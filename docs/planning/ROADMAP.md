@@ -182,7 +182,7 @@ Instalar el toolchain de Qt 6 y compilar por primera vez:
 ```bash
 sudo apt install build-essential cmake ninja-build pkg-config \
                  qt6-base-dev qt6-httpserver-dev qt6-websockets-dev \
-                 qt6-declarative-dev qt6-multimedia-dev qt6-tools-dev \
+                 qt6-declarative-dev qt6-multimedia-dev qt6-tools-dev qt6-serialport-dev \
                  libasound2-dev libusb-1.0-0-dev libftdi1-dev libmad0-dev \
                  libsndfile1-dev libfftw3-dev
 
