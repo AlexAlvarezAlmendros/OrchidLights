@@ -47,6 +47,10 @@ jobs:
           check() {
             echo "$out" | grep -qE "$1" || { echo "::error::$2"; exit 1; }
           }
-          check '^Fixture library: [1-9][0-9]* manufacturers$' "the fixture library did not load"
-          check '^Fixtures: [1-9][0-9]*$'                      "no fixtures were loaded from the project"
-          check '^Functions: [1-9][0-9]*$'                     "no functions were loaded from the project"
+          # Exact counts, taken from Sample.qxw itself: 13 top-level <Fixture>
+          # elements and 114 <Function> elements under <Engine>. Anything else
+          # means the loader started dropping things.
+          check '^Fixture library: [1-9][0-9]{2,} manufacturers$' "the fixture library did not load"
+          check '^Universes: 4$'                                  "wrong universe count"
+          check '^Fixtures: 13$'                                  "wrong fixture count -- the loader is dropping fixtures"
+          check '^Functions: 114$'                                "wrong function count -- the loader is dropping functions"

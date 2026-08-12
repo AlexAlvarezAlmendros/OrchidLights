@@ -116,10 +116,14 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - [x] `NOTICE` + README declarando la relación con QLC+ (obligación de Apache-2.0 §4: conservar avisos de copyright y declarar los cambios; y §6: no usar el nombre ni el logo de QLC+ como marca del derivado).
 - [x] CMake: opción `-Dserver=ON` que poda `ui/`, `qmlui/`, `fixtureeditor/` y `webaccess/` del build.
 - [x] Esqueleto de `server/`: `orchidlightsd` carga un `.qxw` sin interfaz y lista fixtures, universos y funciones.
-- [x] CI: build Linux con Qt 6 + smoke test headless.
-- [ ] **Verificar que compila.** Falta instalar el toolchain de Qt 6 en la máquina local (requiere `sudo`). Hasta entonces el código de `server/` está escrito pero **sin compilar ni una vez**.
+- [x] CI: build Linux con Qt 6 + smoke test que instala y carga un proyecto real.
+- [x] **Verificado en CI**: `orchidlightsd` compila, arranca sin interfaz, carga la librería (143 fabricantes) y abre `resources/samples/Sample.qxw` leyendo sus 13 fixtures, 114 funciones y 4 universos. Las rutas renombradas (`~/.orchidlights`, `/usr/share/orchidlights`) están activas.
+- [ ] Compilar en la máquina local — falta el toolchain de Qt 6 (requiere `sudo`).
+- [ ] Abrir `17Julio.qxw` y ver los 22 fixtures del P62.
 - [ ] AppImage.
 - [ ] Icono y `.desktop` propios.
+
+**Dependencias que el árbol de upstream no documenta** y sin las cuales no configura ni compila: `qt6-serialport-dev` (plugin dmxusb) y `libudev-dev` (hotplugmonitor).
 
 ### F1 — Daemon headless + API core
 - Target `orchidlightsd`: `QGuiApplication` offscreen, carga un `.qxw`, arranca `MasterTimer` y los plugins de salida sin abrir ventana.
