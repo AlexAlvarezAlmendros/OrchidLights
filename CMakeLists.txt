@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(qlcplus VERSION 4.14.4 LANGUAGES C CXX)
+project(orchidlights VERSION 0.1.0 LANGUAGES C CXX)
 
-option(qmlui "Build for QLC+ 5 QML UI" OFF)
+option(qmlui "Build the legacy QLC+ 5 QML UI (frozen, slated for removal)" OFF)
+option(server "Build the OrchidLights headless engine daemon + web API" OFF)
 
 # Set Release build type by default
 if(NOT CMAKE_BUILD_TYPE)
@@ -49,6 +50,13 @@ if(qmlui)
     endif()
 
 endif()
+if(server)
+    # QHttpServer is an official Qt module from 6.4 onwards.
+    if(QT_VERSION_MAJOR LESS 6)
+        message(FATAL_ERROR "The OrchidLights server requires Qt 6.4 or newer (QHttpServer). Found Qt ${QT_VERSION_MAJOR}.")
+    endif()
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS HttpServer WebSockets Concurrent)
+endif()
 
 message("Found Qt version ${QT_VERSION_MAJOR}: ${QT_DIR}")
 
@@ -74,18 +82,26 @@ add_subdirectory(hotplugmonitor)
 add_subdirectory(engine)
 add_subdirectory(resources)
 add_subdirectory(plugins)
-add_subdirectory(webaccess)
-if(qmlui)
-    message("Building QLC+ 5 QML UI")
-    add_subdirectory(qmlui)
+if(server)
+    # OrchidLights build: engine + output plugins + headless daemon.
+    # The inherited desktop UIs (ui/, qmlui/) and the legacy webaccess remote
+    # are deliberately excluded -- they are replaced by server/ + web/.
+    message("Building OrchidLights server (headless daemon + web API)")
+    add_subdirectory(server)
 else()
-    message("Building QLC+ 4 QtWidget UI")
-    add_subdirectory(ui)
-    add_subdirectory(main)
-    add_subdirectory(fixtureeditor)
-endif()
-if(APPLE AND NOT qmlui)
-    add_subdirectory(launcher)
+    add_subdirectory(webaccess)
+    if(qmlui)
+        message("Building legacy QLC+ 5 QML UI")
+        add_subdirectory(qmlui)
+    else()
+        message("Building legacy QLC+ 4 QtWidget UI")
+        add_subdirectory(ui)
+        add_subdirectory(main)
+        add_subdirectory(fixtureeditor)
+    endif()
+    if(APPLE AND NOT qmlui)
+        add_subdirectory(launcher)
+    endif()
 endif()
 
 # Unit testing thru "make check"

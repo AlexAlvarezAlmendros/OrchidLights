@@ -1,0 +1,48 @@
+OrchidLights
+Copyright (c) 2026 Alex Alvarez
+
+This product includes software developed as part of the Q Light Controller Plus
+(QLC+) project:
+
+    Q Light Controller Plus
+    Copyright (c) Massimo Callegari and contributors
+    https://github.com/mcallegari/qlcplus
+    Licensed under the Apache License, Version 2.0
+
+QLC+ is itself a fork of the Q Light Controller project:
+
+    Q Light Controller
+    Copyright (c) Heikki Junnila
+    Licensed under the Apache License, Version 2.0
+
+------------------------------------------------------------------------------
+Statement of changes (Apache License, Version 2.0, Section 4(b))
+------------------------------------------------------------------------------
+
+OrchidLights is a hard fork of QLC+ taken at commit 18cf9da99 (2026-08-10).
+The full upstream git history is preserved in this repository, so every
+modification made by this fork is visible as a commit after that point.
+
+The substantive changes are:
+
+  * The two inherited desktop user interfaces -- the Qt Widgets UI (ui/) and
+    the Qt Quick UI (qmlui/) -- are frozen and slated for removal.
+  * The legacy web remote (webaccess/) is being replaced by a new module
+    (server/) providing a headless engine daemon with a REST and WebSocket API.
+  * A new browser-based user interface (web/) is being added.
+  * The application is renamed, and its installation and user data directories
+    are renamed accordingly.
+
+The lighting engine (engine/), the output plugins (plugins/) and the fixture
+definition library (resources/) are inherited from QLC+ and continue to carry
+their original copyright.
+
+------------------------------------------------------------------------------
+Trademarks
+------------------------------------------------------------------------------
+
+"QLC+" and "Q Light Controller Plus", together with their logos, are the marks
+of the upstream project and are used here solely to describe the origin of this
+software, as permitted by Section 6 of the Apache License, Version 2.0.
+OrchidLights is not affiliated with, endorsed by, or supported by the QLC+
+project. Please do not report OrchidLights issues to the QLC+ project.
