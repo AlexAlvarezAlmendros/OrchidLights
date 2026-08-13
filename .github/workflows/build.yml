@@ -64,10 +64,18 @@ jobs:
           # The inherited entries launch qlcplus and qlcplus-fixtureeditor,
           # which this build does not produce. Shipping them would put broken
           # launchers in the application menu.
-          leaked=$(find /usr/share/applications /usr/share/pixmaps \
-                        /usr/share/metainfo /usr/share/mime /usr/share/man \
-                        /usr/share/orchidlights/translations \
-                        -iname '*qlc*' 2>/dev/null || true)
+          #
+          # Checked against CMake's install manifest rather than by scanning
+          # /usr: the runner images carry unrelated packages, and mysqlcheck
+          # happens to contain "qlc".
+          manifest=build/install_manifest.txt
+          [ -f "$manifest" ] || { echo "::error::no install manifest"; exit 1; }
+
+          # libqlcplusengine keeps its upstream name on purpose, and the fixture
+          # definitions are inherited data. Anything else would be a leak.
+          leaked=$(grep -i 'qlc' "$manifest" \
+                   | grep -v '/fixtures/' \
+                   | grep -v 'libqlcplusengine' || true)
           if [ -n "$leaked" ]; then
             echo "::error::inherited QLC+ files leaked into the install:"
             echo "$leaked"
