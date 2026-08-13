@@ -22,6 +22,7 @@
 #include <QTextStream>
 
 #include "workspaceloader.h"
+#include "fixturelibrary.h"
 #include "qlcconfig.h"
 #include "qlcfile.h"
 #include "doc.h"
@@ -60,6 +61,14 @@ int main(int argc, char **argv)
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("project"),
                                  QStringLiteral("Project file to open (.qxw)"));
+
+    QCommandLineOption fixturesOption(
+        QStringLiteral("fixtures"),
+        QStringLiteral("Directory holding the system fixture library "
+                       "(the one containing FixturesMap.xml)."),
+        QStringLiteral("dir"));
+    parser.addOption(fixturesOption);
+
     parser.process(app);
 
     QTextStream out(stdout);
@@ -69,8 +78,22 @@ int main(int argc, char **argv)
 
     Doc doc(nullptr);
 
-    const int manufacturers = WorkspaceLoader::loadFixtureDefinitions(&doc);
-    out << "Fixture library: " << manufacturers << " manufacturers" << Qt::endl;
+    const FixtureLibrary::Result library =
+        FixtureLibrary::load(&doc, parser.value(fixturesOption));
+
+    out << "Fixture library: " << library.manufacturers << " manufacturers" << Qt::endl;
+    if (library.systemPath.isEmpty())
+    {
+        err << "WARNING: no system fixture library found. Every patched fixture will "
+               "fall back to a generic dimmer, losing its channel definitions. "
+               "Pass --fixtures <dir> or set ORCHID_FIXTURE_DIR." << Qt::endl;
+    }
+    else
+    {
+        out << "  system: " << library.systemPath << Qt::endl;
+    }
+    for (const QString &path : library.userPaths)
+        out << "  user:   " << path << Qt::endl;
 
     const QStringList args = parser.positionalArguments();
     if (args.isEmpty())
@@ -104,6 +127,18 @@ int main(int argc, char **argv)
     {
         out << "  [" << Function::typeToString(function->type()) << "] "
             << function->name() << Qt::endl;
+    }
+
+    /* Doc records every fixture whose definition or mode could not be resolved.
+       Those fixtures still appear above, patched at the right address, but they
+       are backed by a generic dimmer -- no channel names, no capabilities. That
+       is silent data loss unless it is reported. */
+    const QString errorLog = doc.errorLog();
+    if (errorLog.isEmpty() == false)
+    {
+        err << Qt::endl << "Project loaded with unresolved definitions:" << Qt::endl;
+        err << errorLog << Qt::endl;
+        return 2;
     }
 
     return 0;

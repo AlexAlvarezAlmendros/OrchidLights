@@ -77,6 +77,23 @@ La opción `-Dserver=ON` excluye del build las dos interfaces de escritorio
 heredadas y el `webaccess` antiguo. Sin ella, el árbol sigue compilando QLC+ tal
 cual venía de upstream, lo que resulta útil para comparar comportamientos.
 
+## La librería de fixtures
+
+El daemon busca la librería del sistema en este orden: la opción `--fixtures`,
+la variable `ORCHID_FIXTURE_DIR`, la ruta instalada, y por último el árbol de
+fuentes relativo al binario — de modo que ejecutar desde `build/` funciona sin
+instalar nada.
+
+Los perfiles de usuario se leen **tanto de `~/.orchidlights/fixtures` como de
+`~/.qlcplus/fixtures`**. Se leen los dos, no uno como respaldo del otro: la
+propia QLC+ crea su directorio en el primer arranque, así que un respaldo
+condicionado a que falte no llegaría a dispararse nunca. Los perfiles `.qxf`
+propios suelen ser la única definición del hardware que hay realmente en el rig,
+y perderlos convierte cada fixture parcheado en un dimmer genérico.
+
+Si no aparece ninguna librería, el daemon **avisa y sale con código 2** en lugar
+de cargar el proyecto en silencio con las definiciones vacías.
+
 ## Compatibilidad de proyectos
 
 **El formato de archivo `.qxw` no se toca.** Un show creado en QLC+ abre en

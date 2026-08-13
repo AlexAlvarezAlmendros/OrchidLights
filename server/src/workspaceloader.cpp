@@ -21,20 +21,8 @@
 #include <QXmlStreamReader>
 
 #include "workspaceloader.h"
-#include "qlcfixturedefcache.h"
 #include "qlcfile.h"
 #include "doc.h"
-
-int WorkspaceLoader::loadFixtureDefinitions(Doc *doc)
-{
-    /* Same order as QLC+: user definitions are read in full, the system library
-       is read through its index map so that 1700+ files are not all parsed at
-       startup. */
-    doc->fixtureDefCache()->load(QLCFixtureDefCache::userDefinitionDirectory());
-    doc->fixtureDefCache()->loadMap(QLCFixtureDefCache::systemDefinitionDirectory());
-
-    return doc->fixtureDefCache()->manufacturers().count();
-}
 
 bool WorkspaceLoader::load(Doc *doc, const QString &fileName, QString &errorMessage)
 {

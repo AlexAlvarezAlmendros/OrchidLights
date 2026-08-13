@@ -37,10 +37,6 @@ class Doc;
 class WorkspaceLoader
 {
 public:
-    /** Populate the fixture definition cache from the system and user
-     *  directories. Returns the number of definitions loaded. */
-    static int loadFixtureDefinitions(Doc *doc);
-
     /** Load a .qxw file into doc. Returns true on success and leaves a
      *  human-readable reason in errorMessage on failure. */
     static bool load(Doc *doc, const QString &fileName, QString &errorMessage);

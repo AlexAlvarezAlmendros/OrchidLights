@@ -118,18 +118,21 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - [x] Esqueleto de `server/`: `orchidlightsd` carga un `.qxw` sin interfaz y lista fixtures, universos y funciones.
 - [x] CI: build Linux con Qt 6 + smoke test que instala y carga un proyecto real.
 - [x] **Verificado en CI**: `orchidlightsd` compila, arranca sin interfaz, carga la librería (143 fabricantes) y abre `resources/samples/Sample.qxw` leyendo sus 13 fixtures, 114 funciones y 4 universos. Las rutas renombradas (`~/.orchidlights`, `/usr/share/orchidlights`) están activas.
-- [ ] Compilar en la máquina local — falta el toolchain de Qt 6 (requiere `sudo`).
-- [ ] Abrir `17Julio.qxw` y ver los 22 fixtures del P62.
+- [x] Compilado en la máquina local: Qt 6.4.2 sobre Ubuntu 24.04, 659 targets, 3 min 30 s.
+- [x] **Resolución de la librería de fixtures** (`server/src/fixturelibrary.*`), adelantada desde F1 porque sin ella nada de lo anterior sirve: búsqueda del directorio de sistema con `--fixtures` → `$ORCHID_FIXTURE_DIR` → ruta instalada → árbol de fuentes; lectura de perfiles de usuario **tanto de `~/.orchidlights` como de `~/.qlcplus`**; y aviso explícito con salida 2 cuando no hay librería.
+- [x] **`17Julio.qxw` abre con sus 22 fixtures**, las direcciones DMX exactas del patch del P62, las 20 funciones, y **cero definiciones sin resolver**.
 - [ ] AppImage.
 - [ ] Icono y `.desktop` propios.
 
 **Dependencias que el árbol de upstream no documenta** y sin las cuales no configura ni compila: `qt6-serialport-dev` (plugin dmxusb) y `libudev-dev` (hotplugmonitor).
 
+**Lección aprendida.** El primer arranque contra `17Julio.qxw` cargó los 22 fixtures y pareció correcto: direcciones bien, canales bien. Pero la librería estaba vacía y las 22 definiciones habían fallado, así que todos eran dimmers genéricos sin nombres de canal ni capacidades. El motor sólo lo dejaba caer en `qDebug`, mezclado con cientos de líneas de ruido. De ahí que el daemon ahora **falle con código 2** ante cualquier definición sin resolver: en este dominio, un error silencioso significa mandar valores al canal equivocado de una luz real.
+
 ### F1 — Daemon headless + API core
 - Target `orchidlightsd`: `QGuiApplication` offscreen, carga un `.qxw`, arranca `MasterTimer` y los plugins de salida sin abrir ventana.
 - `QHttpServer` + `QWebSocketServer`, protocolo JSON versionado, autenticación por sesión.
 - Endpoints: proyecto (load/save/list), fixtures (lectura), universos (lectura + stream DMX), funciones (listado + run/stop).
-- **Fallback al directorio de usuario heredado**: si `~/.orchidlights` no existe, leer perfiles `.qxf` y perfiles de entrada de `~/.qlcplus`. Sin esto se pierden los 3 perfiles custom del rig del P62.
+- ~~Fallback al directorio de usuario heredado~~ — hecho en F0. Queda pendiente el mismo tratamiento para los **perfiles de entrada** (`~/.qlcplus/inputprofiles`), que aún no se leen.
 - Round-trip de `.qxw`: cargar y guardar un proyecto no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.
 - **Criterio de éxito: disparar el show del P62 Club desde `curl`/`wscat`, con luz real en la sala, sin abrir ninguna GUI.**
 

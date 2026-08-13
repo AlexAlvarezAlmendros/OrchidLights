@@ -51,6 +51,35 @@ jobs:
           # elements and 114 <Function> elements under <Engine>. Anything else
           # means the loader started dropping things.
           check '^Fixture library: [1-9][0-9]{2,} manufacturers$' "the fixture library did not load"
+          check '^  system: /usr/share/orchidlights/fixtures$'    "the installed system library was not picked up"
           check '^Universes: 4$'                                  "wrong universe count"
           check '^Fixtures: 13$'                                  "wrong fixture count -- the loader is dropping fixtures"
           check '^Functions: 114$'                                "wrong function count -- the loader is dropping functions"
+          # A zero exit also means Doc's error log was empty, so every fixture
+          # resolved to a real definition rather than a generic dimmer.
+
+      - name: Smoke test - a missing fixture library is reported, not swallowed
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+
+          # Run somewhere with no library at all: not installed, no user
+          # directory, and far enough from the sources that the build-tree
+          # fallback cannot reach them either.
+          work=$(mktemp -d)
+          cp resources/samples/Sample.qxw "$work/"
+          sudo mv /usr/share/orchidlights/fixtures /usr/share/orchidlights/fixtures.hidden
+
+          set +e
+          out=$(cd "$work" && HOME="$work" orchidlightsd Sample.qxw 2>&1)
+          code=$?
+          set -e
+
+          sudo mv /usr/share/orchidlights/fixtures.hidden /usr/share/orchidlights/fixtures
+
+          echo "$out"
+          [ "$code" -eq 2 ] || { echo "::error::expected exit 2, got $code"; exit 1; }
+          echo "$out" | grep -q 'WARNING: no system fixture library found' \
+            || { echo "::error::the missing library was not reported"; exit 1; }
+          echo "$out" | grep -q 'No fixture definition found for' \
+            || { echo "::error::unresolved fixtures were not listed"; exit 1; }
