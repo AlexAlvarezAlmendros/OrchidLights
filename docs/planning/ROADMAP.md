@@ -270,15 +270,17 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
       disponibles. **Esto es lo que hace que salga luz**, y hoy solo se lee.
 - [ ] Modificadores de canal.
 
-### F5 — Funciones: los diez tipos
+### F5 — Funciones: los diez tipos 🔨
 
-Crear, editar y eliminar. No un subconjunto.
+- [x] **Capa genérica**: crear los **diez tipos**, renombrar, velocidades, orden de ejecución y dirección, y borrar. Verificado creando uno de cada, guardando y recargando.
+- [x] **Orden de construcción corregido** por el mapeo: se registra primero y se nombra después (como la UI v4). Nombrar antes emite `nameChanged` con un id todavía inválido, a un `Doc` que aún no está conectado, y sin marcar el documento como modificado.
+- [x] **Borrar comprueba referencias** con `Doc::getUsage()` y nombra a quién la usa — `Doc::deleteFunction` no lo hace y dejaría pasos de chaser apuntando a nada. `force=true` para saltárselo.
+- [x] **Borrar para la función y espera** (`stopAndWait`): liberar una función en marcha es liberar un objeto que el `MasterTimer` sigue recorriendo.
+- [x] Cuerpos: **Scene** (valores por fixture y canal, con validación de canal que el motor no hace), **Chaser** (pasos con tiempos, sin auto-referencia), **Collection** (miembros, sin auto-referencia).
 
-- [ ] `Scene` — consola de canales por fixture, paletas, presets.
-- [ ] `Chaser` — pasos, tiempos por paso, orden, modo de ejecución.
-- [ ] `EFX` — patrón, ejes, fixtures participantes, previsualización.
-- [ ] `RGBMatrix` — grupo, algoritmo, colores, propiedades del script.
-- [ ] `Collection`, `Sequence`, `Script`, `Show`, `Audio`, `Video`.
+**Pendiente:** cuerpos de `EFX`, `RGBMatrix`, `Sequence`, `Show`, `Script`, `Audio`, `Video` — el mapeo estima `EFX`, `Sequence` y `Show` como grandes, el resto medianos.
+
+> **Nota de compatibilidad**: nuestro motor viene de `master`, más nuevo que QLC+ 5.2.1. Un proyecto guardado aquí puede llevar campos que esa versión no conoce (p. ej. `DimmerControl` en un EFX); los avisa y los ignora, igual que ignora nuestra sección de layout.
 
 ### F6 — Virtual Console: los doce widgets
 
