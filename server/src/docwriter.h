@@ -107,6 +107,54 @@ namespace DocWriter
 
     /* ---- Fixture groups ------------------------------------------------ */
 
+    /* ---- Functions ----------------------------------------------------- */
+
+    /**
+     * Create a function of any of the ten QLC+ types.
+     *
+     * Registration happens before naming, which is the order the desktop v4 UI
+     * uses (ui/src/functionmanager.cpp:320). Naming first emits nameChanged
+     * carrying an id that is still invalid, to a Doc that has not connected to
+     * the object yet, and does not mark the document modified.
+     *
+     * Doc::addFunction is the only thing that makes a function real: it wires
+     * three signals, assigns the id and emits functionAdded. When it fails the
+     * caller still owns the object, so this takes care of deleting it.
+     */
+    Result createFunction(Doc *doc, const QString &type, const QString &name, quint32 &id);
+
+    Result renameFunction(Doc *doc, quint32 id, const QString &name);
+
+    /** Fade in, fade out and duration, in milliseconds. -1 leaves one alone. */
+    Result setFunctionSpeeds(Doc *doc, quint32 id, int fadeIn, int fadeOut, int duration);
+
+    /** Run order (loop|singleshot|pingpong|random) and direction (forward|backward). */
+    Result setFunctionRun(Doc *doc, quint32 id, const QString &runOrder, const QString &direction);
+
+    /**
+     * Delete a function.
+     *
+     * Refuses while anything else references it -- a chaser step, a collection,
+     * a sequence's bound scene -- naming the culprits, because Doc::deleteFunction
+     * would happily leave those pointing at nothing. Stops it first: deleting a
+     * running function frees an object the MasterTimer is still stepping.
+     */
+    Result deleteFunction(Doc *doc, quint32 id, bool force);
+
+    /* ---- Function bodies ------------------------------------------------ */
+
+    /** Scene: set or clear one channel of one fixture. */
+    Result setSceneValue(Doc *doc, quint32 sceneId, quint32 fixtureId, quint32 channel,
+                         int value);
+
+    /** Chaser: append, remove or reorder steps. */
+    Result addChaserStep(Doc *doc, quint32 chaserId, quint32 functionId, int index,
+                         int fadeIn, int hold, int fadeOut);
+    Result removeChaserStep(Doc *doc, quint32 chaserId, int index);
+
+    /** Collection: the set of functions it fires together. */
+    Result setCollectionMembers(Doc *doc, quint32 collectionId, const QList<quint32> &functionIds);
+
     Result addFixtureGroup(Doc *doc, const QString &name, const QList<quint32> &fixtureIds,
                            quint32 &groupId);
     Result removeFixtureGroup(Doc *doc, quint32 groupId);

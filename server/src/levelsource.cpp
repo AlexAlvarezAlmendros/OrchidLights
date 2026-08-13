@@ -57,6 +57,7 @@ void LevelSource::forgetSliders()
        references here lets them go with the old document instead of writing
        into a universe that no longer means what it did. */
     m_faders.clear();
+    m_faderUniverses.clear();
 }
 
 void LevelSource::setValue(quint32 sliderId, uchar value)
@@ -108,11 +109,18 @@ void LevelSource::writeDMX(MasterTimer *timer, QList<Universe *> universes)
 
             Universe *universe = universes.at(int(universeId));
 
+            /* Cached per universe id, and re-requested whenever the universe
+               object behind that id is not the one the fader belongs to.
+               Universes are recreated when one is added or removed, so a fader
+               held from before points at an object nobody writes any more --
+               and the symptom is a slider that moves in the interface while its
+               lamp sits still. */
             QSharedPointer<GenericFader> fader = m_faders.value(universeId);
-            if (fader.isNull())
+            if (fader.isNull() || m_faderUniverses.value(universeId) != universe)
             {
                 fader = universe->requestFader(Universe::Auto);
                 m_faders.insert(universeId, fader);
+                m_faderUniverses.insert(universeId, universe);
             }
 
             FadeChannel *fc = fader->getChannelFader(m_doc, universe,

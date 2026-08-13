@@ -509,6 +509,198 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(fixture ? JsonView::fixture(fixture) : QJsonObject());
     });
 
+    m_server->route("/api/v1/functions", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        quint32 id = 0;
+        const DocWriter::Result result =
+            DocWriter::createFunction(doc, body.value("type").toString(),
+                                      body.value("name").toString(), id);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        const Function *function = doc->function(id);
+        return QHttpServerResponse(function ? JsonView::function(function) : QJsonObject(),
+                                   StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/functions/<arg>", QHttpServerRequest::Method::Patch,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const QJsonObject patch = QJsonDocument::fromJson(request.body()).object();
+
+        if (patch.contains("name"))
+        {
+            const DocWriter::Result result =
+                DocWriter::renameFunction(doc, id, patch.value("name").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        if (patch.contains("fadeIn") || patch.contains("fadeOut") || patch.contains("duration"))
+        {
+            const DocWriter::Result result =
+                DocWriter::setFunctionSpeeds(doc, id, patch.value("fadeIn").toInt(-1),
+                                             patch.value("fadeOut").toInt(-1),
+                                             patch.value("duration").toInt(-1));
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        if (patch.contains("runOrder") || patch.contains("direction"))
+        {
+            const DocWriter::Result result =
+                DocWriter::setFunctionRun(doc, id, patch.value("runOrder").toString(),
+                                          patch.value("direction").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        const Function *function = doc->function(id);
+        if (function == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such function"));
+
+        return QHttpServerResponse(JsonView::function(function));
+    });
+
+    m_server->route("/api/v1/functions/<arg>", QHttpServerRequest::Method::Delete,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const bool force = QUrlQuery(request.url().query())
+                               .queryItemValue(QStringLiteral("force")) == QStringLiteral("true");
+
+        const DocWriter::Result result = DocWriter::deleteFunction(doc, id, force);
+        if (result.ok == false)
+            return jsonError(StatusCode::Conflict, result.error);
+
+        QJsonObject response;
+        response["removed"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* Scene body: one channel of one fixture. value -1 clears it. */
+    m_server->route("/api/v1/functions/<arg>/values", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        const DocWriter::Result result =
+            DocWriter::setSceneValue(doc, id, quint32(body.value("fixture").toInt(-1)),
+                                     quint32(body.value("channel").toInt(-1)),
+                                     body.value("value").toInt(-1));
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["scene"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* Chaser body: steps. */
+    m_server->route("/api/v1/functions/<arg>/steps", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        const DocWriter::Result result =
+            DocWriter::addChaserStep(doc, id, quint32(body.value("function").toInt(-1)),
+                                     body.value("index").toInt(-1),
+                                     body.value("fadeIn").toInt(0),
+                                     body.value("hold").toInt(0),
+                                     body.value("fadeOut").toInt(0));
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["chaser"] = qint64(id);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/functions/<arg>/steps/<arg>", QHttpServerRequest::Method::Delete,
+                    [doc, denied](const QString &rawId, const QString &rawIndex,
+                                  const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false, indexOk = false;
+        const quint32 id = rawId.toUInt(&ok);
+        const int index = rawIndex.toInt(&indexOk);
+        if (ok == false || indexOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const DocWriter::Result result = DocWriter::removeChaserStep(doc, id, index);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["chaser"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* Collection body: the functions it fires together. */
+    m_server->route("/api/v1/functions/<arg>/members", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        if (body.value("functions").isArray() == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Send a \"functions\" array"));
+
+        QList<quint32> members;
+        for (const QJsonValue &value : body.value("functions").toArray())
+        {
+            if (value.isDouble() == false || value.toInt(-1) < 0)
+                return jsonError(StatusCode::BadRequest, QStringLiteral("Function ids must be numbers"));
+            members.append(quint32(value.toInt()));
+        }
+
+        const DocWriter::Result result = DocWriter::setCollectionMembers(doc, id, members);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["collection"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
     m_server->route("/api/v1/fixture-groups", QHttpServerRequest::Method::Get,
                     [doc, denied](const QHttpServerRequest &request) {
         if (denied(request))

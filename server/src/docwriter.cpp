@@ -17,8 +17,21 @@
   limitations under the License.
 */
 
+#include <QSet>
+
 #include "docwriter.h"
 
+#include "collection.h"
+#include "rgbmatrix.h"
+#include "sequence.h"
+#include "chaser.h"
+#include "script.h"
+#include "scene.h"
+#include "show.h"
+#include "audio.h"
+#include "video.h"
+#include "efx.h"
+#include "chaserstep.h"
 #include "qlcfixturedefcache.h"
 #include "qlcfixturemode.h"
 #include "qlcfixturedef.h"
@@ -27,7 +40,6 @@
 #include "qlcpoint.h"
 #include "fixture.h"
 #include "inputoutputmap.h"
-#include "universe.h"
 #include "outputpatch.h"
 #include "universe.h"
 #include "doc.h"
@@ -417,6 +429,17 @@ DocWriter::Result DocWriter::removeFixture(Doc *doc, quint32 fixtureId)
     if (doc->deleteFixture(fixtureId) == false)
         return Result::failure(QStringLiteral("The engine refused to delete \"%1\"").arg(name));
 
+    /* Note what is deliberately NOT cleaned up here: the preserved
+       <VirtualConsole> XML may still name this fixture, in a slider's channel
+       list or an XY pad's fixture list. We do not model that section, so we
+       cannot edit it without risking the rest of it -- and QLC+ tolerates the
+       dangling reference, dropping the channel on load.
+     *
+     * The danger is id reuse: Doc hands out the lowest free id, so a later
+       fixture can inherit this one's id and silently acquire whatever the
+       console still had pointed at it. Modelling the Virtual Console, in F6,
+       is what finally closes this. */
+
     doc->setModified();
     return Result::success();
 }
@@ -549,14 +572,330 @@ DocWriter::Result DocWriter::setFixtureGroupMembers(Doc *doc, quint32 groupId,
             return Result::failure(QStringLiteral("No fixture with id %1").arg(id));
     }
 
-    for (quint32 id : group->fixtureList())
-        group->resignFixture(id);
+    /* Keep whatever grid the group already had, and keep every fixture that is
+       staying exactly where the operator put it.
+     *
+     * Re-laying the whole group as one row destroyed the 2D arrangement of a
+     * group built in QLC+ -- and for a matrix of pixel bars that arrangement is
+     * not decoration, it is what makes an RGB matrix run across the right
+     * fixtures in the right order. */
+    const QSet<quint32> wanted(fixtureIds.begin(), fixtureIds.end());
+    const QList<quint32> existing = group->fixtureList();
 
-    group->setSize(QSize(qMax(1, fixtureIds.count()), 1));
+    for (quint32 id : existing)
+    {
+        if (wanted.contains(id) == false)
+            group->resignFixture(id);
+    }
 
-    int x = 0;
+    QList<quint32> added;
     for (quint32 id : fixtureIds)
-        group->assignFixture(id, QLCPoint(x++, 0));
+    {
+        if (existing.contains(id) == false)
+            added.append(id);
+    }
+
+    if (added.isEmpty() == false)
+    {
+        /* New members go after the existing grid rather than into it. */
+        const QSize size = group->size();
+        group->setSize(QSize(qMax(1, size.width()), size.height() + 1));
+
+        int x = 0;
+        const int row = size.height();
+        for (quint32 id : added)
+            group->assignFixture(id, QLCPoint(x++, row));
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+
+/*****************************************************************************
+ * Functions
+ *****************************************************************************/
+
+namespace
+{
+    /** Allocate an empty function of the named type, or nullptr. */
+    Function *makeFunction(Doc *doc, const QString &type)
+    {
+        const QString wanted = type.trimmed().toLower();
+
+        if (wanted == QStringLiteral("scene"))      return new Scene(doc);
+        if (wanted == QStringLiteral("chaser"))     return new Chaser(doc);
+        if (wanted == QStringLiteral("efx"))        return new EFX(doc);
+        if (wanted == QStringLiteral("collection")) return new Collection(doc);
+        if (wanted == QStringLiteral("script"))     return new Script(doc);
+        if (wanted == QStringLiteral("rgbmatrix"))  return new RGBMatrix(doc);
+        if (wanted == QStringLiteral("show"))       return new Show(doc);
+        if (wanted == QStringLiteral("sequence"))   return new Sequence(doc);
+        if (wanted == QStringLiteral("audio"))      return new Audio(doc);
+        if (wanted == QStringLiteral("video"))      return new Video(doc);
+
+        return nullptr;
+    }
+
+    QString knownFunctionTypes()
+    {
+        return QStringLiteral("scene, chaser, efx, collection, script, rgbmatrix, "
+                              "show, sequence, audio, video");
+    }
+}
+
+DocWriter::Result DocWriter::createFunction(Doc *doc, const QString &type, const QString &name,
+                                            quint32 &id)
+{
+    Function *function = makeFunction(doc, type);
+    if (function == nullptr)
+    {
+        return Result::failure(QStringLiteral("No function type \"%1\". Known types: %2")
+                                   .arg(type, knownFunctionTypes()));
+    }
+
+    /* Register first. Doc::addFunction wires the signals, assigns the id and
+       emits functionAdded; nothing hand-rolled substitutes for it. On failure
+       the object is still ours to delete. */
+    if (doc->addFunction(function) == false)
+    {
+        delete function;
+        return Result::failure(QStringLiteral("The engine refused to add the function"));
+    }
+
+    id = function->id();
+
+    /* Named afterwards, so nameChanged carries the real id to a Doc that is
+       already listening. */
+    function->setName(name.trimmed().isEmpty()
+                          ? QStringLiteral("New %1 %2").arg(type, QString::number(id))
+                          : name);
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::renameFunction(Doc *doc, quint32 id, const QString &name)
+{
+    Function *function = doc->function(id);
+    if (function == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    if (name.trimmed().isEmpty())
+        return Result::failure(QStringLiteral("A function needs a name"));
+
+    function->setName(name);
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setFunctionSpeeds(Doc *doc, quint32 id, int fadeIn, int fadeOut,
+                                               int duration)
+{
+    Function *function = doc->function(id);
+    if (function == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    if (fadeIn >= 0)
+        function->setFadeInSpeed(uint(fadeIn));
+    if (fadeOut >= 0)
+        function->setFadeOutSpeed(uint(fadeOut));
+    if (duration >= 0)
+        function->setDuration(uint(duration));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setFunctionRun(Doc *doc, quint32 id, const QString &runOrder,
+                                            const QString &direction)
+{
+    Function *function = doc->function(id);
+    if (function == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    if (runOrder.isEmpty() == false)
+    {
+        const QString wanted = runOrder.toLower();
+        if (wanted == QStringLiteral("loop"))            function->setRunOrder(Function::Loop);
+        else if (wanted == QStringLiteral("singleshot")) function->setRunOrder(Function::SingleShot);
+        else if (wanted == QStringLiteral("pingpong"))   function->setRunOrder(Function::PingPong);
+        else if (wanted == QStringLiteral("random"))     function->setRunOrder(Function::Random);
+        else
+        {
+            return Result::failure(
+                QStringLiteral("Run order must be loop, singleshot, pingpong or random"));
+        }
+    }
+
+    if (direction.isEmpty() == false)
+    {
+        const QString wanted = direction.toLower();
+        if (wanted == QStringLiteral("forward"))       function->setDirection(Function::Forward);
+        else if (wanted == QStringLiteral("backward")) function->setDirection(Function::Backward);
+        else
+            return Result::failure(QStringLiteral("Direction must be forward or backward"));
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::deleteFunction(Doc *doc, quint32 id, bool force)
+{
+    Function *function = doc->function(id);
+    if (function == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    /* Doc::deleteFunction does not check references, so a chaser step or a
+       collection would be left pointing at nothing. Name the holders instead
+       of failing vaguely. */
+    const QList<quint32> usage = doc->getUsage(id);
+    if (usage.isEmpty() == false && force == false)
+    {
+        QStringList holders;
+        for (quint32 holderId : usage)
+        {
+            const Function *holder = doc->function(holderId);
+            if (holder != nullptr && holders.contains(holder->name()) == false)
+                holders << holder->name();
+        }
+
+        return Result::failure(
+            QStringLiteral("\"%1\" is still used by: %2. Pass force=true to delete it anyway.")
+                .arg(function->name(), holders.join(QStringLiteral(", "))));
+    }
+
+    /* Stopped first and waited for: deleting a running function frees an object
+       the MasterTimer is still stepping through. */
+    if (function->isRunning())
+    {
+        if (function->stopAndWait() == false)
+        {
+            return Result::failure(
+                QStringLiteral("\"%1\" did not stop in time; refusing to delete it while it runs")
+                    .arg(function->name()));
+        }
+    }
+
+    if (doc->deleteFunction(id) == false)
+        return Result::failure(QStringLiteral("The engine refused to delete the function"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+/*****************************************************************************
+ * Function bodies
+ *****************************************************************************/
+
+DocWriter::Result DocWriter::setSceneValue(Doc *doc, quint32 sceneId, quint32 fixtureId,
+                                           quint32 channel, int value)
+{
+    Function *function = doc->function(sceneId);
+    if (function == nullptr || function->type() != Function::SceneType)
+        return Result::failure(QStringLiteral("No scene with id %1").arg(sceneId));
+
+    const Fixture *fixture = doc->fixture(fixtureId);
+    if (fixture == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
+
+    /* Scene::setValue validates nothing: an unknown fixture is warned about and
+       stored anyway, and the channel is never checked against the fixture. The
+       junk then survives until a project reload prunes it. */
+    if (channel >= fixture->channels())
+    {
+        return Result::failure(QStringLiteral("\"%1\" has %2 channels, so channel %3 does not exist")
+                                   .arg(fixture->name()).arg(fixture->channels()).arg(channel + 1));
+    }
+
+    Scene *scene = qobject_cast<Scene *>(function);
+
+    if (value < 0)
+    {
+        scene->unsetValue(fixtureId, channel);
+    }
+    else if (value > 255)
+    {
+        return Result::failure(QStringLiteral("A channel value must be between 0 and 255"));
+    }
+    else
+    {
+        scene->addFixture(fixtureId);
+        scene->setValue(fixtureId, channel, uchar(value));
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::addChaserStep(Doc *doc, quint32 chaserId, quint32 functionId,
+                                           int index, int fadeIn, int hold, int fadeOut)
+{
+    Function *function = doc->function(chaserId);
+    if (function == nullptr || function->type() != Function::ChaserType)
+        return Result::failure(QStringLiteral("No chaser with id %1").arg(chaserId));
+
+    if (functionId == chaserId)
+        return Result::failure(QStringLiteral("A chaser cannot step through itself"));
+
+    const Function *member = doc->function(functionId);
+    if (member == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(functionId));
+
+    Chaser *chaser = qobject_cast<Chaser *>(function);
+
+    ChaserStep step(functionId, uint(qMax(0, fadeIn)), uint(qMax(0, hold)), uint(qMax(0, fadeOut)));
+    if (chaser->addStep(step, index) == false)
+        return Result::failure(QStringLiteral("The engine refused the step"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::removeChaserStep(Doc *doc, quint32 chaserId, int index)
+{
+    Function *function = doc->function(chaserId);
+    if (function == nullptr || function->type() != Function::ChaserType)
+        return Result::failure(QStringLiteral("No chaser with id %1").arg(chaserId));
+
+    Chaser *chaser = qobject_cast<Chaser *>(function);
+
+    if (index < 0 || index >= chaser->stepsCount())
+    {
+        return Result::failure(QStringLiteral("Step %1 does not exist; this chaser has %2")
+                                   .arg(index).arg(chaser->stepsCount()));
+    }
+
+    if (chaser->removeStep(index) == false)
+        return Result::failure(QStringLiteral("The engine refused to remove the step"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setCollectionMembers(Doc *doc, quint32 collectionId,
+                                                  const QList<quint32> &functionIds)
+{
+    Function *function = doc->function(collectionId);
+    if (function == nullptr || function->type() != Function::CollectionType)
+        return Result::failure(QStringLiteral("No collection with id %1").arg(collectionId));
+
+    for (quint32 id : functionIds)
+    {
+        if (id == collectionId)
+            return Result::failure(QStringLiteral("A collection cannot contain itself"));
+        if (doc->function(id) == nullptr)
+            return Result::failure(QStringLiteral("No function with id %1").arg(id));
+    }
+
+    Collection *collection = qobject_cast<Collection *>(function);
+
+    for (quint32 id : collection->functions())
+        collection->removeFunction(id);
+
+    for (quint32 id : functionIds)
+        collection->addFunction(id);
 
     doc->setModified();
     return Result::success();

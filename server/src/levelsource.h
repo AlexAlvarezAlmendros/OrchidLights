@@ -29,6 +29,7 @@
 #include "dmxsource.h"
 
 class GenericFader;
+class Universe;
 class Doc;
 
 /**
@@ -81,6 +82,11 @@ private:
     /** One fader per universe, kept alive so values hold between ticks rather
      *  than being re-requested and losing their place. */
     QHash<quint32, QSharedPointer<GenericFader>> m_faders;
+
+    /** Which Universe object each cached fader belongs to. Universe ids are
+     *  reused when one is added or removed, so the id alone does not say
+     *  whether a cached fader is still connected to anything. */
+    QHash<quint32, Universe *> m_faderUniverses;
 };
 
 #endif // LEVELSOURCE_H
