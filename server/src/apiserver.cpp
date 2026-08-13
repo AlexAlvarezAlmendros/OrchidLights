@@ -35,6 +35,7 @@
 #include "virtualconsole.h"
 #include "consolelayout.h"
 #include "docwriter.h"
+#include "rgbalgorithm.h"
 #include "qlcfixturedefcache.h"
 #include "qlcfixturemode.h"
 #include "qlcfixturedef.h"
@@ -667,6 +668,75 @@ void ApiServer::registerRoutes()
         QJsonObject response;
         response["chaser"] = qint64(id);
         return QHttpServerResponse(response);
+    });
+
+    /* The algorithms an RGB matrix can run, so a caller is not guessing. */
+    m_server->route("/api/v1/algorithms", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray names;
+        for (const QString &name : RGBAlgorithm::algorithms(doc))
+            names.append(name);
+
+        QJsonObject body;
+        body["algorithms"] = names;
+        return QHttpServerResponse(body);
+    });
+
+    /* Bodies of the remaining editable types. One route, dispatching on the
+       function's own type, because a caller should not have to know which URL
+       shape a type happens to use. */
+    m_server->route("/api/v1/functions/<arg>/body", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const Function *function = doc->function(id);
+        if (function == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such function"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        DocWriter::Result result = DocWriter::Result::failure(
+            QStringLiteral("%1 functions have no editable body here yet")
+                .arg(Function::typeToString(function->type())));
+
+        switch (function->type())
+        {
+        case Function::RGBMatrixType:
+        {
+            QList<QString> colours;
+            for (const QJsonValue &value : body.value("colors").toArray())
+                colours.append(value.toString());
+
+            result = DocWriter::setRgbMatrix(doc, id, body.value("fixtureGroup").toInt(-1),
+                                             body.value("algorithm").toString(), colours);
+            break;
+        }
+        case Function::ScriptType:
+            result = DocWriter::setScriptData(doc, id, body.value("data").toString());
+            break;
+        case Function::AudioType:
+            result = DocWriter::setAudioSource(doc, id, body.value("source").toString(),
+                                               body.value("volume").toDouble(-1.0));
+            break;
+        case Function::VideoType:
+            result = DocWriter::setVideoSource(doc, id, body.value("source").toString());
+            break;
+        default:
+            break;
+        }
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        return QHttpServerResponse(JsonView::function(doc->function(id)));
     });
 
     /* Collection body: the functions it fires together. */

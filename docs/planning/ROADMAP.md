@@ -278,7 +278,11 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 - [x] **Borrar para la función y espera** (`stopAndWait`): liberar una función en marcha es liberar un objeto que el `MasterTimer` sigue recorriendo.
 - [x] Cuerpos: **Scene** (valores por fixture y canal, con validación de canal que el motor no hace), **Chaser** (pasos con tiempos, sin auto-referencia), **Collection** (miembros, sin auto-referencia).
 
-**Pendiente:** cuerpos de `EFX`, `RGBMatrix`, `Sequence`, `Show`, `Script`, `Audio`, `Video` — el mapeo estima `EFX`, `Sequence` y `Show` como grandes, el resto medianos.
+- [x] Cuerpos de **RGBMatrix** (grupo, algoritmo de entre 43, hasta 5 colores), **Script** (programa, validado por el parser del motor), **Audio** (archivo verificado contra los decodificadores cargados, volumen) y **Video** (archivo local o URL).
+
+**Pendiente:** cuerpos de `EFX`, `Sequence` y `Show` — los tres que el mapeo estimó como grandes.
+
+> **Trampa del motor**, encontrada al probar: `RGBAlgorithm::algorithm()` **no puede** informar de un nombre inválido. Para cualquier cosa que no sea uno de sus cuatro algoritmos internos cae en `RGBScriptsCache::script()`, que devuelve un `RGBScript` **vacío pero no nulo** (`rgbscriptscache.cpp:42-55`). Una errata se aceptaba, la matriz corría y no emitía nada, sin error en ninguna parte. Ahora el nombre se valida contra la lista **antes** de pedir la instancia.
 
 > **Nota de compatibilidad**: nuestro motor viene de `master`, más nuevo que QLC+ 5.2.1. Un proyecto guardado aquí puede llevar campos que esa versión no conoce (p. ej. `DimmerControl` en un EFX); los avisa y los ignora, igual que ignora nuestra sección de layout.
 

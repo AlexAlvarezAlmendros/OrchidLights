@@ -155,6 +155,25 @@ namespace DocWriter
     /** Collection: the set of functions it fires together. */
     Result setCollectionMembers(Doc *doc, quint32 collectionId, const QList<quint32> &functionIds);
 
+    /**
+     * RGBMatrix: the fixture group it runs across, the algorithm, and colours.
+     *
+     * An empty algorithm name leaves it alone; group id invalidId() likewise.
+     * A matrix without a group is legal to build but produces nothing, so the
+     * group is reported back rather than assumed.
+     */
+    Result setRgbMatrix(Doc *doc, quint32 matrixId, int fixtureGroupId,
+                        const QString &algorithm, const QList<QString> &colours);
+
+    /** Script: the program text. */
+    Result setScriptData(Doc *doc, quint32 scriptId, const QString &data);
+
+    /** Audio: source file and volume. Volume < 0 leaves it alone. */
+    Result setAudioSource(Doc *doc, quint32 audioId, const QString &fileName, double volume);
+
+    /** Video: source file or URL. */
+    Result setVideoSource(Doc *doc, quint32 videoId, const QString &source);
+
     Result addFixtureGroup(Doc *doc, const QString &name, const QList<quint32> &fixtureIds,
                            quint32 &groupId);
     Result removeFixtureGroup(Doc *doc, quint32 groupId);

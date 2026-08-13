@@ -17,10 +17,13 @@
   limitations under the License.
 */
 
+#include <QFileInfo>
+#include <QColor>
 #include <QSet>
 
 #include "docwriter.h"
 
+#include "rgbalgorithm.h"
 #include "collection.h"
 #include "rgbmatrix.h"
 #include "sequence.h"
@@ -42,6 +45,7 @@
 #include "inputoutputmap.h"
 #include "outputpatch.h"
 #include "universe.h"
+#include "audioplugincache.h"
 #include "doc.h"
 
 namespace
@@ -896,6 +900,147 @@ DocWriter::Result DocWriter::setCollectionMembers(Doc *doc, quint32 collectionId
 
     for (quint32 id : functionIds)
         collection->addFunction(id);
+
+    doc->setModified();
+    return Result::success();
+}
+
+
+DocWriter::Result DocWriter::setRgbMatrix(Doc *doc, quint32 matrixId, int fixtureGroupId,
+                                          const QString &algorithm, const QList<QString> &colours)
+{
+    Function *function = doc->function(matrixId);
+    if (function == nullptr || function->type() != Function::RGBMatrixType)
+        return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
+
+    RGBMatrix *matrix = qobject_cast<RGBMatrix *>(function);
+
+    if (fixtureGroupId >= 0)
+    {
+        if (doc->fixtureGroup(quint32(fixtureGroupId)) == nullptr)
+        {
+            return Result::failure(
+                QStringLiteral("No fixture group with id %1").arg(fixtureGroupId));
+        }
+        matrix->setFixtureGroup(quint32(fixtureGroupId));
+    }
+
+    if (algorithm.isEmpty() == false)
+    {
+        /* Checked against the list BEFORE asking for an instance, because
+           RGBAlgorithm::algorithm() cannot report a bad name: for anything that
+           is not one of the four built-ins it falls through to
+           RGBScriptsCache::script(), which returns a fresh, empty RGBScript
+           rather than nullptr (engine/src/rgbscriptscache.cpp:42-55).
+         *
+         * So a typo would be accepted, and the matrix would run and emit
+           nothing at all -- with no error anywhere to explain why the lights
+           stayed dark. */
+        if (RGBAlgorithm::algorithms(doc).contains(algorithm) == false)
+        {
+            return Result::failure(QStringLiteral("No algorithm named \"%1\". Available: %2")
+                                       .arg(algorithm,
+                                            RGBAlgorithm::algorithms(doc).join(QStringLiteral(", "))));
+        }
+
+        /* Builds a fresh instance; RGBMatrix takes ownership. */
+        RGBAlgorithm *instance = RGBAlgorithm::algorithm(doc, algorithm);
+        if (instance == nullptr)
+            return Result::failure(QStringLiteral("The engine could not build that algorithm"));
+
+        matrix->setAlgorithm(instance);
+    }
+
+    for (int i = 0; i < colours.count() && i < 5; i++)
+    {
+        const QString &text = colours.at(i);
+        if (text.isEmpty())
+            continue;
+
+        const QColor colour(text);
+        if (colour.isValid() == false)
+        {
+            return Result::failure(
+                QStringLiteral("\"%1\" is not a colour; use #rrggbb").arg(text));
+        }
+        matrix->setColor(i, colour);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setScriptData(Doc *doc, quint32 scriptId, const QString &data)
+{
+    Function *function = doc->function(scriptId);
+    if (function == nullptr || function->type() != Function::ScriptType)
+        return Result::failure(QStringLiteral("No script with id %1").arg(scriptId));
+
+    Script *script = qobject_cast<Script *>(function);
+
+    /* setData parses the program and reports whether it made sense. Accepting
+       a script the engine could not parse would leave a function that silently
+       does nothing when fired. */
+    if (script->setData(data) == false)
+        return Result::failure(QStringLiteral("The engine could not parse that script"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setAudioSource(Doc *doc, quint32 audioId, const QString &fileName,
+                                            double volume)
+{
+    Function *function = doc->function(audioId);
+    if (function == nullptr || function->type() != Function::AudioType)
+        return Result::failure(QStringLiteral("No audio function with id %1").arg(audioId));
+
+    Audio *audio = qobject_cast<Audio *>(function);
+
+    if (fileName.isEmpty() == false)
+    {
+        if (QFileInfo::exists(fileName) == false)
+            return Result::failure(QStringLiteral("No such file: %1").arg(fileName));
+
+        /* Returns false when no decoder plugin can read it. Saying so beats a
+           function that loads, shows a duration of zero and never plays. */
+        if (audio->setSourceFileName(fileName) == false)
+        {
+            return Result::failure(
+                QStringLiteral("No audio decoder can read %1. Loaded decoders handle: %2")
+                    .arg(fileName, doc->audioPluginCache()->getSupportedFormats()
+                                       .join(QStringLiteral(", "))));
+        }
+    }
+
+    if (volume >= 0.0)
+    {
+        if (volume > 1.0)
+            return Result::failure(QStringLiteral("Volume must be between 0 and 1"));
+        audio->setVolume(volume);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setVideoSource(Doc *doc, quint32 videoId, const QString &source)
+{
+    Function *function = doc->function(videoId);
+    if (function == nullptr || function->type() != Function::VideoType)
+        return Result::failure(QStringLiteral("No video function with id %1").arg(videoId));
+
+    if (source.isEmpty())
+        return Result::failure(QStringLiteral("A video needs a source"));
+
+    /* A local path must exist; a URL is taken on trust because resolving it
+       here would block the engine thread on the network. */
+    const bool isUrl = source.contains(QStringLiteral("://"));
+    if (isUrl == false && QFileInfo::exists(source) == false)
+        return Result::failure(QStringLiteral("No such file: %1").arg(source));
+
+    Video *video = qobject_cast<Video *>(function);
+    video->setSourceUrl(source);
 
     doc->setModified();
     return Result::success();
