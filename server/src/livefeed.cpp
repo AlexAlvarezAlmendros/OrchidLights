@@ -36,6 +36,8 @@
 #include "functionparent.h"
 #include "inputoutputmap.h"
 #include "mastertimer.h"
+#include "chaseraction.h"
+#include "chaser.h"
 #include "function.h"
 #include "doc.h"
 
@@ -291,6 +293,71 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             if (it.value().authenticated && it.key() != socket)
                 it.key()->sendTextMessage(payload);
         }
+        return;
+    }
+
+    if (type == QStringLiteral("cuelist"))
+    {
+        /* A cue list is a chaser plus transport. The action goes to the chaser
+           the widget names, so the interface never has to know that. */
+        Doc *doc = m_engine->doc();
+        Function *function = doc->function(quint32(message.value("chaser").toInt(-1)));
+
+        if (function == nullptr || function->type() != Function::ChaserType)
+        {
+            QJsonObject error;
+            error["type"] = "error";
+            error["error"] = QStringLiteral("No such chaser");
+            sendJson(socket, error);
+            return;
+        }
+
+        Chaser *chaser = qobject_cast<Chaser *>(function);
+        const QString action = message.value("action").toString();
+
+        if (action == QStringLiteral("play"))
+        {
+            if (chaser->isRunning() == false)
+                chaser->start(doc->masterTimer(), FunctionParent::master());
+        }
+        else if (action == QStringLiteral("stop"))
+        {
+            if (chaser->isRunning())
+                chaser->stop(FunctionParent::master());
+        }
+        else if (action == QStringLiteral("next") || action == QStringLiteral("previous")
+                 || action == QStringLiteral("step"))
+        {
+            /* Transport on a stopped cue list starts it first, which is what
+               pressing Next on a desk does. Otherwise the first press appears
+               to do nothing and the operator presses it again. */
+            if (chaser->isRunning() == false)
+                chaser->start(doc->masterTimer(), FunctionParent::master());
+
+            ChaserAction command;
+            command.m_masterIntensity = 1.0;
+            command.m_stepIntensity = 1.0;
+            command.m_fadeMode = Chaser::FromFunction;
+            command.m_stepIndex = message.value("index").toInt(-1);
+
+            if (action == QStringLiteral("next"))
+                command.m_action = ChaserNextStep;
+            else if (action == QStringLiteral("previous"))
+                command.m_action = ChaserPreviousStep;
+            else
+                command.m_action = ChaserSetStepIndex;
+
+            chaser->setAction(command);
+        }
+        else
+        {
+            QJsonObject error;
+            error["type"] = "error";
+            error["error"] = QStringLiteral("Action must be play, stop, next, previous or step");
+            sendJson(socket, error);
+            return;
+        }
+
         return;
     }
 

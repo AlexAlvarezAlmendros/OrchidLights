@@ -139,7 +139,10 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
     QJsonObject json;
 
     json["type"] = widget.type;
-    json["id"] = qint64(widget.id);
+    if (widget.hasId)
+        json["id"] = qint64(widget.id);
+    if (widget.page != 0)
+        json["page"] = widget.page;
     if (widget.caption.isEmpty() == false)
         json["caption"] = widget.caption;
 
@@ -157,6 +160,18 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
 
     if (widget.hasFunction)
         json["functionId"] = qint64(widget.functionId);
+
+    if (widget.hasChaser)
+    {
+        json["chaserId"] = qint64(widget.chaserId);
+        json["controllable"] = true;
+    }
+
+    if (widget.clockType.isEmpty() == false)
+    {
+        json["clockType"] = widget.clockType;
+        json["clockTime"] = widget.clockTime;
+    }
 
     if (widget.speedTargets.isEmpty() == false)
     {

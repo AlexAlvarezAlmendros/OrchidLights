@@ -42,6 +42,17 @@ namespace
         return name.toString().toLower();
     }
 
+    /**
+     * The widget tags that actually appear in a .qxw.
+     *
+     * Taken from the writers rather than from the menu labels: the RGB matrix
+     * widget is shown as "Animation" in both UIs but writes <Matrix> in v4 and
+     * v5 alike (ui/src/virtualconsole/vcmatrix.h:43,
+     * qmlui/virtualconsole/vcanimation.h:28). The earlier list here had
+     * "Animation" and "ButtonMatrix", neither of which is a tag anywhere in the
+     * tree, and lacked "Matrix" -- so a Matrix widget was simply invisible to
+     * the interface.
+     */
     bool isWidgetElement(const QStringView name)
     {
         static const QStringList widgets = {
@@ -50,7 +61,7 @@ namespace
             QStringLiteral("Label"),   QStringLiteral("SpeedDial"),
             QStringLiteral("XYPad"),   QStringLiteral("CueList"),
             QStringLiteral("Clock"),   QStringLiteral("AudioTriggers"),
-            QStringLiteral("Animation"), QStringLiteral("ButtonMatrix"),
+            QStringLiteral("Matrix"),
         };
 
         return widgets.contains(name.toString());
@@ -59,8 +70,34 @@ namespace
     void parseWidget(QXmlStreamReader &reader, VcWidget &widget)
     {
         widget.type = typeForElement(reader.name());
-        widget.caption = reader.attributes().value(QStringLiteral("Caption")).toString();
-        widget.id = reader.attributes().value(QStringLiteral("ID")).toUInt();
+
+        const QXmlStreamAttributes widgetAttributes = reader.attributes();
+        widget.caption = widgetAttributes.value(QStringLiteral("Caption")).toString();
+
+        /* ID is omitted entirely when a widget has none -- QLC+ never writes
+           the invalidId sentinel (ui/src/virtualconsole/vcwidget.cpp:1022).
+           Defaulting the absent case to 0 made every such widget claim to be
+           widget zero, which is a real id belonging to something else. */
+        widget.hasId = widgetAttributes.hasAttribute(QStringLiteral("ID"));
+        if (widget.hasId)
+            widget.id = widgetAttributes.value(QStringLiteral("ID")).toUInt();
+
+        /* Written only when non-zero, and it decides which page of a multipage
+           frame a widget belongs to. Ignoring it drew every page at once. */
+        widget.page = widgetAttributes.value(QStringLiteral("Page")).toInt();
+
+        /* A clock keeps everything on the element itself: the type always, and
+           for a countdown the target as three attributes. It never writes a
+           <Time> element -- that belongs to the speed dial, and reading a
+           clock's time from there meant it was always zero. */
+        if (widget.type == QStringLiteral("clock"))
+        {
+            widget.clockType = widgetAttributes.value(QStringLiteral("Type")).toString().toLower();
+
+            widget.clockTime = widgetAttributes.value(QStringLiteral("Hours")).toInt() * 3600
+                             + widgetAttributes.value(QStringLiteral("Minutes")).toInt() * 60
+                             + widgetAttributes.value(QStringLiteral("Seconds")).toInt();
+        }
 
         while (reader.readNextStartElement())
         {
@@ -118,9 +155,48 @@ namespace
                     widget.speedTargets.append(target);
                 }
             }
+            else if (name == QStringLiteral("Chaser"))
+            {
+                /* A cue list names the chaser it steps through in the element
+                   text. Without it the widget is decoration. */
+                bool ok = false;
+                const quint32 id = reader.readElementText().toUInt(&ok);
+                if (ok)
+                {
+                    widget.hasChaser = true;
+                    widget.chaserId = id;
+                }
+            }
             else if (name == QStringLiteral("Time"))
             {
+                /* A speed dial's stored position. A clock does NOT use this
+                   element -- see the Clock attributes read below. */
                 widget.speedMs = reader.readElementText().toInt();
+            }
+            else if (name == QStringLiteral("Playback"))
+            {
+                /* A playback slider names its function here, as element text
+                   inside <Playback> (ui/src/virtualconsole/vcslider.cpp:1921),
+                   not as an attribute on <Function> the way a button does. Only
+                   handling the button form meant a playback slider never
+                   reported a function at all. */
+                while (reader.readNextStartElement())
+                {
+                    if (reader.name() == QStringLiteral("Function"))
+                    {
+                        bool ok = false;
+                        const quint32 id = reader.readElementText().toUInt(&ok);
+                        if (ok && widget.hasFunction == false)
+                        {
+                            widget.hasFunction = true;
+                            widget.functionId = id;
+                        }
+                    }
+                    else
+                    {
+                        reader.skipCurrentElement();
+                    }
+                }
             }
             else if (name == QStringLiteral("AbsoluteValue"))
             {

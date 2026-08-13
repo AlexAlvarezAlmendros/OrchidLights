@@ -290,7 +290,24 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 
 > **Nota de compatibilidad**: nuestro motor viene de `master`, más nuevo que QLC+ 5.2.1. Un proyecto guardado aquí puede llevar campos que esa versión no conoce (p. ej. `DimmerControl` en un EFX); los avisa y los ignora, igual que ignora nuestra sección de layout.
 
-### F6 — Virtual Console: los doce widgets
+### F6 — Virtual Console: los doce widgets 🔨
+
+**Decisión de diseño, tomada tras mapear los 11 widgets campo a campo.**
+
+El modelo actual cubre **124 de 489 campos persistidos (25 %)**. Regenerar `<VirtualConsole>` desde él no sería una pérdida marginal: **borraría la mayor parte de la sección** — cada `<Input>` y `<Key>` (todo el mapeo MIDI/OSC/teclado del show), el `<Action>` de cada botón (un botón "BLACKOUT" pasaría a ser un toggle), las fuentes, el `<Properties>` con el Grand Master y su binding, las páginas de los frames multipágina…
+
+Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fragmento capturado sigue siendo la fuente de verdad; se parsea a un árbol mutable que guarda nombres, atributos *en orden*, texto e hijos verbatim; las mutaciones son parches dirigidos; y se reserializa. Lo no modelado sobrevive porque **nunca se destruye** — son nodos copiados, no valores rederivados. Es la misma disciplina de `<OrchidLightsLayout>`, aplicada hacia dentro.
+
+**Hecho:**
+
+- [x] **Control de cue lists** (play/stop/next/previous/ir a paso) — una cue list es un chaser más transporte, así que se controla sin escribir XML. El transporte sobre una parada la arranca primero, como hace una mesa real.
+- [x] **Cinco fallos del lector corregidos**, todos con efecto hoy:
+  - `Matrix` faltaba en la lista de etiquetas —que además contenía `Animation` y `ButtonMatrix`, **que no existen en ningún árbol**—, así que un widget Matrix era invisible.
+  - El fader de *playback* nombra su función como texto dentro de `<Playback>`, no como atributo: nunca reportaba ninguna.
+  - El reloj guarda `@Type` y `@Hours/@Minutes/@Seconds` **en el propio elemento** y jamás escribe `<Time>`; leer de ahí daba siempre cero.
+  - `@Page` se ignoraba, así que un frame multipágina se dibujaba con **todas las páginas superpuestas**.
+  - El `ID` ausente se tomaba como 0, que es un id real de otro widget.
+- [x] `server/test/data/vc-widgets.qxw`, un proyecto que contiene justo las formas que los shows reales aquí no tienen, para que estos cinco no vuelvan.
 
 Crear, editar, eliminar y configurar. Hoy se renderizan cinco, en solo lectura.
 
