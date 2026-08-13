@@ -23,6 +23,8 @@
 #include <QObject>
 #include <QString>
 
+#include "apiauth.h"
+
 class QHttpServer;
 class EngineHost;
 
@@ -50,11 +52,19 @@ public:
         /**
          * Listen on every interface instead of loopback only.
          *
-         * The default is loopback because there is no authentication yet:
-         * anything that can reach the port can black out the room. Opening it
-         * up is a deliberate act until sessions land.
+         * Doing so turns the bearer token on: a desk reachable across a venue
+         * network is a desk anyone on it can black out mid-show.
          */
         bool listenAll = false;
+
+        /**
+         * Demand the token even on loopback.
+         *
+         * Loopback is left open by default because the operating system is
+         * already the boundary there. On a machine with untrusted local users
+         * that is not good enough, hence this.
+         */
+        bool requireAuth = false;
     };
 
     explicit ApiServer(EngineHost *engine, QObject *parent = nullptr);
@@ -68,11 +78,14 @@ public:
     /** Base URL a browser or curl can use. */
     QString url() const;
 
+    const ApiAuth &auth() const { return m_auth; }
+
 private:
     void registerRoutes();
 
     EngineHost *m_engine = nullptr;
     QHttpServer *m_server = nullptr;
+    ApiAuth m_auth;
     quint16 m_port = 0;
     bool m_listenAll = false;
 };

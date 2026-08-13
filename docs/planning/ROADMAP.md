@@ -153,9 +153,10 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - [x] `server/test/api-smoke.sh`: arranca el daemon, conduce el motor por HTTP y comprueba el binding a loopback. Corre igual en local que en CI.
 - [x] Escucha **solo en loopback** por defecto. `--listen-all` es deliberado porque todavía no hay autenticación.
 
+- [x] **Autenticación por token** (`server/src/apiauth.*`): 32 bytes del CSPRNG del sistema, generados en el primer arranque, guardados con permisos `600`, comparados en tiempo constante. `--listen-all` la activa sola; `--require-auth` la exige también en loopback. Cubierta por el smoke test, lecturas **y** comandos.
+
 **Pendiente:**
 
-- [ ] **Autenticación por sesión** — bloquea poder usar `--listen-all` con cabeza, y por tanto bloquea F2.
 - [ ] `QWebSocketServer`: estado en vivo y stream DMX en frames binarios.
 - [ ] Endpoints de proyecto: load/save/list.
 - [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.

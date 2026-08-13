@@ -130,9 +130,29 @@ Las direcciones DMX y los universos van **1-based** en el API, como están
 impresos en los focos y como se teclean en una mesa. El motor cuenta desde 0
 internamente; la conversión ocurre en un solo sitio, `server/src/jsonview.cpp`.
 
-**Sin autenticación todavía.** Por eso el daemon escucha **solo en loopback**.
-`--listen-all` lo abre a toda la red, y es una decisión deliberada: cualquiera
-que alcance el puerto puede dejar la sala a oscuras.
+### Autenticación
+
+El daemon escucha **solo en loopback** por defecto y ahí no pide nada: el
+sistema operativo ya es la frontera.
+
+`--listen-all` lo abre a toda la red y **activa el token** automáticamente. Una
+mesa alcanzable desde la red de una sala es una mesa que cualquiera en esa red
+puede dejar a oscuras en mitad del pase.
+
+```bash
+orchidlightsd --listen-all tonight.qxw
+# Authentication: required
+#   token file: ~/.orchidlights/api-token
+
+curl -H "Authorization: Bearer $(cat ~/.orchidlights/api-token)" \
+     http://mesa.local:9998/api/v1/status
+```
+
+El token son 32 bytes del CSPRNG del sistema, se genera en el primer arranque y
+se guarda con permisos `600`. Rotarlo es borrar el archivo. La comparación es en
+tiempo constante, para que nadie lo deduzca byte a byte midiendo cuánto tarda el
+rechazo. `--require-auth` lo exige también en loopback, para máquinas con
+usuarios locales en los que no se confía.
 
 ## Ejecutar como servicio
 

@@ -45,6 +45,14 @@ namespace
         return QHttpServerResponse(body, code);
     }
 
+    QHttpServerResponse unauthorized()
+    {
+        return jsonError(StatusCode::Unauthorized,
+                         QStringLiteral("Send Authorization: Bearer <token>. "
+                                        "The token is in the api-token file of the "
+                                        "user data directory."));
+    }
+
     /** A command was queued on the engine. Deliberately carries no state: see
         the note on the function routes. */
     QJsonObject acknowledge(const Function *function, const QString &requested)
@@ -71,6 +79,13 @@ ApiServer::~ApiServer() = default;
 bool ApiServer::start(const Options &options, QString &errorMessage)
 {
     Q_ASSERT(m_server == nullptr);
+
+    if (m_auth.load(errorMessage) == false)
+        return false;
+
+    /* Reaching beyond loopback always demands the token; on loopback it is
+       opt-in, because there the operating system is already the boundary. */
+    m_auth.setRequired(options.listenAll || options.requireAuth);
 
     m_server = new QHttpServer(this);
     m_listenAll = options.listenAll;
@@ -106,6 +121,14 @@ void ApiServer::registerRoutes()
 {
     Doc *doc = m_engine->doc();
 
+    /* Repeated at the top of every /api handler rather than hidden in a
+       wrapper: Qt 6.4's QHttpServer has no middleware, and a route that
+       silently forgets its check is the kind of bug that only shows up when
+       someone else is on the network. One grep finds them all. */
+    const auto denied = [this](const QHttpServerRequest &request) {
+        return m_auth.authorize(request) == false;
+    };
+
     /* Anything not under /api is the web interface's territory, which does not
        exist yet. Say what this is rather than 404 at a confused browser. */
     m_server->route("/", [this]() {
@@ -117,7 +140,10 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/status", [this, doc]() {
+    m_server->route("/api/v1/status", [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
         QJsonObject body;
         body["name"] = QStringLiteral(APPNAME);
         body["version"] = QStringLiteral(APPVERSION);
@@ -138,15 +164,21 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/fixtures", [doc]() {
+    m_server->route("/api/v1/fixtures", [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
         return QHttpServerResponse(JsonView::fixtures(doc));
     });
 
-    m_server->route("/api/v1/functions", [doc]() {
+    m_server->route("/api/v1/functions", [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
         return QHttpServerResponse(JsonView::functions(doc));
     });
 
-    m_server->route("/api/v1/universes", [doc]() {
+    m_server->route("/api/v1/universes", [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
         return QHttpServerResponse(JsonView::universes(doc));
     });
 
@@ -161,7 +193,10 @@ void ApiServer::registerRoutes()
      * observes the result through GET /functions. */
     m_server->route("/api/v1/functions/<arg>/start",
                     QHttpServerRequest::Method::Post,
-                    [doc](quint32 id) {
+                    [doc, denied](quint32 id, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
         Function *function = doc->function(id);
         if (function == nullptr)
             return jsonError(StatusCode::NotFound, QStringLiteral("No such function"));
@@ -175,7 +210,10 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/functions/<arg>/stop",
                     QHttpServerRequest::Method::Post,
-                    [doc](quint32 id) {
+                    [doc, denied](quint32 id, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
         Function *function = doc->function(id);
         if (function == nullptr)
             return jsonError(StatusCode::NotFound, QStringLiteral("No such function"));
@@ -189,7 +227,10 @@ void ApiServer::registerRoutes()
 
     /* The one control every lighting desk has a physical button for. */
     m_server->route("/api/v1/blackout", QHttpServerRequest::Method::Post,
-                    [doc]() {
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
         doc->masterTimer()->stopAllFunctions();
         doc->inputOutputMap()->setBlackout(true);
 
@@ -199,7 +240,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/blackout", QHttpServerRequest::Method::Delete,
-                    [doc]() {
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
         doc->inputOutputMap()->setBlackout(false);
 
         QJsonObject body;

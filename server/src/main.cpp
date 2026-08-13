@@ -132,9 +132,13 @@ int main(int argc, char **argv)
     QCommandLineOption listenAllOption(
         QStringLiteral("listen-all"),
         QStringLiteral("Serve on every network interface instead of loopback only. "
-                       "There is no authentication yet, so anything that can reach "
-                       "the port can black out the room."));
+                       "This turns the bearer token on."));
     parser.addOption(listenAllOption);
+
+    QCommandLineOption requireAuthOption(
+        QStringLiteral("require-auth"),
+        QStringLiteral("Demand the bearer token even on loopback."));
+    parser.addOption(requireAuthOption);
 
     parser.process(app);
 
@@ -203,6 +207,7 @@ int main(int argc, char **argv)
     ApiServer::Options apiOptions;
     apiOptions.port = quint16(port);
     apiOptions.listenAll = parser.isSet(listenAllOption);
+    apiOptions.requireAuth = parser.isSet(requireAuthOption);
 
     ApiServer api(&engine);
     if (api.start(apiOptions, errorMessage) == false)
@@ -212,11 +217,17 @@ int main(int argc, char **argv)
     }
 
     out << Qt::endl << "API listening on " << api.url() << Qt::endl;
-    if (apiOptions.listenAll)
+
+    if (api.auth().isRequired())
     {
-        err << "WARNING: serving on every interface with no authentication. "
-               "Anything that can reach this port can black out the room."
-            << Qt::endl;
+        out << "Authentication: required" << Qt::endl;
+        out << "  token file: " << api.auth().tokenPath() << Qt::endl;
+        if (api.auth().wasGenerated())
+            out << "  a new token was generated for this machine" << Qt::endl;
+    }
+    else
+    {
+        out << "Authentication: not required on loopback (see --require-auth)" << Qt::endl;
     }
 
     return app.exec();

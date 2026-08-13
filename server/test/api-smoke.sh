@@ -109,4 +109,58 @@ if command -v ss > /dev/null; then
         || fail "the daemon is not bound to loopback only"
 fi
 
+kill $DAEMON_PID 2>/dev/null || true
+wait $DAEMON_PID 2>/dev/null || true
+trap - EXIT
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+#
+# Same daemon, --require-auth. Worth its own pass because the failure mode is
+# silent: a route that forgets its check still answers 200 and looks perfect
+# until someone else is on the network.
+
+AUTH_PORT=$((PORT + 1))
+AUTH_BASE="http://127.0.0.1:$AUTH_PORT/api/v1"
+
+"$DAEMON" --port "$AUTH_PORT" --no-output --require-auth "$PROJECT" \
+    > /tmp/orchid-api-auth.log 2>&1 &
+AUTH_PID=$!
+trap 'kill $AUTH_PID 2>/dev/null || true' EXIT
+
+for _ in $(seq 1 100); do
+    CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 "$AUTH_BASE/status" || true)
+    [ "$CODE" = "401" ] && break
+    if ! kill -0 $AUTH_PID 2>/dev/null; then
+        cat /tmp/orchid-api-auth.log >&2
+        fail "the authenticated daemon exited before it started listening"
+    fi
+    sleep 0.2
+done
+[ "$CODE" = "401" ] || fail "an unauthenticated read answered $CODE, expected 401"
+
+TOKEN_PATH=$(grep -oE '/[^ ]*api-token' /tmp/orchid-api-auth.log | head -1)
+[ -n "$TOKEN_PATH" ] || fail "the daemon did not say where the token lives"
+[ -f "$TOKEN_PATH" ] || fail "the token file $TOKEN_PATH was not created"
+
+# A token the whole machine can read is not a token.
+PERMS=$(stat -c '%a' "$TOKEN_PATH")
+[ "$PERMS" = "600" ] || fail "the token file is mode $PERMS, expected 600"
+
+TOKEN=$(cat "$TOKEN_PATH")
+[ ${#TOKEN} -ge 32 ] || fail "the token is only ${#TOKEN} characters"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong" \
+       --max-time 5 "$AUTH_BASE/status")
+[ "$CODE" = "401" ] || fail "a wrong token answered $CODE, expected 401"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
+       --max-time 5 "$AUTH_BASE/status")
+[ "$CODE" = "200" ] || fail "the correct token answered $CODE, expected 200"
+
+# Commands must be protected too, not just reads.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST --max-time 5 "$AUTH_BASE/blackout")
+[ "$CODE" = "401" ] || fail "an unauthenticated blackout answered $CODE, expected 401"
+
 echo "API smoke test passed."
