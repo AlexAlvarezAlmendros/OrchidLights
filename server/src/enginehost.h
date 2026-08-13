@@ -100,6 +100,10 @@ public:
 
     Doc *doc() const { return m_doc; }
 
+    /** Apply a speed dial's value, in milliseconds, to the functions it drives.
+     *  Returns false when the project has no such dial. */
+    bool setSpeedDial(quint32 widgetId, int milliseconds);
+
     /** How the operator arranged the console, empty when never arranged. */
     QVector<ConsoleLayout::Page> layout() const;
 

@@ -32,6 +32,10 @@ export interface VcWidget {
   high?: number
   value?: number
   controllable?: boolean
+  speedTargets?: { functionId: number; fadeIn: number; fadeOut: number; duration: number }[]
+  speedMs?: number
+  speedMin?: number
+  speedMax?: number
   children?: VcWidget[]
 }
 

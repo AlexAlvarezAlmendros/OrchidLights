@@ -93,12 +93,39 @@ namespace
                    use <Function> for their own purposes -- a SpeedDial lists
                    several, with the id in the element text -- so only take the
                    attribute form, and only the first one. */
-                const QStringView id = reader.attributes().value(QStringLiteral("ID"));
-                if (id.isEmpty() == false && widget.hasFunction == false)
+                const QXmlStreamAttributes attributes = reader.attributes();
+                const QStringView id = attributes.value(QStringLiteral("ID"));
+
+                if (id.isEmpty() == false)
                 {
-                    widget.hasFunction = true;
-                    widget.functionId = id.toUInt();
+                    if (widget.hasFunction == false)
+                    {
+                        widget.hasFunction = true;
+                        widget.functionId = id.toUInt();
+                    }
+                    reader.skipCurrentElement();
                 }
+                else
+                {
+                    /* The speed dial form: multipliers in the attributes, the
+                       function id in the element text. */
+                    VcWidget::SpeedTarget target;
+                    target.fadeIn = attributes.value(QStringLiteral("FadeIn")).toInt();
+                    target.fadeOut = attributes.value(QStringLiteral("FadeOut")).toInt();
+                    target.duration = attributes.value(QStringLiteral("Duration")).toInt();
+                    target.functionId = reader.readElementText().toUInt();
+
+                    widget.speedTargets.append(target);
+                }
+            }
+            else if (name == QStringLiteral("Time"))
+            {
+                widget.speedMs = reader.readElementText().toInt();
+            }
+            else if (name == QStringLiteral("AbsoluteValue"))
+            {
+                widget.speedMin = reader.attributes().value(QStringLiteral("Minimum")).toInt();
+                widget.speedMax = reader.attributes().value(QStringLiteral("Maximum")).toInt();
                 reader.skipCurrentElement();
             }
             else if (name == QStringLiteral("SliderMode"))
