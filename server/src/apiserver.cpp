@@ -33,6 +33,7 @@
 #include "livefeed.h"
 #include "virtualconsole.h"
 #include "consolelayout.h"
+#include "docwriter.h"
 #include "installpaths.h"
 #include "qlcconfig.h"
 
@@ -295,6 +296,116 @@ void ApiServer::registerRoutes()
         }
 
         return QHttpServerResponse(JsonView::vcWidget(root));
+    });
+
+    /* What a universe can be patched to. Without this the operator would be
+       guessing at plugin and line names, which the writer then refuses. */
+    m_server->route("/api/v1/io", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        InputOutputMap *map = doc->inputOutputMap();
+
+        const auto describe = [&](const QStringList &plugins, bool outputs) {
+            QJsonArray array;
+            for (const QString &name : plugins)
+            {
+                QJsonArray lines;
+                for (const QString &line : (outputs ? map->pluginOutputs(name)
+                                                    : map->pluginInputs(name)))
+                    lines.append(line);
+
+                QJsonObject plugin;
+                plugin["name"] = name;
+                plugin["lines"] = lines;
+                array.append(plugin);
+            }
+            return array;
+        };
+
+        QJsonArray profiles;
+        for (const QString &name : map->profileNames())
+            profiles.append(name);
+
+        QJsonObject body;
+        body["outputPlugins"] = describe(map->outputPluginNames(), true);
+        body["inputPlugins"] = describe(map->inputPluginNames(), false);
+        body["inputProfiles"] = profiles;
+        return QHttpServerResponse(body);
+    });
+
+    const auto writeResult = [](const DocWriter::Result &result, const QJsonObject &body) {
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+        return QHttpServerResponse(body);
+    };
+
+    m_server->route("/api/v1/universes", QHttpServerRequest::Method::Post,
+                    [this, doc, denied, writeResult](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonObject body;
+        body["universes"] = int(doc->inputOutputMap()->universesCount()) + 1;
+        return writeResult(DocWriter::addUniverse(doc), body);
+    });
+
+    m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Delete,
+                    [doc, denied, writeResult](int index, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonObject body;
+        body["removed"] = index;
+        return writeResult(DocWriter::removeUniverse(doc, index), body);
+    });
+
+    m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Patch,
+                    [doc, denied, writeResult](int index, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject patch = QJsonDocument::fromJson(request.body()).object();
+
+        if (patch.contains("name"))
+        {
+            const DocWriter::Result result =
+                DocWriter::renameUniverse(doc, index, patch.value("name").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        if (patch.contains("passthrough"))
+        {
+            const DocWriter::Result result =
+                DocWriter::setPassthrough(doc, index, patch.value("passthrough").toBool());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        if (patch.contains("output"))
+        {
+            const QJsonObject output = patch.value("output").toObject();
+            const DocWriter::Result result =
+                DocWriter::setOutputPatch(doc, index, output.value("plugin").toString(),
+                                          output.value("line").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        if (patch.contains("input"))
+        {
+            const QJsonObject input = patch.value("input").toObject();
+            const DocWriter::Result result =
+                DocWriter::setInputPatch(doc, index, input.value("plugin").toString(),
+                                         input.value("line").toString(),
+                                         input.value("profile").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        return QHttpServerResponse(JsonView::universes(doc));
     });
 
     m_server->route("/api/v1/layout", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {

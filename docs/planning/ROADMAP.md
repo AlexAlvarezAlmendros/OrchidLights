@@ -216,30 +216,97 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
   La medición corrigió el marco: lo que se cronometraba no era *tap a DMX* sino *tap a que el navegador se entera*. **La luz se mueve en ~20 ms**; los 20 ms extra del ajuste por defecto solo retrasan el eco visual, que la interfaz ya adelanta de forma optimista. Subir `--stream-rate` gasta ancho de banda sin acelerar ningún foco.
 - [ ] Modo operador en móvil sin edición posible, y PWA instalable.
 
-### F3 — Patch y gestión de fixtures *(dolor #2)*
-- Buscador de la librería de 1.735 perfiles con filtros por fabricante, tipo y número de canales.
-- Patch visual: mapa de 512 canales por universo, direccionamiento por arrastre, **detección de solapes**.
-- Grupos, modos, offsets. Importación y exportación de patch.
-- **Criterio de éxito: rehacer el patch del P62 (22 fixtures, 6 modelos, 3 perfiles custom) más rápido que en la app actual.**
+### Reencuadre (2026-08-13)
 
-### F4 — Editores de funciones *(dolor #3)*
-- Escena: consola de canales por fixture, con paletas de color y presets.
-- Chaser: lista de pasos con timing editable en línea, copiar/pegar entre pasos.
-- EFX: editor de patrón con previsualización.
-- RGB Matrix: algoritmos con preview.
+Hasta aquí el plan se ordenaba por los dolores de un rig concreto. **Eso era un
+sesgo**: un proyecto real sirve como banco de pruebas, no como especificación.
+Priorizar por "esto aquel proyecto no lo usa" deja fuera justo lo que otro
+proyecto necesitará.
 
-### F5 — Show Manager y preview 2D *(dolor #4)*
-- Timeline multipista.
-- Preview 2D: planta del rig con color y dimmer en vivo, sobre imagen de fondo (el plànol d'il·luminació del P62 encaja aquí directamente).
+El objetivo es **paridad funcional con QLC+ desde el navegador**: controlar,
+crear, editar y eliminar cualquier cosa, en cualquier proyecto. La medida de
+avance es la cobertura de la superficie de QLC+, no la de un show.
 
-### F6 — Extras
-- 3D opcional con three.js, solo si aporta algo sobre el 2D.
-- PWA instalable y offline en tablet.
-- Multiusuario con roles.
+**La superficie real, sacada del código:**
+
+| Superficie | Elementos | Estado hoy |
+|---|---|---|
+| Widgets de Virtual Console | 12: `button` `slider` `label` `frame` `soloframe` `cuelist` `speeddial` `xypad` `clock` `audiotriggers` `animation` `page` | 5 en solo lectura |
+| Tipos de función | 10: `Scene` `Chaser` `EFX` `Collection` `Script` `RGBMatrix` `Show` `Sequence` `Audio` `Video` | listar, arrancar/parar, velocidades |
+| Fixtures | alta, baja, sustitución, grupos, grupos de canales, modos, direcciones, modificadores de canal | solo lectura |
+| Universos y E/S | alta, baja, nombre, passthrough, monitor, patch de entrada y salida, perfiles | solo lectura |
+
+**Lo que falta no es una lista de features, es una capa**: hoy no existe
+escritura sobre el documento. Todo lo anterior lee `Doc` y ejecuta funciones;
+nada lo modifica. Esa capa es el trabajo de fondo y la comparten las cuatro
+superficies.
+
+---
+
+### F3 — La capa de escritura
+
+Sin esto no hay CRUD de nada, así que va primero y va completa.
+
+- [ ] Mutaciones sobre `Doc` desde el hilo correcto. El motor corre en su propio
+      hilo y añadir o borrar un fixture bajo un `MasterTimer` que está escribiendo
+      DMX es el mismo problema de concurrencia que ya apareció al cargar proyectos.
+- [ ] Estado `modified` propagado, y `POST /project/save` como único punto de
+      persistencia. Editar no debe escribir en disco por sorpresa.
+- [ ] Difusión por WebSocket de cada cambio, para que dos clientes no diverjan.
+- [ ] Validación en el borde: un patch que se solapa, un modo que no existe, un
+      universo fuera de rango. Rechazar con un mensaje que diga qué está mal.
+- [ ] Deshacer. QLC+ v5 tiene `Tardis`; sin equivalente, editar desde el
+      navegador da miedo y con razón.
+
+### F4 — Fixtures y universos
+
+- [ ] Fixtures: alta, baja, edición de dirección, universo, modo y nombre.
+- [ ] Buscador de la librería (1.735 perfiles) por fabricante, modelo, tipo y
+      número de canales.
+- [ ] Mapa de 512 canales por universo con **detección de solapes**.
+- [ ] Grupos de fixtures y grupos de canales.
+- [ ] Universos: alta, baja, nombre, passthrough, monitor.
+- [ ] Patch de entrada y salida por universo, con los plugins y perfiles
+      disponibles. **Esto es lo que hace que salga luz**, y hoy solo se lee.
+- [ ] Modificadores de canal.
+
+### F5 — Funciones: los diez tipos
+
+Crear, editar y eliminar. No un subconjunto.
+
+- [ ] `Scene` — consola de canales por fixture, paletas, presets.
+- [ ] `Chaser` — pasos, tiempos por paso, orden, modo de ejecución.
+- [ ] `EFX` — patrón, ejes, fixtures participantes, previsualización.
+- [ ] `RGBMatrix` — grupo, algoritmo, colores, propiedades del script.
+- [ ] `Collection`, `Sequence`, `Script`, `Show`, `Audio`, `Video`.
+
+### F6 — Virtual Console: los doce widgets
+
+Crear, editar, eliminar y configurar. Hoy se renderizan cinco, en solo lectura.
+
+- [ ] Control completo: `cuelist`, `xypad`, `clock`, `audiotriggers`,
+      `animation` (control de RGB Matrix), `soloframe` con su semántica de solo,
+      `slider` en modos playback y submaster, paginación de `frame`.
+- [ ] Edición: añadir y borrar widgets, asignarles funciones y canales,
+      apariencia, y las propiedades específicas de cada tipo.
+- [ ] Controles externos: mapeo de entrada (MIDI/OSC) por widget.
+- [ ] La disposición sigue en `<OrchidLightsLayout>`; **crear widgets sí exige
+      escribir `<VirtualConsole>`**, y entonces hay que modelarlo por completo o
+      se pierde lo que no se modele. Es el punto de mayor riesgo del proyecto.
+
+### F7 — Show manager y previsualización 2D
+
+- [ ] Timeline multipista.
+- [ ] Planta del rig con color y dimmer en vivo sobre imagen de fondo.
+
+### F8 — Extras
+
+- [ ] 3D opcional, PWA instalable, multiusuario con roles.
 
 ---
 
 ## 5. Riesgos
+
 
 | # | Riesgo | Mitigación |
 |---|---|---|
