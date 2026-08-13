@@ -122,6 +122,9 @@ jobs:
           echo "$out" | grep -q 'No system fixture library found' \
             || { echo "::error::the missing library was not reported"; exit 1; }
 
+      - name: Smoke test - the web API drives the engine
+        run: ./server/test/api-smoke.sh orchidlightsd resources/samples/Sample.qxw
+
       - name: Smoke test - an unresolvable fixture is reported, not swallowed
         run: |
           set -euo pipefail

@@ -2,9 +2,11 @@ set(module_name "orchidlightsd")
 
 add_executable(${module_name}
     main.cpp
+    apiserver.cpp apiserver.h
     enginehost.cpp enginehost.h
     fixturelibrary.cpp fixturelibrary.h
     installpaths.cpp installpaths.h
+    jsonview.cpp jsonview.h
     workspaceloader.cpp workspaceloader.h
 )
 

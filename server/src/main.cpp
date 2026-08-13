@@ -22,6 +22,7 @@
 #include <QTextStream>
 
 #include "enginehost.h"
+#include "apiserver.h"
 #include "qlcconfig.h"
 #include "qlcfile.h"
 #include "doc.h"
@@ -121,6 +122,20 @@ int main(int argc, char **argv)
         QStringLiteral("Load the project, report it and exit instead of staying up."));
     parser.addOption(checkOption);
 
+    QCommandLineOption portOption(
+        QStringLiteral("port"),
+        QStringLiteral("Port for the web API (default 9998)."),
+        QStringLiteral("number"),
+        QStringLiteral("9998"));
+    parser.addOption(portOption);
+
+    QCommandLineOption listenAllOption(
+        QStringLiteral("listen-all"),
+        QStringLiteral("Serve on every network interface instead of loopback only. "
+                       "There is no authentication yet, so anything that can reach "
+                       "the port can black out the room."));
+    parser.addOption(listenAllOption);
+
     parser.process(app);
 
     QTextStream out(stdout);
@@ -177,7 +192,32 @@ int main(int argc, char **argv)
     if (parser.isSet(checkOption))
         return 0;
 
-    out << Qt::endl << "Engine running. The API server arrives later in F1." << Qt::endl;
+    bool portOk = false;
+    const uint port = parser.value(portOption).toUInt(&portOk);
+    if (portOk == false || port == 0 || port > 65535)
+    {
+        err << "ERROR: --port must be between 1 and 65535" << Qt::endl;
+        return 1;
+    }
+
+    ApiServer::Options apiOptions;
+    apiOptions.port = quint16(port);
+    apiOptions.listenAll = parser.isSet(listenAllOption);
+
+    ApiServer api(&engine);
+    if (api.start(apiOptions, errorMessage) == false)
+    {
+        err << "ERROR: " << errorMessage << Qt::endl;
+        return 1;
+    }
+
+    out << Qt::endl << "API listening on " << api.url() << Qt::endl;
+    if (apiOptions.listenAll)
+    {
+        err << "WARNING: serving on every interface with no authentication. "
+               "Anything that can reach this port can black out the room."
+            << Qt::endl;
+    }
 
     return app.exec();
 }

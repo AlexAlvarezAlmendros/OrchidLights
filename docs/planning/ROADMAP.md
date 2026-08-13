@@ -143,10 +143,21 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 > **Bug corregido en el motor** (`engine/src/mastertimer-unix.cpp`). `MasterTimerPrivate::run()` levantaba su propia bandera `m_run` **dentro del hilo nuevo**, tras una guarda `if (m_run == true) return;`. Un `stop()` que llegase antes de que el hilo alcanzara su bucle ponía la bandera a `false`, el hilo pasaba la guarda, **se la volvía a poner a `true` él mismo** y giraba para siempre mientras `stop()` esperaba en un `wait()` que no volvía nunca. Es una ventana que se abre de par en par en cuanto algo carga un proyecto justo después de arrancar el motor — es decir, un daemon. La bandera se levanta ahora en el hilo que llama, y los arranques dobles los rechaza `isRunning()`. La variante Win32 no estaba afectada: su `start()` ya era síncrono.
 
+**API HTTP** — hecho:
+
+- [x] `QHttpServer` sobre Qt 6.4, JSON versionado en `/api/v1`, en el proceso del motor.
+- [x] Endpoints de lectura: `status`, `fixtures`, `functions`, `universes`.
+- [x] Control: `functions/{id}/start`, `functions/{id}/stop`, `blackout` (POST/DELETE).
+- [x] Los comandos responden **202 Accepted sin estado**. El motor los encola y la transición cae en el siguiente tick (20 ms); devolver la función serializada daría el estado *anterior* al comando, y un `POST /start` contestando `running:false` se lee como un fallo.
+- [x] Direcciones y universos **1-based** en el API, convertidos en un único sitio (`jsonview.cpp`).
+- [x] `server/test/api-smoke.sh`: arranca el daemon, conduce el motor por HTTP y comprueba el binding a loopback. Corre igual en local que en CI.
+- [x] Escucha **solo en loopback** por defecto. `--listen-all` es deliberado porque todavía no hay autenticación.
+
 **Pendiente:**
 
-- [ ] `QHttpServer` + `QWebSocketServer`, protocolo JSON versionado, autenticación por sesión.
-- [ ] Endpoints: proyecto (load/save/list), fixtures (lectura), universos (lectura + stream DMX), funciones (listado + run/stop).
+- [ ] **Autenticación por sesión** — bloquea poder usar `--listen-all` con cabeza, y por tanto bloquea F2.
+- [ ] `QWebSocketServer`: estado en vivo y stream DMX en frames binarios.
+- [ ] Endpoints de proyecto: load/save/list.
 - [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.
 - [ ] Round-trip de `.qxw`: cargar y guardar no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.
 - [ ] **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador.

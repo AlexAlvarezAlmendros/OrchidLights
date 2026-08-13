@@ -101,6 +101,39 @@ y perderlos convierte cada fixture parcheado en un dimmer genérico.
 Si no aparece ninguna librería, el daemon **avisa y sale con código 2** en lugar
 de cargar el proyecto en silencio con las definiciones vacías.
 
+## El API
+
+```bash
+orchidlightsd ~/shows/tonight.qxw          # escucha en 127.0.0.1:9998
+orchidlightsd --check tonight.qxw          # carga, informa y sale
+orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
+```
+
+| | |
+|---|---|
+| `GET /api/v1/status` | versión, librería, plugins cargados, recuentos, funciones en marcha |
+| `GET /api/v1/fixtures` | patch completo; `resolved:false` marca los que cayeron a dimmer genérico |
+| `GET /api/v1/functions` | escenas, chasers, EFX… con su estado `running` |
+| `GET /api/v1/universes` | universos y su patch de salida; `patched:false` no llega a ningún sitio |
+| `POST /api/v1/functions/{id}/start` | encola el arranque |
+| `POST /api/v1/functions/{id}/stop` | encola la parada |
+| `POST /api/v1/blackout` | para todo y activa blackout |
+| `DELETE /api/v1/blackout` | lo desactiva |
+
+Los comandos de función responden **202 Accepted**, no 200, y no devuelven
+estado. El motor los encola y la transición ocurre en el siguiente tick, 20 ms
+después: serializar la función en ese momento devolvería el estado *anterior* al
+comando — un `POST /start` contestando `running: false`, que se lee como un
+fallo. El resultado se observa con `GET /api/v1/functions`.
+
+Las direcciones DMX y los universos van **1-based** en el API, como están
+impresos en los focos y como se teclean en una mesa. El motor cuenta desde 0
+internamente; la conversión ocurre en un solo sitio, `server/src/jsonview.cpp`.
+
+**Sin autenticación todavía.** Por eso el daemon escucha **solo en loopback**.
+`--listen-all` lo abre a toda la red, y es una decisión deliberada: cualquiera
+que alcance el puerto puede dejar la sala a oscuras.
+
 ## Ejecutar como servicio
 
 Una mesa de luces tiene que sobrevivir a que el operador cierre el portátil, así
