@@ -122,6 +122,13 @@ int main(int argc, char **argv)
         QStringLiteral("Load the project, report it and exit instead of staying up."));
     parser.addOption(checkOption);
 
+    QCommandLineOption projectsOption(
+        QStringLiteral("projects"),
+        QStringLiteral("Directory the API may read and write projects in. "
+                       "Defaults to the directory of the project given here."),
+        QStringLiteral("dir"));
+    parser.addOption(projectsOption);
+
     QCommandLineOption portOption(
         QStringLiteral("port"),
         QStringLiteral("Port for the web API (default 9998)."),
@@ -160,6 +167,10 @@ int main(int argc, char **argv)
         err << "ERROR: " << errorMessage << Qt::endl;
         return 1;
     }
+
+    /* Set before loading, so an explicit directory wins over the fallback of
+       "wherever the project happened to be". */
+    engine.setProjectsDirectory(parser.value(projectsOption));
 
     report(out, engine);
 

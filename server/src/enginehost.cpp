@@ -17,6 +17,7 @@
   limitations under the License.
 */
 
+#include <QFileInfo>
 #include <QDir>
 
 #include "enginehost.h"
@@ -24,10 +25,12 @@
 #include "fixturelibrary.h"
 #include "workspaceloader.h"
 
+#include "qlcfile.h"
 #include "qlcmodifierscache.h"
 #include "rgbscriptscache.h"
 #include "ioplugincache.h"
 #include "qlcioplugin.h"
+#include "audioplugincache.h"
 #include "inputoutputmap.h"
 #include "mastertimer.h"
 #include "doc.h"
@@ -94,6 +97,22 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
         }
     }
 
+    /* Audio decoders. They install alongside the output plugins, so the same
+       resolution finds them.
+     *
+     * These decode files; playing the result still needs a Qt multimedia
+       backend, which the AppImage does not bundle yet. An Audio function in a
+       project therefore loads and reports its formats but stays silent there. */
+    if (m_pluginPath.isEmpty() == false)
+    {
+        const QString audioPath = QDir(m_pluginPath).absoluteFilePath(QStringLiteral("audio"));
+        if (QDir(audioPath).exists())
+        {
+            m_doc->audioPluginCache()->load(QDir(audioPath));
+            m_audioFormats = m_doc->audioPluginCache()->getSupportedFormats();
+        }
+    }
+
     Q_ASSERT(m_doc->inputOutputMap() != nullptr);
 
     /* Input profiles, ours and the legacy QLC+ ones, for the same reason the
@@ -128,12 +147,72 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
     m_doc->clearContents();
     m_doc->clearErrorLog();
 
-    const bool ok = WorkspaceLoader::load(m_doc, fileName, errorMessage);
+    const bool ok = WorkspaceLoader::load(m_doc, fileName, m_preserved, errorMessage);
 
     m_doc->inputOutputMap()->startUniverses();
     m_doc->masterTimer()->start();
 
+    if (ok)
+    {
+        m_projectPath = QFileInfo(fileName).absoluteFilePath();
+
+        /* Default the writable directory to wherever the show already lives,
+           which is where an operator expects "save" to put it. */
+        if (m_projectsDirectory.isEmpty())
+            m_projectsDirectory = QFileInfo(m_projectPath).absolutePath();
+    }
+
     return ok;
+}
+
+bool EngineHost::saveProject(const QString &fileName, QString &errorMessage)
+{
+    Q_ASSERT(m_doc != nullptr);
+
+    const QString target = fileName.isEmpty() ? m_projectPath : fileName;
+    if (target.isEmpty())
+    {
+        errorMessage = QStringLiteral("No project is loaded, so there is nothing to save over");
+        return false;
+    }
+
+    if (WorkspaceLoader::save(m_doc, target, m_preserved, errorMessage) == false)
+        return false;
+
+    m_projectPath = QFileInfo(target).absoluteFilePath();
+    m_doc->resetModified();
+
+    return true;
+}
+
+QStringList EngineHost::availableProjects() const
+{
+    if (m_projectsDirectory.isEmpty())
+        return QStringList();
+
+    QDir dir(m_projectsDirectory);
+    dir.setFilter(QDir::Files);
+    dir.setNameFilters(QStringList() << QString("*%1").arg(KExtWorkspace));
+    dir.setSorting(QDir::Name);
+
+    return dir.entryList();
+}
+
+QString EngineHost::resolveProjectName(const QString &name) const
+{
+    if (name.isEmpty() || m_projectsDirectory.isEmpty())
+        return QString();
+
+    /* A name, not a path. Anything with a separator in it, or the usual
+       traversal tricks, is refused outright rather than normalised: normalising
+       is where these bugs hide. */
+    if (name.contains(QChar('/')) || name.contains(QChar('\\')) || name.contains(QStringLiteral("..")))
+        return QString();
+
+    if (name.endsWith(KExtWorkspace, Qt::CaseInsensitive) == false)
+        return QString();
+
+    return QDir(m_projectsDirectory).absoluteFilePath(name);
 }
 
 QString EngineHost::projectErrors() const

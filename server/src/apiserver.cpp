@@ -22,6 +22,7 @@
 #include <QHostAddress>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QFileInfo>
 
 #include "apiserver.h"
 #include "enginehost.h"
@@ -163,6 +164,11 @@ void ApiServer::registerRoutes()
             plugins.append(name);
         body["outputPlugins"] = plugins;
 
+        QJsonArray audio;
+        for (const QString &format : m_engine->audioFormats())
+            audio.append(format);
+        body["audioFormats"] = audio;
+
         body["fixtures"] = doc->fixtures().count();
         body["functions"] = doc->functions().count();
         body["universes"] = int(doc->inputOutputMap()->universesCount());
@@ -230,6 +236,98 @@ void ApiServer::registerRoutes()
 
         return QHttpServerResponse(acknowledge(function, QStringLiteral("stop")),
                                    StatusCode::Accepted);
+    });
+
+    m_server->route("/api/v1/project", [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonObject body;
+        body["path"] = m_engine->projectPath();
+        body["name"] = QFileInfo(m_engine->projectPath()).fileName();
+        body["directory"] = m_engine->projectsDirectory();
+        body["modified"] = doc->isModified();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/projects", [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray names;
+        for (const QString &name : m_engine->availableProjects())
+            names.append(name);
+
+        QJsonObject body;
+        body["directory"] = m_engine->projectsDirectory();
+        body["projects"] = names;
+        return QHttpServerResponse(body);
+    });
+
+    /* Load and save take a file name inside the projects directory, never a
+       path. Accepting a path would hand whoever holds the token an
+       arbitrary-file-write primitive, which is not a trade a lighting desk
+       should make for the convenience of it. */
+    m_server->route("/api/v1/project/load/<arg>",
+                    QHttpServerRequest::Method::Post,
+                    [this, denied](const QString &name, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QString path = m_engine->resolveProjectName(name);
+        if (path.isEmpty())
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Give a .qxw file name inside the projects "
+                                            "directory, not a path"));
+        }
+
+        QString errorMessage;
+        if (m_engine->loadProject(path, errorMessage) == false)
+            return jsonError(StatusCode::NotFound, errorMessage);
+
+        QJsonObject body;
+        body["path"] = m_engine->projectPath();
+        body["unresolved"] = m_engine->projectErrors();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project/save",
+                    QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QString errorMessage;
+        if (m_engine->saveProject(QString(), errorMessage) == false)
+            return jsonError(StatusCode::Conflict, errorMessage);
+
+        QJsonObject body;
+        body["path"] = m_engine->projectPath();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project/save/<arg>",
+                    QHttpServerRequest::Method::Post,
+                    [this, denied](const QString &name, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QString path = m_engine->resolveProjectName(name);
+        if (path.isEmpty())
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Give a .qxw file name inside the projects "
+                                            "directory, not a path"));
+        }
+
+        QString errorMessage;
+        if (m_engine->saveProject(path, errorMessage) == false)
+            return jsonError(StatusCode::Conflict, errorMessage);
+
+        QJsonObject body;
+        body["path"] = m_engine->projectPath();
+        return QHttpServerResponse(body);
     });
 
     /* The one control every lighting desk has a physical button for. */
