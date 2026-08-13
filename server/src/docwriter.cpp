@@ -17,10 +17,15 @@
   limitations under the License.
 */
 
+#include <QFileInfo>
+#include <QColor>
 #include <QSet>
 
 #include "docwriter.h"
 
+#include "rgbalgorithm.h"
+#include "efxfixture.h"
+#include "grouphead.h"
 #include "collection.h"
 #include "rgbmatrix.h"
 #include "sequence.h"
@@ -42,6 +47,7 @@
 #include "inputoutputmap.h"
 #include "outputpatch.h"
 #include "universe.h"
+#include "audioplugincache.h"
 #include "doc.h"
 
 namespace
@@ -896,6 +902,276 @@ DocWriter::Result DocWriter::setCollectionMembers(Doc *doc, quint32 collectionId
 
     for (quint32 id : functionIds)
         collection->addFunction(id);
+
+    doc->setModified();
+    return Result::success();
+}
+
+
+DocWriter::Result DocWriter::setRgbMatrix(Doc *doc, quint32 matrixId, int fixtureGroupId,
+                                          const QString &algorithm, const QList<QString> &colours)
+{
+    Function *function = doc->function(matrixId);
+    if (function == nullptr || function->type() != Function::RGBMatrixType)
+        return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
+
+    RGBMatrix *matrix = qobject_cast<RGBMatrix *>(function);
+
+    if (fixtureGroupId >= 0)
+    {
+        if (doc->fixtureGroup(quint32(fixtureGroupId)) == nullptr)
+        {
+            return Result::failure(
+                QStringLiteral("No fixture group with id %1").arg(fixtureGroupId));
+        }
+        matrix->setFixtureGroup(quint32(fixtureGroupId));
+    }
+
+    if (algorithm.isEmpty() == false)
+    {
+        /* Checked against the list BEFORE asking for an instance, because
+           RGBAlgorithm::algorithm() cannot report a bad name: for anything that
+           is not one of the four built-ins it falls through to
+           RGBScriptsCache::script(), which returns a fresh, empty RGBScript
+           rather than nullptr (engine/src/rgbscriptscache.cpp:42-55).
+         *
+         * So a typo would be accepted, and the matrix would run and emit
+           nothing at all -- with no error anywhere to explain why the lights
+           stayed dark. */
+        if (RGBAlgorithm::algorithms(doc).contains(algorithm) == false)
+        {
+            return Result::failure(QStringLiteral("No algorithm named \"%1\". Available: %2")
+                                       .arg(algorithm,
+                                            RGBAlgorithm::algorithms(doc).join(QStringLiteral(", "))));
+        }
+
+        /* Builds a fresh instance; RGBMatrix takes ownership. */
+        RGBAlgorithm *instance = RGBAlgorithm::algorithm(doc, algorithm);
+        if (instance == nullptr)
+            return Result::failure(QStringLiteral("The engine could not build that algorithm"));
+
+        matrix->setAlgorithm(instance);
+    }
+
+    for (int i = 0; i < colours.count() && i < 5; i++)
+    {
+        const QString &text = colours.at(i);
+        if (text.isEmpty())
+            continue;
+
+        const QColor colour(text);
+        if (colour.isValid() == false)
+        {
+            return Result::failure(
+                QStringLiteral("\"%1\" is not a colour; use #rrggbb").arg(text));
+        }
+        matrix->setColor(i, colour);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setScriptData(Doc *doc, quint32 scriptId, const QString &data)
+{
+    Function *function = doc->function(scriptId);
+    if (function == nullptr || function->type() != Function::ScriptType)
+        return Result::failure(QStringLiteral("No script with id %1").arg(scriptId));
+
+    Script *script = qobject_cast<Script *>(function);
+
+    /* setData parses the program and reports whether it made sense. Accepting
+       a script the engine could not parse would leave a function that silently
+       does nothing when fired. */
+    if (script->setData(data) == false)
+        return Result::failure(QStringLiteral("The engine could not parse that script"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setAudioSource(Doc *doc, quint32 audioId, const QString &fileName,
+                                            double volume)
+{
+    Function *function = doc->function(audioId);
+    if (function == nullptr || function->type() != Function::AudioType)
+        return Result::failure(QStringLiteral("No audio function with id %1").arg(audioId));
+
+    Audio *audio = qobject_cast<Audio *>(function);
+
+    if (fileName.isEmpty() == false)
+    {
+        if (QFileInfo::exists(fileName) == false)
+            return Result::failure(QStringLiteral("No such file: %1").arg(fileName));
+
+        /* Returns false when no decoder plugin can read it. Saying so beats a
+           function that loads, shows a duration of zero and never plays. */
+        if (audio->setSourceFileName(fileName) == false)
+        {
+            return Result::failure(
+                QStringLiteral("No audio decoder can read %1. Loaded decoders handle: %2")
+                    .arg(fileName, doc->audioPluginCache()->getSupportedFormats()
+                                       .join(QStringLiteral(", "))));
+        }
+    }
+
+    if (volume >= 0.0)
+    {
+        if (volume > 1.0)
+            return Result::failure(QStringLiteral("Volume must be between 0 and 1"));
+        audio->setVolume(volume);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setVideoSource(Doc *doc, quint32 videoId, const QString &source)
+{
+    Function *function = doc->function(videoId);
+    if (function == nullptr || function->type() != Function::VideoType)
+        return Result::failure(QStringLiteral("No video function with id %1").arg(videoId));
+
+    if (source.isEmpty())
+        return Result::failure(QStringLiteral("A video needs a source"));
+
+    /* A local path must exist; a URL is taken on trust because resolving it
+       here would block the engine thread on the network. */
+    const bool isUrl = source.contains(QStringLiteral("://"));
+    if (isUrl == false && QFileInfo::exists(source) == false)
+        return Result::failure(QStringLiteral("No such file: %1").arg(source));
+
+    Video *video = qobject_cast<Video *>(function);
+    video->setSourceUrl(source);
+
+    doc->setModified();
+    return Result::success();
+}
+
+
+DocWriter::Result DocWriter::setEfx(Doc *doc, quint32 efxId, const QString &algorithm,
+                                    const QJsonObject &geometry, const QList<quint32> *fixtureIds)
+{
+    Function *function = doc->function(efxId);
+    if (function == nullptr || function->type() != Function::EFXType)
+        return Result::failure(QStringLiteral("No EFX with id %1").arg(efxId));
+
+    EFX *efx = qobject_cast<EFX *>(function);
+
+    if (algorithm.isEmpty() == false)
+    {
+        if (EFX::algorithmList().contains(algorithm) == false)
+        {
+            return Result::failure(QStringLiteral("No EFX algorithm named \"%1\". Available: %2")
+                                       .arg(algorithm,
+                                            EFX::algorithmList().join(QStringLiteral(", "))));
+        }
+        efx->setAlgorithm(EFX::stringToAlgorithm(algorithm));
+    }
+
+    /* Every one of these is clamped by the engine, so out-of-range input would
+       be silently corrected rather than reported. Checking here means a caller
+       that asks for width 500 learns it cannot have it. */
+    const auto ranged = [&](const char *key, int low, int high, QString &error) -> int {
+        if (geometry.contains(QLatin1String(key)) == false)
+            return INT_MIN;
+
+        const int value = geometry.value(QLatin1String(key)).toInt();
+        if (value < low || value > high)
+        {
+            error = QStringLiteral("%1 must be between %2 and %3")
+                        .arg(QLatin1String(key)).arg(low).arg(high);
+        }
+        return value;
+    };
+
+    QString error;
+    const int width      = ranged("width",       0, 127, error);
+    const int height     = ranged("height",      0, 127, error);
+    const int xOffset    = ranged("xOffset",     0, 255, error);
+    const int yOffset    = ranged("yOffset",     0, 255, error);
+    const int rotation   = ranged("rotation",    0, 359, error);
+    const int startOff   = ranged("startOffset", 0, 359, error);
+    const int xFrequency = ranged("xFrequency",  0,   5, error);
+    const int yFrequency = ranged("yFrequency",  0,   5, error);
+    const int xPhase     = ranged("xPhase",      0, 359, error);
+    const int yPhase     = ranged("yPhase",      0, 359, error);
+
+    if (error.isEmpty() == false)
+        return Result::failure(error);
+
+    if (width      != INT_MIN) efx->setWidth(width);
+    if (height     != INT_MIN) efx->setHeight(height);
+    if (xOffset    != INT_MIN) efx->setXOffset(xOffset);
+    if (yOffset    != INT_MIN) efx->setYOffset(yOffset);
+    if (rotation   != INT_MIN) efx->setRotation(rotation);
+    if (startOff   != INT_MIN) efx->setStartOffset(startOff);
+    if (xFrequency != INT_MIN) efx->setXFrequency(xFrequency);
+    if (yFrequency != INT_MIN) efx->setYFrequency(yFrequency);
+    if (xPhase     != INT_MIN) efx->setXPhase(xPhase);
+    if (yPhase     != INT_MIN) efx->setYPhase(yPhase);
+
+    if (geometry.contains(QStringLiteral("relative")))
+        efx->setIsRelative(geometry.value(QStringLiteral("relative")).toBool());
+
+    if (fixtureIds != nullptr)
+    {
+        for (quint32 id : *fixtureIds)
+        {
+            if (doc->fixture(id) == nullptr)
+                return Result::failure(QStringLiteral("No fixture with id %1").arg(id));
+        }
+
+        /* Stopped and waited for before the list is touched. EFX::write() walks
+           m_fixtures on the timer thread with no lock, so rebuilding it live
+           frees objects out from under it. */
+        if (efx->isRunning() && efx->stopAndWait() == false)
+        {
+            return Result::failure(
+                QStringLiteral("\"%1\" did not stop in time; refusing to change its fixtures while it runs")
+                    .arg(efx->name()));
+        }
+
+        for (EFXFixture *existing : efx->fixtures())
+            efx->removeFixture(existing->head().fxi, existing->head().head);
+
+        for (quint32 id : *fixtureIds)
+        {
+            EFXFixture *member = new EFXFixture(efx);
+            member->setHead(GroupHead(id, 0));
+
+            if (efx->addFixture(member) == false)
+                delete member;   // already present; addFixture refused it
+        }
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setSequenceScene(Doc *doc, quint32 sequenceId, quint32 sceneId)
+{
+    Function *function = doc->function(sequenceId);
+    if (function == nullptr || function->type() != Function::SequenceType)
+        return Result::failure(QStringLiteral("No sequence with id %1").arg(sequenceId));
+
+    const Function *scene = doc->function(sceneId);
+    if (scene == nullptr || scene->type() != Function::SceneType)
+        return Result::failure(QStringLiteral("No scene with id %1").arg(sceneId));
+
+    Sequence *sequence = qobject_cast<Sequence *>(function);
+
+    /* The bound scene is structural: a sequence's steps hold values that only
+       mean anything against it. Rebinding a running one would have it stepping
+       through values addressed at a scene it no longer drives. */
+    if (sequence->isRunning() && sequence->stopAndWait() == false)
+    {
+        return Result::failure(
+            QStringLiteral("\"%1\" did not stop in time; refusing to rebind it while it runs")
+                .arg(sequence->name()));
+    }
+
+    sequence->setBoundSceneID(sceneId);
 
     doc->setModified();
     return Result::success();
