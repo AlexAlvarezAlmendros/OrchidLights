@@ -43,9 +43,18 @@
 struct VcWidget
 {
     QString type;        //!< frame, button, slider, label, speeddial, ...
+
+    /** QLC+ omits the ID attribute entirely rather than writing a sentinel, so
+     *  "absent" and "zero" are different things and zero is a real id. */
+    bool hasId = false;
     quint32 id = 0;
+
     QString caption;
     QRect geometry;
+
+    /** Which page of a multipage frame this widget belongs to. Written only
+     *  when non-zero; ignoring it draws every page superimposed. */
+    int page = 0;
 
     QString background;  //!< "#rrggbb", empty when the widget has no colour set
     QString foreground;
@@ -64,6 +73,15 @@ struct VcWidget
 
     /** Fixture and channel pairs a level slider writes to. */
     QVector<QPair<quint32, quint32>> levelChannels;
+
+    /** Cue list: the chaser it steps through. A cue list is a chaser plus
+     *  next/previous, which is how a show is actually run. */
+    bool hasChaser = false;
+    quint32 chaserId = 0;
+
+    /** Clock: "stopwatch", "countdown" or "clock", and its target time. */
+    QString clockType;
+    int clockTime = 0;
 
     /* Speed dials. Each entry names a function and, for each of its three
        speeds, a multiplier index into QLC+'s table. Index 0 is None, meaning
