@@ -24,6 +24,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QHttpServerRequest>
+#include <QUrlQuery>
 #include <QFileInfo>
 #include <QDir>
 
@@ -34,6 +35,11 @@
 #include "virtualconsole.h"
 #include "consolelayout.h"
 #include "docwriter.h"
+#include "qlcfixturedefcache.h"
+#include "qlcfixturemode.h"
+#include "qlcfixturedef.h"
+#include "fixturegroup.h"
+#include "fixture.h"
 #include "installpaths.h"
 #include "qlcconfig.h"
 
@@ -250,9 +256,14 @@ void ApiServer::registerRoutes()
      * observes the result through GET /functions. */
     m_server->route("/api/v1/functions/<arg>/start",
                     QHttpServerRequest::Method::Post,
-                    [doc, denied](quint32 id, const QHttpServerRequest &request) {
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
 
         Function *function = doc->function(id);
         if (function == nullptr)
@@ -267,9 +278,14 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/functions/<arg>/stop",
                     QHttpServerRequest::Method::Post,
-                    [doc, denied](quint32 id, const QHttpServerRequest &request) {
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
 
         Function *function = doc->function(id);
         if (function == nullptr)
@@ -300,6 +316,312 @@ void ApiServer::registerRoutes()
 
     /* What a universe can be patched to. Without this the operator would be
        guessing at plugin and line names, which the writer then refuses. */
+    /* The fixture library. 1735 definitions is far too many to hand over in one
+       response, so this answers manufacturers, then models, then modes -- the
+       same three steps an operator takes when patching. */
+    m_server->route("/api/v1/library", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QString search = QUrlQuery(request.url().query())
+                                   .queryItemValue(QStringLiteral("q")).trimmed();
+
+        QJsonArray manufacturers;
+        for (const QString &name : doc->fixtureDefCache()->manufacturers())
+        {
+            if (search.isEmpty() == false
+                && name.contains(search, Qt::CaseInsensitive) == false)
+                continue;
+            manufacturers.append(name);
+        }
+
+        QJsonObject body;
+        body["manufacturers"] = manufacturers;
+        body["total"] = doc->fixtureDefCache()->manufacturers().count();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/library/<arg>", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &manufacturer, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QStringList models = doc->fixtureDefCache()->models(manufacturer);
+        if (models.isEmpty())
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such manufacturer"));
+
+        QJsonArray array;
+        for (const QString &model : models)
+            array.append(model);
+
+        QJsonObject body;
+        body["manufacturer"] = manufacturer;
+        body["models"] = array;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/library/<arg>/<arg>", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &manufacturer, const QString &model,
+                                  const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QLCFixtureDef *definition = doc->fixtureDefCache()->fixtureDef(manufacturer, model);
+        if (definition == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such fixture definition"));
+
+        QJsonArray modes;
+        for (QLCFixtureMode *mode : definition->modes())
+        {
+            QJsonObject entry;
+            entry["name"] = mode->name();
+            entry["channels"] = mode->channels().count();
+            modes.append(entry);
+        }
+
+        QJsonObject body;
+        body["manufacturer"] = definition->manufacturer();
+        body["model"] = definition->model();
+        body["type"] = definition->type();
+        body["modes"] = modes;
+        return QHttpServerResponse(body);
+    });
+
+    /* The 512 channels of a universe and who holds them. This is the view that
+       makes a clash obvious before it becomes a light that will not respond. */
+    m_server->route("/api/v1/universes/<arg>/map", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const int index = rawIndex.toInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a number"));
+
+        const int count = int(doc->inputOutputMap()->universesCount());
+        if (index < 1 || index > count)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("Universe %1 does not exist; this project has %2")
+                                 .arg(index).arg(count));
+        }
+
+        QJsonArray occupants;
+        int used = 0;
+
+        for (const Fixture *fixture : doc->fixtures())
+        {
+            if (int(fixture->universe()) != index - 1)
+                continue;
+
+            QJsonObject entry;
+            entry["id"] = qint64(fixture->id());
+            entry["name"] = fixture->name();
+            entry["address"] = qint64(fixture->address()) + 1;
+            entry["channels"] = qint64(fixture->channels());
+            occupants.append(entry);
+            used += int(fixture->channels());
+        }
+
+        QJsonObject body;
+        body["universe"] = index;
+        body["used"] = used;
+        body["free"] = 512 - used;
+        body["fixtures"] = occupants;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/fixtures", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        DocWriter::FixturePlacement placement;
+        placement.manufacturer = body.value("manufacturer").toString();
+        placement.model = body.value("model").toString();
+        placement.mode = body.value("mode").toString();
+        placement.name = body.value("name").toString();
+        placement.universe = body.value("universe").toInt(1);
+        placement.address = body.value("address").toInt(1);
+        placement.quantity = body.value("quantity").toInt(1);
+        placement.gap = body.value("gap").toInt(0);
+
+        QList<quint32> ids;
+        const DocWriter::Result result =
+            m_engine->withFixturesLocked([&] { return DocWriter::addFixtures(doc, placement, ids); });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonArray created;
+        for (quint32 id : ids)
+            created.append(qint64(id));
+
+        QJsonObject response;
+        response["created"] = created;
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const DocWriter::Result result =
+            m_engine->withFixturesLocked([&] { return DocWriter::removeFixture(doc, id); });
+        if (result.ok == false)
+            return jsonError(StatusCode::NotFound, result.error);
+
+        QJsonObject body;
+        body["removed"] = qint64(id);
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Patch,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const QJsonObject patch = QJsonDocument::fromJson(request.body()).object();
+
+        const DocWriter::Result result = m_engine->withFixturesLocked([&] {
+            return DocWriter::updateFixture(doc, id, patch.value("name").toString(),
+                                            patch.value("universe").toInt(-1),
+                                            patch.value("address").toInt(-1));
+        });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        const Fixture *fixture = doc->fixture(id);
+        return QHttpServerResponse(fixture ? JsonView::fixture(fixture) : QJsonObject());
+    });
+
+    m_server->route("/api/v1/fixture-groups", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray groups;
+        for (const FixtureGroup *group : doc->fixtureGroups())
+        {
+            QJsonArray members;
+            for (quint32 id : group->fixtureList())
+                members.append(qint64(id));
+
+            QJsonObject entry;
+            entry["id"] = qint64(group->id());
+            entry["name"] = group->name();
+            entry["fixtures"] = members;
+            groups.append(entry);
+        }
+
+        return QHttpServerResponse(groups);
+    });
+
+    m_server->route("/api/v1/fixture-groups", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        QList<quint32> members;
+        for (const QJsonValue &value : body.value("fixtures").toArray())
+        {
+            if (value.isDouble() == false || value.toInt(-1) < 0)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Fixture ids must be non-negative numbers"));
+            }
+            members.append(quint32(value.toInt()));
+        }
+
+        quint32 groupId = 0;
+        const DocWriter::Result result =
+            DocWriter::addFixtureGroup(doc, body.value("name").toString(), members, groupId);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(groupId);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/fixture-groups/<arg>", QHttpServerRequest::Method::Patch,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Group id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        /* Absent is not empty. A PATCH that forgot the key, or a malformed
+           body, would otherwise read as "remove every fixture from this
+           group". */
+        if (body.value("fixtures").isArray() == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send a \"fixtures\" array. To empty the group, "
+                                            "send an empty one."));
+        }
+
+        QList<quint32> members;
+        for (const QJsonValue &value : body.value("fixtures").toArray())
+        {
+            if (value.isDouble() == false || value.toInt(-1) < 0)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Fixture ids must be non-negative numbers"));
+            }
+            members.append(quint32(value.toInt()));
+        }
+
+        const DocWriter::Result result = DocWriter::setFixtureGroupMembers(doc, id, members);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        response["fixtures"] = body.value("fixtures");
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/fixture-groups/<arg>", QHttpServerRequest::Method::Delete,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Group id must be a number"));
+
+        const DocWriter::Result result = DocWriter::removeFixtureGroup(doc, id);
+        if (result.ok == false)
+            return jsonError(StatusCode::NotFound, result.error);
+
+        QJsonObject response;
+        response["removed"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
     m_server->route("/api/v1/io", QHttpServerRequest::Method::Get,
                     [doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
@@ -352,9 +674,14 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Delete,
-                    [doc, denied, writeResult](int index, const QHttpServerRequest &request) {
+                    [doc, denied, writeResult](const QString &rawIndex, const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
+
+        bool ok = false;
+        const int index = rawIndex.toInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a number"));
 
         QJsonObject body;
         body["removed"] = index;
@@ -362,9 +689,14 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Patch,
-                    [doc, denied, writeResult](int index, const QHttpServerRequest &request) {
+                    [doc, denied, writeResult](const QString &rawIndex, const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
+
+        bool ok = false;
+        const int index = rawIndex.toInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a number"));
 
         const QJsonObject patch = QJsonDocument::fromJson(request.body()).object();
 

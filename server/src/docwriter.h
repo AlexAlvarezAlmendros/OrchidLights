@@ -72,6 +72,45 @@ namespace DocWriter
 
     Result setInputPatch(Doc *doc, int index, const QString &pluginName,
                          const QString &inputName, const QString &profileName);
+
+    /* ---- Fixtures ------------------------------------------------------ */
+
+    struct FixturePlacement
+    {
+        QString manufacturer;
+        QString model;
+        QString mode;
+        QString name;        //!< empty to use the model name
+        int universe = 1;    //!< 1-based, as everywhere on the wire
+        int address = 1;     //!< 1-based
+        int quantity = 1;
+        int gap = 0;         //!< channels left between consecutive fixtures
+    };
+
+    /**
+     * Patch one or more fixtures.
+     *
+     * Refuses the whole batch if any of it would overlap something already
+     * patched, or run past channel 512. Partially applying a patch is worse
+     * than refusing it: the operator ends up with some fixtures placed and no
+     * clear idea which.
+     *
+     * On success, ids holds the new fixture ids in order.
+     */
+    Result addFixtures(Doc *doc, const FixturePlacement &placement, QList<quint32> &ids);
+
+    Result removeFixture(Doc *doc, quint32 fixtureId);
+
+    /** Move or rename a fixture. A universe or address of -1 leaves it alone. */
+    Result updateFixture(Doc *doc, quint32 fixtureId, const QString &name,
+                         int universe, int address);
+
+    /* ---- Fixture groups ------------------------------------------------ */
+
+    Result addFixtureGroup(Doc *doc, const QString &name, const QList<quint32> &fixtureIds,
+                           quint32 &groupId);
+    Result removeFixtureGroup(Doc *doc, quint32 groupId);
+    Result setFixtureGroupMembers(Doc *doc, quint32 groupId, const QList<quint32> &fixtureIds);
 }
 
 #endif // DOCWRITER_H

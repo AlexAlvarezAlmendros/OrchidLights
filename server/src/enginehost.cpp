@@ -198,6 +198,18 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
     m_doc->inputOutputMap()->startUniverses();
     m_doc->masterTimer()->start();
 
+    if (ok == false)
+    {
+        /* The old show is already gone from memory -- clearContents() ran
+           before the parse. Keeping the old path would leave a daemon holding
+           an empty document that still believes it is that project, and the
+           next save would write the emptiness over the real file. Forgetting
+           the path makes the next save refuse instead. */
+        m_projectPath.clear();
+        m_preserved = WorkspaceLoader::Preserved();
+        teachSliders();
+    }
+
     if (ok)
     {
         m_projectPath = QFileInfo(fileName).absoluteFilePath();
@@ -321,6 +333,28 @@ QVector<ConsoleLayout::Page> EngineHost::layout() const
 
 void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
 {
+    /* Merge by page, do not replace wholesale. The interface only ever sends
+       the page being edited, so replacing everything silently dropped the
+       arrangement of every other page in the console. */
+    QVector<ConsoleLayout::Page> merged;
+    ConsoleLayout::parse(m_preserved.sections, merged);
+
+    for (const ConsoleLayout::Page &page : pages)
+    {
+        bool replaced = false;
+        for (ConsoleLayout::Page &existing : merged)
+        {
+            if (existing.id == page.id)
+            {
+                existing = page;
+                replaced = true;
+                break;
+            }
+        }
+        if (replaced == false)
+            merged.append(page);
+    }
+
     /* The layout lives among the preserved sections, which is what carries it
        through a save. Replacing means dropping the copy that was read in --
        otherwise the file would grow a second, stale arrangement every time. */
@@ -330,8 +364,8 @@ void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
             m_preserved.sections.removeAt(i);
     }
 
-    if (pages.isEmpty() == false)
-        m_preserved.sections.append(ConsoleLayout::toXml(pages));
+    if (merged.isEmpty() == false)
+        m_preserved.sections.append(ConsoleLayout::toXml(merged));
 
     m_doc->setModified();
 }
