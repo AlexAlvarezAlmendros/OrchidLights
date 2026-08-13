@@ -29,11 +29,43 @@ plan por fases.
 |---|---|---|
 | F0 | Fundación del fork: rebranding, poda del build, empaquetado, CI | ✅ |
 | F1 | Daemon headless + API REST/WebSocket | ⬜ |
-| F2 | Interfaz web + Virtual Console en directo | ⬜ |
+| F2 | Interfaz web + Virtual Console en directo | 🔨 en curso |
 | F3 | Patch y gestión de fixtures | ⬜ |
 | F4 | Editores de escenas, chasers, EFX y matrices | ⬜ |
 | F5 | Show Manager y previsualización 2D | ⬜ |
 | F6 | 3D, PWA, multiusuario | ⬜ |
+
+## La interfaz
+
+Abre `http://127.0.0.1:9998` y el daemon sirve su propia interfaz, en el mismo
+origen y el mismo puerto que el API.
+
+Si el proyecto trae un Virtual Console, se renderiza. Y no escalando el lienzo:
+QLC+ coloca cada widget en una posición absoluta sobre el lienzo en que se
+diseñó el show — 1920×1080 normalmente — y reducir eso a un móvil de 390 px da
+botones de 30 px que nadie acierta a oscuras. La geometría se lee como
+**intención**: lo que el diseñador puso en paralelo es una fila, las filas
+mantienen su orden, y cada una refluye al ancho real de la pantalla.
+
+Las filas se agrupan por **alineación del borde superior, no por solapamiento**.
+Un fader de 400 px cruza todas las bandas de botones que tiene al lado, así que
+bajo una regla de solapamiento se los traga a todos y el layout colapsa.
+
+Dos temas, ambos oscuros. **`blackout`** es rojo y ámbar a baja luminancia para
+usar durante un pase: la visión nocturna tarda veinte minutos en recuperarse y
+una pantalla blanca entre cajas le cuesta el escenario al operador. Anula los
+colores del show, que se eligieron para focos y no para una pantalla que se mira
+a oscuras.
+
+Todo control mide **44 px como mínimo**, porque esto se usa sin mirar. Los
+faders, XY pads y cue lists todavía no tienen control propio: salen en gris
+punteado y etiquetados, porque ocultarlos haría parecer la consola completa
+cuando no lo está.
+
+```bash
+cd web && pnpm install && pnpm build   # el daemon la sirve si existe
+cd web && pnpm dev                     # desarrollo, con proxy al daemon
+```
 
 ## Arquitectura
 
