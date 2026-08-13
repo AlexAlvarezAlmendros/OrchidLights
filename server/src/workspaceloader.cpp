@@ -23,6 +23,7 @@
 #include <QFileInfo>
 
 #include "workspaceloader.h"
+#include "xmltree.h"
 #include "qlcconfig.h"
 #include "qlcfile.h"
 #include "doc.h"
@@ -93,12 +94,25 @@ namespace
         return xml;
     }
 
-    /** Re-emit a captured fragment. Round-tripped through a reader rather than
-        pasted as text, so a fragment we somehow mangled fails here instead of
-        producing a project file that will not open. */
+    /**
+     * Re-emit a captured fragment, by way of the node tree.
+     *
+     * Going through XmlTree rather than straight from the string is what makes
+     * the tree load-bearing: it is the same code path that widget editing will
+     * use, so every save exercises it against every real project. If the tree
+     * ever stops being faithful, a round trip stops being identical and the
+     * test catches it -- rather than the first person to edit a widget.
+     *
+     * Parsed back before writing, so a fragment we somehow mangled fails here
+     * instead of producing a project file that will not open.
+     */
     bool writeFragment(QXmlStreamWriter &writer, const QString &xml)
     {
-        QXmlStreamReader reader(xml);
+        XmlNode node;
+        if (XmlTree::parse(xml, node) == false)
+            return false;
+
+        QXmlStreamReader reader(XmlTree::toXml(node));
 
         if (reader.readNextStartElement() == false)
             return false;

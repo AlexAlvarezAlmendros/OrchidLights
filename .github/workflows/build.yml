@@ -196,6 +196,12 @@ jobs:
       - name: Smoke test - saving a project preserves what we do not model
         run: ./server/test/roundtrip-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      # The property everything in F6 rests on: a Virtual Console goes through
+      # the node tree and comes back identical. If this fails, editing widgets
+      # stops being safe.
+      - name: Smoke test - the XML tree round-trips every project
+        run: ./server/test/xmltree-roundtrip.sh orchidlightsd
+
       - name: Smoke test - an unresolvable fixture is reported, not swallowed
         run: |
           set -euo pipefail

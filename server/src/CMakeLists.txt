@@ -14,6 +14,7 @@ add_executable(${module_name}
     levelsource.cpp levelsource.h
     livefeed.cpp livefeed.h
     workspaceloader.cpp workspaceloader.h
+    xmltree.cpp xmltree.h
 )
 
 target_include_directories(${module_name} PRIVATE
