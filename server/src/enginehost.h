@@ -110,6 +110,10 @@ public:
     QStringList loadedPlugins() const { return m_loadedPlugins; }
     QString pluginPath() const { return m_pluginPath; }
 
+    /** Raw XML of the project sections this daemon does not model. The
+     *  Virtual Console is parsed out of here for display, read only. */
+    QStringList preservedSections() const { return m_preserved.sections; }
+
     /** Anything the engine could not resolve while loading the project. */
     QString projectErrors() const;
 

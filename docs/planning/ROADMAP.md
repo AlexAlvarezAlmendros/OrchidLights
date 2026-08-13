@@ -183,11 +183,26 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - [ ] **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador.
 - [ ] **Criterio de éxito: disparar el show del P62 Club desde `curl`/`wscat`, con luz real en la sala, sin abrir ninguna GUI.**
 
-### F2 — Shell web + Virtual Console en directo *(dolor #1)*
-- SPA con el layout responsive y los dos temas.
-- Grid de VC alimentado por `/vc.json` (ya existe upstream): botones, faders, cuelist, speed dial.
-- Presupuesto de latencia: **≤ 50 ms de *tap* a DMX**.
-- Editor de layout drag & drop **sobre grid, no sobre píxeles absolutos** — esto es exactamente lo que hace que un VC deje de romperse al cambiar de pantalla.
+### F2 — Shell web + Virtual Console en directo *(dolor #1)* 🔨
+
+**Hecho:**
+
+- [x] SPA React 19 + Vite + TS estricto + Biome + Vitest, servida por el daemon desde su mismo origen y puerto.
+- [x] `server/src/virtualconsole.*`: el VC se parsea del **mismo XML que ya preservamos**, en solo lectura, y se expone en `GET /api/v1/vc` con geometría, colores y referencias a función.
+- [x] **Reflow responsive real.** La geometría se lee como intención, no como coordenadas. Contra la consola del P62 (31 widgets) recupera las bandas del diseñador y las presenta a 2 columnas en móvil y 8 en escritorio.
+- [x] Comandos por **WebSocket, no REST** — presupuesto de 50 ms de tap a DMX; el estado vuelve por el mismo canal, sin polling.
+- [x] Dos temas oscuros, incluido **blackout-safe** (rojo/ámbar a baja luminancia), recordado entre recargas.
+- [x] Objetivos táctiles ≥ 44 px. Widgets sin control propio en gris punteado y etiquetados.
+- [x] CI: lint, typecheck, tests y build de la web antes de CMake; y comprobación de que **el AppImage lleva la interfaz dentro** — sin eso el único artefacto que alguien se descarga arrancaba sin UI.
+
+> **La regla que costó un test.** Las filas se agrupan por **alineación del borde superior, no por solapamiento**. El solapamiento es la opción obvia y colapsa el layout: un fader de 400 px cruza todas las bandas de botones que tiene al lado y se las traga a una sola fila. El test lo afirma explícitamente porque es el bug que alguien reintroducirá.
+
+**Pendiente:**
+
+- [ ] Control de faders, cue lists, XY pads y speed dial.
+- [ ] Editor de layout drag & drop **sobre grid**, guardado en una sección propia del `.qxw` para no tocar el `<VirtualConsole>` de QLC+.
+- [ ] Medir de verdad el presupuesto de **≤ 50 ms de tap a DMX**.
+- [ ] Modo operador en móvil sin edición posible, y PWA instalable.
 
 ### F3 — Patch y gestión de fixtures *(dolor #2)*
 - Buscador de la librería de 1.735 perfiles con filtros por fabricante, tipo y número de canales.

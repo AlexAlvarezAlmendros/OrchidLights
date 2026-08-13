@@ -23,6 +23,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 
+struct VcWidget;
 class Fixture;
 class Function;
 class Universe;
@@ -48,6 +49,10 @@ namespace JsonView
     QJsonArray fixtures(const Doc *doc);
     QJsonArray functions(const Doc *doc);
     QJsonArray universes(const Doc *doc);
+
+    /** The Virtual Console tree, geometry included: the interface needs the
+        original coordinates to group widgets into rows and reflow them. */
+    QJsonObject vcWidget(const VcWidget &widget);
 }
 
 #endif // JSONVIEW_H

@@ -50,7 +50,8 @@ coverage/
 
 # CMake build
 CMakeLists.txt.user
-build*
+build
+build-*
 
 # AI and agents
 .codex
