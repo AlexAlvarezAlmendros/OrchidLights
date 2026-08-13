@@ -262,6 +262,30 @@ QString EngineHost::resolveProjectName(const QString &name) const
     return QDir(m_projectsDirectory).absoluteFilePath(name);
 }
 
+QVector<ConsoleLayout::Page> EngineHost::layout() const
+{
+    QVector<ConsoleLayout::Page> pages;
+    ConsoleLayout::parse(m_preserved.sections, pages);
+    return pages;
+}
+
+void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
+{
+    /* The layout lives among the preserved sections, which is what carries it
+       through a save. Replacing means dropping the copy that was read in --
+       otherwise the file would grow a second, stale arrangement every time. */
+    for (int i = m_preserved.sections.count() - 1; i >= 0; i--)
+    {
+        if (ConsoleLayout::isLayoutSection(m_preserved.sections.at(i)))
+            m_preserved.sections.removeAt(i);
+    }
+
+    if (pages.isEmpty() == false)
+        m_preserved.sections.append(ConsoleLayout::toXml(pages));
+
+    m_doc->setModified();
+}
+
 QString EngineHost::projectErrors() const
 {
     return m_doc == nullptr ? QString() : m_doc->errorLog();

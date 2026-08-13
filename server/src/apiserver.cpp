@@ -22,6 +22,8 @@
 #include <QHostAddress>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QHttpServerRequest>
 #include <QFileInfo>
 #include <QDir>
 
@@ -30,6 +32,7 @@
 #include "jsonview.h"
 #include "livefeed.h"
 #include "virtualconsole.h"
+#include "consolelayout.h"
 #include "installpaths.h"
 #include "qlcconfig.h"
 
@@ -140,7 +143,12 @@ void ApiServer::registerRoutes()
         return m_auth.authorize(request) == false;
     };
 
-    /* The web interface, served from the same origin as the API so a browser
+    /* Read-only routes are pinned to GET. A route registered without a method
+       answers every verb, which is not merely untidy: it is how the layout's
+       GET handler quietly swallowed its own PUT, returning the old value and
+       persisting nothing.
+
+       The web interface, served from the same origin as the API so a browser
        needs no CORS and the operator needs one URL.
      *
      * Deliberately not a catch-all route: /<arg> would also swallow /api and
@@ -183,7 +191,7 @@ void ApiServer::registerRoutes()
         });
     }
 
-    m_server->route("/api/v1/status", [this, doc, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/status", QHttpServerRequest::Method::Get, [this, doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
 
@@ -212,19 +220,19 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/fixtures", [doc, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/fixtures", QHttpServerRequest::Method::Get, [doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
         return QHttpServerResponse(JsonView::fixtures(doc));
     });
 
-    m_server->route("/api/v1/functions", [doc, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/functions", QHttpServerRequest::Method::Get, [doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
         return QHttpServerResponse(JsonView::functions(doc));
     });
 
-    m_server->route("/api/v1/universes", [doc, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/universes", QHttpServerRequest::Method::Get, [doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
         return QHttpServerResponse(JsonView::universes(doc));
@@ -275,7 +283,7 @@ void ApiServer::registerRoutes()
 
     /* Read only, and parsed out of the very XML we preserve, so serving it
        cannot disturb what goes back into the file. */
-    m_server->route("/api/v1/vc", [this, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/vc", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
 
@@ -289,7 +297,44 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(JsonView::vcWidget(root));
     });
 
-    m_server->route("/api/v1/project", [this, doc, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/layout", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        return QHttpServerResponse(ConsoleLayout::toJson(m_engine->layout()));
+    });
+
+    m_server->route("/api/v1/layout", QHttpServerRequest::Method::Put,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(request.body(), &parseError);
+        if (parseError.error != QJsonParseError::NoError || document.isObject() == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Expected a JSON object"));
+        }
+
+        QVector<ConsoleLayout::Page> pages;
+        QString errorMessage;
+        if (ConsoleLayout::fromJson(document.object(), pages, errorMessage) == false)
+            return jsonError(StatusCode::BadRequest, errorMessage);
+
+        m_engine->setLayout(pages);
+
+        /* Held in memory until the project is saved, like every other edit. An
+           arrangement that wrote itself to disk on every drag would be a
+           surprise the first time someone rearranged a show they did not mean
+           to change. */
+        QJsonObject body = ConsoleLayout::toJson(pages);
+        body["saved"] = false;
+        body["note"] = QStringLiteral("Kept in memory; POST /api/v1/project/save to write it.");
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project", QHttpServerRequest::Method::Get, [this, doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
 
@@ -301,7 +346,7 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/projects", [this, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/projects", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
 

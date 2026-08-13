@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FunctionState, api } from './api'
-import { type VcWidget, groupIntoRows, growFactor, isContainer, pagesOf } from './layout'
+import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
+import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './layout'
 import { type Connection, Live } from './live'
 
 type Theme = 'stage' | 'blackout'
@@ -17,6 +18,10 @@ export function App() {
   )
   const [error, setError] = useState<string | null>(null)
   const [levels, setLevels] = useState<Record<number, number>>({})
+  const [editing, setEditing] = useState(false)
+  const [layout, setLayout] = useState<LayoutRows | null>(null)
+  const [dragging, setDragging] = useState<number | null>(null)
+  const [dirty, setDirty] = useState(false)
 
   const live = useRef<Live | null>(null)
 
@@ -48,6 +53,10 @@ export function App() {
       .catch(() => setVc(null))
 
     api.functions().then(setFunctions).catch(setErrorMessage)
+    api
+      .layout()
+      .then((l) => setLayout(l.pages[0]?.rows ?? null))
+      .catch(() => setLayout(null))
 
     return () => feed.close()
 
@@ -77,6 +86,26 @@ export function App() {
 
   const pages = vc ? pagesOf(vc) : []
   const current = pages[page] ?? pages[0]
+  const rows = current ? resolveRows(current.children ?? [], layout) : []
+
+  const drop = useCallback(
+    (rowIndex: number, beforeId: number | null) => {
+      if (dragging === null) return
+      setLayout((currentLayout) =>
+        moveWidget(currentLayout ?? rowsToLayout(rows), dragging, rowIndex, beforeId),
+      )
+      setDragging(null)
+      setDirty(true)
+    },
+    [dragging, rows],
+  )
+
+  const persist = useCallback(async () => {
+    const pageId = current?.id ?? 0
+    await api.putLayout({ pages: [{ id: pageId, rows: layout ?? rowsToLayout(rows) }] })
+    await api.saveProject()
+    setDirty(false)
+  }, [current, layout, rows])
 
   return (
     <div className="app">
@@ -98,6 +127,16 @@ export function App() {
         >
           {theme === 'stage' ? '🌙' : '☀'}
         </button>
+        {vc && (
+          <button type="button" onClick={() => setEditing(!editing)} aria-pressed={editing}>
+            {editing ? 'Listo' : 'Ordenar'}
+          </button>
+        )}
+        {editing && dirty && (
+          <button type="button" onClick={persist}>
+            Guardar
+          </button>
+        )}
         <button type="button" className="danger" onClick={() => api.blackout(true)}>
           BLACKOUT
         </button>
@@ -118,11 +157,15 @@ export function App() {
 
         {current ? (
           <Surface
-            widget={current}
+            rows={rows}
             running={running}
             onToggle={toggle}
             levels={levels}
             onLevel={setLevel}
+            editing={editing}
+            dragging={dragging}
+            onDragStart={setDragging}
+            onDrop={drop}
           />
         ) : (
           <FunctionList functions={functions} onToggle={toggle} />
@@ -133,43 +176,91 @@ export function App() {
 }
 
 function Surface({
-  widget,
+  rows,
   running,
   onToggle,
   levels,
   onLevel,
+  editing,
+  dragging,
+  onDragStart,
+  onDrop,
 }: {
-  widget: VcWidget
+  rows: Row[]
   running: Set<number>
   onToggle: (id: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
+  editing: boolean
+  dragging: number | null
+  onDragStart: (id: number | null) => void
+  onDrop: (rowIndex: number, beforeId: number | null) => void
 }) {
-  const children = widget.children ?? []
-  if (children.length === 0) {
+  if (rows.length === 0) {
     return <p className="empty">Esta página está vacía.</p>
   }
 
-  const rows = groupIntoRows(children)
-
   return (
     <>
-      {rows.map((row) => (
-        <div className="row" key={`${row.top}-${row.widgets[0]?.id}`}>
+      {rows.map((row, rowIndex) => (
+        <div className="row" key={`${rowIndex}-${row.widgets[0]?.id}`} data-editing={editing}>
           {row.widgets.map((child) => (
-            <Widget
-              key={child.id}
-              widget={child}
-              grow={growFactor(child, row)}
-              running={running}
-              onToggle={onToggle}
-              levels={levels}
-              onLevel={onLevel}
-            />
+            <Fragment key={child.id}>
+              {editing && dragging !== null && dragging !== child.id && (
+                <DropSlot onDrop={() => onDrop(rowIndex, child.id)} />
+              )}
+              <Widget
+                widget={child}
+                grow={growFactor(child, row)}
+                running={running}
+                onToggle={onToggle}
+                levels={levels}
+                onLevel={onLevel}
+                editing={editing}
+                dragged={dragging === child.id}
+                onDragStart={onDragStart}
+              />
+            </Fragment>
           ))}
+          {editing && dragging !== null && <DropSlot onDrop={() => onDrop(rowIndex, null)} />}
         </div>
       ))}
+
+      {editing && dragging !== null && (
+        <div className="row">
+          <DropSlot wide onDrop={() => onDrop(rows.length, null)} label="Nueva fila" />
+        </div>
+      )}
     </>
+  )
+}
+
+/**
+ * A place a dragged widget can land.
+ *
+ * pointerup rather than a drag event: HTML5 drag and drop does not fire on
+ * touch at all, and this is meant to be used on a phone.
+ */
+function DropSlot({
+  onDrop,
+  wide,
+  label,
+}: {
+  onDrop: () => void
+  wide?: boolean
+  label?: string
+}) {
+  return (
+    <button
+      type="button"
+      className="dropslot"
+      data-wide={wide === true}
+      onPointerUp={onDrop}
+      onClick={onDrop}
+      aria-label={label ?? 'Soltar aquí'}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -180,6 +271,9 @@ function Widget({
   onToggle,
   levels,
   onLevel,
+  editing,
+  dragged,
+  onDragStart,
 }: {
   widget: VcWidget
   grow: number
@@ -187,12 +281,31 @@ function Widget({
   onToggle: (id: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
+  editing: boolean
+  dragged: boolean
+  onDragStart: (id: number | null) => void
 }) {
   const style = {
     '--grow': grow,
     ...(widget.background ? { '--widget-bg': widget.background } : {}),
     ...(widget.foreground ? { color: widget.foreground } : {}),
   } as React.CSSProperties
+
+  // While arranging, every widget is a handle and nothing fires its function:
+  // moving a button must never also press it.
+  if (editing) {
+    return (
+      <button
+        type="button"
+        className={`widget ${widget.type} arranging`}
+        style={style}
+        data-dragged={dragged}
+        onPointerDown={() => onDragStart(dragged ? null : widget.id)}
+      >
+        {widget.caption || widget.type}
+      </button>
+    )
+  }
 
   if (widget.type === 'label') {
     return <div className="widget label">{widget.caption}</div>

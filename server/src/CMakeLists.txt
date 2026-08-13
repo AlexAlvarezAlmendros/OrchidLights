@@ -4,6 +4,7 @@ add_executable(${module_name}
     main.cpp
     apiauth.cpp apiauth.h
     apiserver.cpp apiserver.h
+    consolelayout.cpp consolelayout.h
     enginehost.cpp enginehost.h
     fixturelibrary.cpp fixturelibrary.h
     installpaths.cpp installpaths.h

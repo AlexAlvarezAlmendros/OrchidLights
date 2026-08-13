@@ -217,7 +217,37 @@ motor: el ritmo de la red se desacopla del ritmo del show, y un cliente lento no
 puede frenar la mesa. El motor además solo emite cuando los valores cambian, así
 que una escena estática no gasta ancho de banda.
 
-### Latencia
+### Ordenar la consola
+
+El botón **Ordenar** convierte cada widget en un asa: se toca uno, se toca dónde
+va, y se guarda. En modo ordenar **ningún widget dispara su función** — mover un
+botón no debe además pulsarlo, que en una mesa de luces no es un matiz pequeño.
+Se usa `pointerup` y no arrastre HTML5, porque ese no existe en táctil.
+
+La disposición **no se escribe en el `<VirtualConsole>` de QLC+**. Va en una
+sección propia del `.qxw`:
+
+```xml
+<OrchidLightsLayout Version="1">
+ <Page ID="0">
+  <Row><Widget ID="1002"/><Widget ID="1004"/></Row>
+ </Page>
+</OrchidLightsLayout>
+```
+
+Comprobado contra QLC+ 5.2.1: avisa `Unknown Workspace tag: "OrchidLightsLayout"`
+y carga el proyecto con normalidad.
+
+Hay una asimetría que conviene saber: **QLC+ no conserva las secciones que no
+entiende**, así que si guardas el proyecto *desde QLC+*, esta se pierde y la
+consola vuelve a ordenarse por su geometría. No se pierde nada más que el orden.
+
+Un layout guardado nunca oculta un widget que no menciona: lo que no conozca
+aparece igualmente, en su sitio geométrico. Un botón añadido en QLC+ después de
+guardar el orden seguiría siendo visible — esconderlo sería el peor fallo
+posible, porque el operador ni siquiera sabría qué le falta.
+
+## Latencia
 
 El compromiso de F2 es **≤ 50 ms de *tap* a DMX**. Medido con
 `server/test/latency.mjs` contra el rig del P62, cronometrando desde que sale el

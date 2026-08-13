@@ -205,7 +205,9 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 **Pendiente:**
 
 - [ ] Sliders de playback y submaster, cue lists, XY pads y speed dial.
-- [ ] Editor de layout drag & drop **sobre grid**, guardado en una sección propia del `.qxw` para no tocar el `<VirtualConsole>` de QLC+.
+- [x] **Editor de orden sobre rejilla**, guardado en `<OrchidLightsLayout>`, una sección propia del `.qxw`. Verificado contra **QLC+ 5.2.1**: avisa `Unknown Workspace tag` y carga el proyecto con normalidad. Asimetría documentada: QLC+ no conserva secciones desconocidas, así que guardar desde QLC+ pierde el orden (y solo el orden).
+- [x] `web/src/arrange.ts` con 11 tests: un layout **nunca pierde un widget** ni oculta uno que no menciona — un botón añadido en QLC+ después de guardar el orden sigue apareciendo, porque esconderlo sería el peor fallo posible.
+- [x] En modo ordenar **ningún widget dispara su función**: mover un botón no debe además pulsarlo. Interacción por `pointerup`, no arrastre HTML5, que no existe en táctil.
 - [x] **Presupuesto de latencia medido**, no declarado. `server/test/latency.mjs`, 40 muestras sobre el rig del P62: mediana **40 ms** con el flush por defecto de 25 Hz, **20 ms** a 50 Hz, y **20 ms** también a 100 Hz. El suelo de 20 ms es el tick del motor y no baja de ahí.
   La medición corrigió el marco: lo que se cronometraba no era *tap a DMX* sino *tap a que el navegador se entera*. **La luz se mueve en ~20 ms**; los 20 ms extra del ajuste por defecto solo retrasan el eco visual, que la interfaz ya adelanta de forma optimista. Subir `--stream-rate` gasta ancho de banda sin acelerar ningún foco.
 - [ ] Modo operador en móvil sin edición posible, y PWA instalable.

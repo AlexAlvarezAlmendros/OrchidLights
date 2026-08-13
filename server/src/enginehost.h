@@ -24,6 +24,7 @@
 #include <QObject>
 
 #include "workspaceloader.h"
+#include "consolelayout.h"
 
 class LevelSource;
 class Doc;
@@ -98,6 +99,12 @@ public:
     QString resolveProjectName(const QString &name) const;
 
     Doc *doc() const { return m_doc; }
+
+    /** How the operator arranged the console, empty when never arranged. */
+    QVector<ConsoleLayout::Page> layout() const;
+
+    /** Replace the arrangement. Takes effect in the file on the next save. */
+    void setLayout(const QVector<ConsoleLayout::Page> &pages);
 
     /** Writes the Virtual Console's level sliders onto the universes. */
     LevelSource *levels() const { return m_levels; }
