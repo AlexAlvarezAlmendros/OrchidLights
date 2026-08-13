@@ -23,6 +23,8 @@
 #include <QStringList>
 #include <QObject>
 
+#include "workspaceloader.h"
+
 class Doc;
 
 /**
@@ -69,12 +71,40 @@ public:
     /** Load a project into the running engine. */
     bool loadProject(const QString &fileName, QString &errorMessage);
 
+    /** Write the current project back out. An empty fileName saves over the
+     *  file it was loaded from. */
+    bool saveProject(const QString &fileName, QString &errorMessage);
+
+    /** Absolute path of the loaded project, empty when none. */
+    QString projectPath() const { return m_projectPath; }
+
+    /**
+     * The one directory the API may read and write projects in.
+     *
+     * The API takes file names, never paths. Letting a request name an
+     * arbitrary path would be an arbitrary-file-write primitive handed to
+     * whoever holds the token, which is not a trade a lighting desk should
+     * make.
+     */
+    QString projectsDirectory() const { return m_projectsDirectory; }
+    void setProjectsDirectory(const QString &path) { m_projectsDirectory = path; }
+
+    /** Project files in the projects directory, by file name. */
+    QStringList availableProjects() const;
+
+    /** Resolve a bare file name inside the projects directory. Empty when the
+     *  name tries to escape it. */
+    QString resolveProjectName(const QString &name) const;
+
     Doc *doc() const { return m_doc; }
 
     /** Fixture manufacturers in the library. */
     int manufacturerCount() const { return m_manufacturers; }
     QString fixtureLibraryPath() const { return m_fixturePath; }
     QStringList userFixturePaths() const { return m_userFixturePaths; }
+
+    /** Audio formats the decoder plugins can read. */
+    QStringList audioFormats() const { return m_audioFormats; }
 
     /** Names of the output plugins that came up, empty when none did. */
     QStringList loadedPlugins() const { return m_loadedPlugins; }
@@ -93,6 +123,11 @@ private:
 
     QString m_pluginPath;
     QStringList m_loadedPlugins;
+    QStringList m_audioFormats;
+
+    QString m_projectPath;
+    QString m_projectsDirectory;
+    WorkspaceLoader::Preserved m_preserved;
 };
 
 #endif // ENGINEHOST_H

@@ -20,7 +20,10 @@
 #ifndef WORKSPACELOADER_H
 #define WORKSPACELOADER_H
 
+#include <QStringList>
 #include <QString>
+#include <QList>
+#include <QPair>
 
 class Doc;
 
@@ -29,17 +32,38 @@ class Doc;
 #define KXMLQLCWorkspace QStringLiteral("Workspace")
 
 /**
- * Loads QLC+ project files (.qxw) into a Doc without any UI involvement.
+ * Loads and saves QLC+ project files (.qxw) without any UI involvement.
  *
- * Only the engine-owned part of the document is read here. Virtual Console and
- * Simple Desk sections live outside Doc in QLC+ and are handled separately.
+ * A project holds more than the engine owns. Virtual Console and Simple Desk
+ * live outside Doc in QLC+, and this daemon has no model for either yet.
+ * Writing a file back from what we understand would therefore delete a user's
+ * entire Virtual Console -- the layout they built the show on -- and the file
+ * would still open cleanly, so nothing would look wrong until the night it
+ * mattered.
+ *
+ * Every section we do not own is kept verbatim across a load/save cycle.
  */
 class WorkspaceLoader
 {
 public:
-    /** Load a .qxw file into doc. Returns true on success and leaves a
-     *  human-readable reason in errorMessage on failure. */
-    static bool load(Doc *doc, const QString &fileName, QString &errorMessage);
+    /** The parts of a project this daemon does not model, carried unchanged. */
+    struct Preserved
+    {
+        /** Attributes of the <Workspace> element, e.g. CurrentWindow. */
+        QList<QPair<QString, QString>> workspaceAttributes;
+
+        /** Raw XML of each child of <Workspace> we do not parse. */
+        QStringList sections;
+    };
+
+    /** Load a .qxw into doc, capturing what we do not model. Returns true on
+     *  success and leaves a human-readable reason in errorMessage otherwise. */
+    static bool load(Doc *doc, const QString &fileName,
+                     Preserved &preserved, QString &errorMessage);
+
+    /** Write doc back out, re-emitting the preserved sections unchanged. */
+    static bool save(const Doc *doc, const QString &fileName,
+                     const Preserved &preserved, QString &errorMessage);
 };
 
 #endif // WORKSPACELOADER_H

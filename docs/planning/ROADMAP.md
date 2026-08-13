@@ -165,9 +165,19 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 > **Trampa de Qt que costó encontrar.** `qabstracthttpserver.cpp:88` condiciona el upgrade a `handleRequest(...) && isSignalConnected(...)`. Sin una ruta para `/ws`, `handleRequest` devuelve `false` y Qt rechaza la conexión con *"WebSocket received but no slots connected"* — un mensaje que culpa a la señal, que estaba perfectamente conectada. Y al añadir una ruta normal, el handler **escribe su respuesta** antes de que Qt entregue el socket, así que el cliente lee el HTTP y abandona. La salida es la forma de `route()` con `QHttpServerResponder&&` y retorno `void`: ahí `responseImpl()` no llama a `sendResponse()`, y un handler que no escribe nada deja el socket limpio para el handshake.
 
-**Pendiente:**
+**Proyectos** — hecho:
 
-- [ ] Endpoints de proyecto: load/save/list.
+- [x] Endpoints `GET /project`, `GET /projects`, `POST /project/load/{nombre}`, `POST /project/save[/{nombre}]`.
+- [x] Toman **nombre de archivo, nunca ruta**, y solo dentro del directorio de `--projects`. Aceptar rutas sería regalar una primitiva de escritura arbitraria a quien tenga el token.
+- [x] **Guardado que preserva verbatim** Virtual Console, Simple Desk y cualquier sección futura que no modelemos, con `QSaveFile` para no dejar un archivo de show a medio escribir.
+- [x] `server/test/roundtrip-smoke.sh` en CI, comparando los subárboles canonicalizados antes y después.
+- [x] Decodificadores de audio cargados y reportados en `/status` como `audioFormats`.
+
+> **Dos bugs que este test cazó y que habrían destruido shows en silencio.**
+> El primero: al reemitir las secciones con `writeCurrentToken()`, Qt las reescribía ligadas explícitamente al namespace por defecto (`<ns0:VirtualConsole xmlns:ns0="...">`), inflando el archivo un 20 %. Se copian los tokens a mano con nombres locales.
+> El segundo, más grave: con el procesamiento de namespaces activado, **`xmlns` no aparece en `attributes()`** — Qt lo consume en `namespaceDeclarations()`. Al leer solo los atributos se perdía la declaración, todos los hijos salían del namespace por defecto, y las secciones "preservadas" volvían distintas de como entraron **mientras el archivo seguía abriendo perfectamente**. `Sample.qxw` no lo detectaba porque no declara `xmlns`; `17Julio.qxw` sí.
+
+**Pendiente:**
 - [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.
 - [ ] Round-trip de `.qxw`: cargar y guardar no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.
 - [ ] **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador.

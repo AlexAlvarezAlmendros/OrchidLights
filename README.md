@@ -119,6 +119,24 @@ orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
 | `POST /api/v1/functions/{id}/stop` | encola la parada |
 | `POST /api/v1/blackout` | para todo y activa blackout |
 | `DELETE /api/v1/blackout` | lo desactiva |
+| `GET /api/v1/project` | proyecto cargado y si tiene cambios sin guardar |
+| `GET /api/v1/projects` | proyectos disponibles en el directorio permitido |
+| `POST /api/v1/project/load/{nombre}` | carga otro proyecto |
+| `POST /api/v1/project/save` | guarda sobre el archivo actual |
+| `POST /api/v1/project/save/{nombre}` | guarda con otro nombre |
+
+Los endpoints de proyecto toman un **nombre de archivo, nunca una ruta**, y solo
+dentro del directorio de `--projects` (por defecto, el del proyecto que abriste).
+Aceptar rutas sería entregarle a quien tenga el token una primitiva de escritura
+arbitraria de archivos, y eso no es un intercambio que deba hacer una mesa de
+luces.
+
+**Guardar preserva lo que el motor no modela.** Virtual Console y Simple Desk
+viven fuera de `Doc` en QLC+ y este daemon todavía no tiene modelo para ellos:
+se conservan **verbatim**, incluidas las declaraciones de namespace del archivo.
+Si un guardado los perdiera, el archivo seguiría abriendo y los fixtures
+seguirían ahí — y el operador se enteraría de que su Virtual Console ha
+desaparecido la noche que importa. Hay un test dedicado a esto.
 
 Los comandos de función responden **202 Accepted**, no 200, y no devuelven
 estado. El motor los encola y la transición ocurre en el siguiente tick, 20 ms
