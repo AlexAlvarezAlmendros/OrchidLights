@@ -202,6 +202,16 @@ bool WorkspaceLoader::load(Doc *doc, const QString &fileName,
         errorMessage = QStringLiteral("Workspace node not found in %1").arg(fileName);
     }
 
+    /* A parse that stopped early still leaves whatever was read in Doc, and
+       reporting success would let the next save write that truncated show back
+       over the user's file. */
+    if (result && reader->hasError())
+    {
+        errorMessage = QStringLiteral("%1 is truncated or malformed: %2")
+                           .arg(fileName, reader->errorString());
+        result = false;
+    }
+
     QLCFile::releaseXMLReader(reader);
 
     if (result)

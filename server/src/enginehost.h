@@ -25,8 +25,8 @@
 
 #include "workspaceloader.h"
 #include "consolelayout.h"
+#include "levelsource.h"
 
-class LevelSource;
 class Doc;
 
 /**
@@ -99,6 +99,26 @@ public:
     QString resolveProjectName(const QString &name) const;
 
     Doc *doc() const { return m_doc; }
+
+    /**
+     * Run a mutation that may free or move fixtures.
+     *
+     * LevelSource dereferences Doc-owned Fixture pointers on the timer thread.
+     * Clearing it first takes the mutex that writeDMX() holds, so once this
+     * returns no tick can be inside that dereference; the sliders are then
+     * rebuilt from the project afterwards.
+     */
+    template <typename Mutation>
+    auto withFixturesLocked(Mutation mutation) -> decltype(mutation())
+    {
+        if (m_levels != nullptr)
+            m_levels->forgetSliders();
+
+        auto result = mutation();
+
+        teachSliders();
+        return result;
+    }
 
     /** Apply a speed dial's value, in milliseconds, to the functions it drives.
      *  Returns false when the project has no such dial. */
