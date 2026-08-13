@@ -280,7 +280,11 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 
 - [x] Cuerpos de **RGBMatrix** (grupo, algoritmo de entre 43, hasta 5 colores), **Script** (programa, validado por el parser del motor), **Audio** (archivo verificado contra los decodificadores cargados, volumen) y **Video** (archivo local o URL).
 
-**Pendiente:** cuerpos de `EFX`, `Sequence` y `Show` — los tres que el mapeo estimó como grandes.
+- [x] Cuerpos de **EFX** (algoritmo de entre 7, geometría con rangos validados, fixtures participantes) y **Sequence** (escena vinculada).
+
+**Pendiente:** cuerpo de `Show` — el timeline multipista, que es F7.
+
+> **Peligro que el mapeo destapó y que ahora se respeta**: `EFX::m_fixtures` es una `QList` sin mutex que `EFX::write()` recorre **en el hilo del `MasterTimer` cada 20 ms**. Reconstruirla en caliente libera objetos que ese hilo está usando. Cambiar los fixtures de un EFX **lo para y espera** antes de tocar la lista, igual que hacen los dos editores de escritorio. Lo mismo para rebindear la escena de un Sequence, cuyos pasos solo significan algo contra ella.
 
 > **Trampa del motor**, encontrada al probar: `RGBAlgorithm::algorithm()` **no puede** informar de un nombre inválido. Para cualquier cosa que no sea uno de sus cuatro algoritmos internos cae en `RGBScriptsCache::script()`, que devuelve un `RGBScript` **vacío pero no nulo** (`rgbscriptscache.cpp:42-55`). Una errata se aceptaba, la matriz corría y no emitía nada, sin error en ninguna parte. Ahora el nombre se valida contra la lista **antes** de pedir la instancia.
 

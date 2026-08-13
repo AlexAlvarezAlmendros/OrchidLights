@@ -729,6 +729,31 @@ void ApiServer::registerRoutes()
         case Function::VideoType:
             result = DocWriter::setVideoSource(doc, id, body.value("source").toString());
             break;
+        case Function::EFXType:
+        {
+            QList<quint32> fixtures;
+            const bool hasFixtures = body.value("fixtures").isArray();
+            if (hasFixtures)
+            {
+                for (const QJsonValue &value : body.value("fixtures").toArray())
+                {
+                    if (value.isDouble() == false || value.toInt(-1) < 0)
+                    {
+                        return jsonError(StatusCode::BadRequest,
+                                         QStringLiteral("Fixture ids must be non-negative numbers"));
+                    }
+                    fixtures.append(quint32(value.toInt()));
+                }
+            }
+
+            result = DocWriter::setEfx(doc, id, body.value("algorithm").toString(), body,
+                                       hasFixtures ? &fixtures : nullptr);
+            break;
+        }
+        case Function::SequenceType:
+            result = DocWriter::setSequenceScene(doc, id,
+                                                 quint32(body.value("scene").toInt(-1)));
+            break;
         default:
             break;
         }

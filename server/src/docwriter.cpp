@@ -24,6 +24,8 @@
 #include "docwriter.h"
 
 #include "rgbalgorithm.h"
+#include "efxfixture.h"
+#include "grouphead.h"
 #include "collection.h"
 #include "rgbmatrix.h"
 #include "sequence.h"
@@ -1041,6 +1043,135 @@ DocWriter::Result DocWriter::setVideoSource(Doc *doc, quint32 videoId, const QSt
 
     Video *video = qobject_cast<Video *>(function);
     video->setSourceUrl(source);
+
+    doc->setModified();
+    return Result::success();
+}
+
+
+DocWriter::Result DocWriter::setEfx(Doc *doc, quint32 efxId, const QString &algorithm,
+                                    const QJsonObject &geometry, const QList<quint32> *fixtureIds)
+{
+    Function *function = doc->function(efxId);
+    if (function == nullptr || function->type() != Function::EFXType)
+        return Result::failure(QStringLiteral("No EFX with id %1").arg(efxId));
+
+    EFX *efx = qobject_cast<EFX *>(function);
+
+    if (algorithm.isEmpty() == false)
+    {
+        if (EFX::algorithmList().contains(algorithm) == false)
+        {
+            return Result::failure(QStringLiteral("No EFX algorithm named \"%1\". Available: %2")
+                                       .arg(algorithm,
+                                            EFX::algorithmList().join(QStringLiteral(", "))));
+        }
+        efx->setAlgorithm(EFX::stringToAlgorithm(algorithm));
+    }
+
+    /* Every one of these is clamped by the engine, so out-of-range input would
+       be silently corrected rather than reported. Checking here means a caller
+       that asks for width 500 learns it cannot have it. */
+    const auto ranged = [&](const char *key, int low, int high, QString &error) -> int {
+        if (geometry.contains(QLatin1String(key)) == false)
+            return INT_MIN;
+
+        const int value = geometry.value(QLatin1String(key)).toInt();
+        if (value < low || value > high)
+        {
+            error = QStringLiteral("%1 must be between %2 and %3")
+                        .arg(QLatin1String(key)).arg(low).arg(high);
+        }
+        return value;
+    };
+
+    QString error;
+    const int width      = ranged("width",       0, 127, error);
+    const int height     = ranged("height",      0, 127, error);
+    const int xOffset    = ranged("xOffset",     0, 255, error);
+    const int yOffset    = ranged("yOffset",     0, 255, error);
+    const int rotation   = ranged("rotation",    0, 359, error);
+    const int startOff   = ranged("startOffset", 0, 359, error);
+    const int xFrequency = ranged("xFrequency",  0,   5, error);
+    const int yFrequency = ranged("yFrequency",  0,   5, error);
+    const int xPhase     = ranged("xPhase",      0, 359, error);
+    const int yPhase     = ranged("yPhase",      0, 359, error);
+
+    if (error.isEmpty() == false)
+        return Result::failure(error);
+
+    if (width      != INT_MIN) efx->setWidth(width);
+    if (height     != INT_MIN) efx->setHeight(height);
+    if (xOffset    != INT_MIN) efx->setXOffset(xOffset);
+    if (yOffset    != INT_MIN) efx->setYOffset(yOffset);
+    if (rotation   != INT_MIN) efx->setRotation(rotation);
+    if (startOff   != INT_MIN) efx->setStartOffset(startOff);
+    if (xFrequency != INT_MIN) efx->setXFrequency(xFrequency);
+    if (yFrequency != INT_MIN) efx->setYFrequency(yFrequency);
+    if (xPhase     != INT_MIN) efx->setXPhase(xPhase);
+    if (yPhase     != INT_MIN) efx->setYPhase(yPhase);
+
+    if (geometry.contains(QStringLiteral("relative")))
+        efx->setIsRelative(geometry.value(QStringLiteral("relative")).toBool());
+
+    if (fixtureIds != nullptr)
+    {
+        for (quint32 id : *fixtureIds)
+        {
+            if (doc->fixture(id) == nullptr)
+                return Result::failure(QStringLiteral("No fixture with id %1").arg(id));
+        }
+
+        /* Stopped and waited for before the list is touched. EFX::write() walks
+           m_fixtures on the timer thread with no lock, so rebuilding it live
+           frees objects out from under it. */
+        if (efx->isRunning() && efx->stopAndWait() == false)
+        {
+            return Result::failure(
+                QStringLiteral("\"%1\" did not stop in time; refusing to change its fixtures while it runs")
+                    .arg(efx->name()));
+        }
+
+        for (EFXFixture *existing : efx->fixtures())
+            efx->removeFixture(existing->head().fxi, existing->head().head);
+
+        for (quint32 id : *fixtureIds)
+        {
+            EFXFixture *member = new EFXFixture(efx);
+            member->setHead(GroupHead(id, 0));
+
+            if (efx->addFixture(member) == false)
+                delete member;   // already present; addFixture refused it
+        }
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setSequenceScene(Doc *doc, quint32 sequenceId, quint32 sceneId)
+{
+    Function *function = doc->function(sequenceId);
+    if (function == nullptr || function->type() != Function::SequenceType)
+        return Result::failure(QStringLiteral("No sequence with id %1").arg(sequenceId));
+
+    const Function *scene = doc->function(sceneId);
+    if (scene == nullptr || scene->type() != Function::SceneType)
+        return Result::failure(QStringLiteral("No scene with id %1").arg(sceneId));
+
+    Sequence *sequence = qobject_cast<Sequence *>(function);
+
+    /* The bound scene is structural: a sequence's steps hold values that only
+       mean anything against it. Rebinding a running one would have it stepping
+       through values addressed at a scene it no longer drives. */
+    if (sequence->isRunning() && sequence->stopAndWait() == false)
+    {
+        return Result::failure(
+            QStringLiteral("\"%1\" did not stop in time; refusing to rebind it while it runs")
+                .arg(sequence->name()));
+    }
+
+    sequence->setBoundSceneID(sceneId);
 
     doc->setModified();
     return Result::success();

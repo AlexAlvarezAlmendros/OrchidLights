@@ -20,6 +20,7 @@
 #ifndef DOCWRITER_H
 #define DOCWRITER_H
 
+#include <QJsonObject>
 #include <QString>
 
 class Doc;
@@ -173,6 +174,23 @@ namespace DocWriter
 
     /** Video: source file or URL. */
     Result setVideoSource(Doc *doc, quint32 videoId, const QString &source);
+
+    /**
+     * EFX: pattern, geometry and the fixtures that follow it.
+     *
+     * Structural changes to the fixture list stop the function first, and not
+     * as a courtesy: EFX::m_fixtures is a bare QList with no mutex that
+     * EFX::write() walks on the MasterTimer thread every 20 ms, so editing it
+     * live is a use-after-free. Both desktop editors stop before touching it.
+     *
+     * An empty algorithm leaves it alone; a null fixtures list leaves the
+     * fixture set alone.
+     */
+    Result setEfx(Doc *doc, quint32 efxId, const QString &algorithm,
+                  const QJsonObject &geometry, const QList<quint32> *fixtureIds);
+
+    /** Sequence: the scene it drives. Its steps use the chaser step calls. */
+    Result setSequenceScene(Doc *doc, quint32 sequenceId, quint32 sceneId);
 
     Result addFixtureGroup(Doc *doc, const QString &name, const QList<quint32> &fixtureIds,
                            quint32 &groupId);
