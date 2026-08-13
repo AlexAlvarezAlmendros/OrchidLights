@@ -25,6 +25,7 @@
 
 #include "workspaceloader.h"
 
+class LevelSource;
 class Doc;
 
 /**
@@ -98,6 +99,9 @@ public:
 
     Doc *doc() const { return m_doc; }
 
+    /** Writes the Virtual Console's level sliders onto the universes. */
+    LevelSource *levels() const { return m_levels; }
+
     /** Fixture manufacturers in the library. */
     int manufacturerCount() const { return m_manufacturers; }
     QString fixtureLibraryPath() const { return m_fixturePath; }
@@ -118,7 +122,11 @@ public:
     QString projectErrors() const;
 
 private:
+    /** Read the project's level sliders and hand them to the level source. */
+    void teachSliders();
+
     Doc *m_doc = nullptr;
+    LevelSource *m_levels = nullptr;
     bool m_running = false;
 
     int m_manufacturers = 0;

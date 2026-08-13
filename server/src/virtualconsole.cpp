@@ -101,6 +101,32 @@ namespace
                 }
                 reader.skipCurrentElement();
             }
+            else if (name == QStringLiteral("SliderMode"))
+            {
+                widget.sliderMode = reader.readElementText().trimmed().toLower();
+            }
+            else if (name == QStringLiteral("Level"))
+            {
+                const QXmlStreamAttributes attributes = reader.attributes();
+                widget.low = attributes.value(QStringLiteral("LowLimit")).toInt();
+                widget.high = attributes.value(QStringLiteral("HighLimit")).toInt();
+                widget.value = attributes.value(QStringLiteral("Value")).toInt();
+
+                while (reader.readNextStartElement())
+                {
+                    if (reader.name() == QStringLiteral("Channel"))
+                    {
+                        const quint32 fixture =
+                            reader.attributes().value(QStringLiteral("Fixture")).toUInt();
+                        const quint32 channel = reader.readElementText().toUInt();
+                        widget.levelChannels.append(qMakePair(fixture, channel));
+                    }
+                    else
+                    {
+                        reader.skipCurrentElement();
+                    }
+                }
+            }
             else if (isWidgetElement(name))
             {
                 VcWidget child;

@@ -197,9 +197,14 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 > **La regla que costó un test.** Las filas se agrupan por **alineación del borde superior, no por solapamiento**. El solapamiento es la opción obvia y colapsa el layout: un fader de 400 px cruza todas las bandas de botones que tiene al lado y se las traga a una sola fila. El test lo afirma explícitamente porque es el bug que alguien reintroducirá.
 
+- [x] **Faders funcionando.** `server/src/levelsource.cpp` se registra como `DMXSource` en el `MasterTimer`, que es la única vía sancionada para escribir en un universo fuera de una Function: `writeDMX()` corre en el hilo del timer con los universos ya reclamados. Mover un fader desde HTTP o WebSocket **no toca un universo**: aparca el valor bajo mutex y el siguiente tick (≤20 ms) lo aplica.
+- [x] Verificado contra el rig real: el fader *Washes* del P62 escribe 200 en los canales DMX **158, 184, 210, 236** — el canal 6 (dimmer) de los cuatro Hero Wash 300FC en 153/179/205/231, y en ningún otro sitio.
+- [x] Faders horizontales en móvil (más fáciles con una mano) y verticales en escritorio, como en una mesa. Valores sembrados desde el proyecto, y sincronizados entre clientes por WebSocket.
+- [x] Los sliders de tipo *playback* y *submaster* se parsean pero salen **deshabilitados y etiquetados**: mostrarlos operativos sería una mentira que el operador descubre cuando la luz no se mueve.
+
 **Pendiente:**
 
-- [ ] Control de faders, cue lists, XY pads y speed dial.
+- [ ] Sliders de playback y submaster, cue lists, XY pads y speed dial.
 - [ ] Editor de layout drag & drop **sobre grid**, guardado en una sección propia del `.qxw` para no tocar el `<VirtualConsole>` de QLC+.
 - [ ] Medir de verdad el presupuesto de **≤ 50 ms de tap a DMX**.
 - [ ] Modo operador en móvil sin edición posible, y PWA instalable.

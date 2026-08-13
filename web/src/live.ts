@@ -14,6 +14,8 @@ export type Connection = 'connecting' | 'open' | 'auth' | 'closed'
 export interface LiveHandlers {
   onFunctions: (functions: FunctionState[]) => void
   onConnection: (state: Connection) => void
+  /** Another client moved a fader; ours needs to follow. */
+  onSlider?: (id: number, value: number) => void
   onUniverse?: (universe: number, channels: Uint8Array) => void
 }
 
@@ -63,6 +65,9 @@ export class Live {
         case 'functions':
           this.handlers.onFunctions(message.functions)
           break
+        case 'slider':
+          this.handlers.onSlider?.(message.id, message.value)
+          break
       }
     })
 
@@ -85,6 +90,10 @@ export class Live {
 
   toggle(id: number, running: boolean): void {
     this.send({ type: 'function', id, action: running ? 'stop' : 'start' })
+  }
+
+  setSlider(id: number, value: number): void {
+    this.send({ type: 'slider', id, value })
   }
 
   subscribe(universes: number[]): void {

@@ -27,6 +27,11 @@ export interface VcWidget {
   background?: string
   foreground?: string
   functionId?: number
+  sliderMode?: string
+  low?: number
+  high?: number
+  value?: number
+  controllable?: boolean
   children?: VcWidget[]
 }
 

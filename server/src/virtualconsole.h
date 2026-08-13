@@ -23,6 +23,7 @@
 #include <QStringList>
 #include <QString>
 #include <QVector>
+#include <QPair>
 #include <QRect>
 
 /**
@@ -49,9 +50,20 @@ struct VcWidget
     QString background;  //!< "#rrggbb", empty when the widget has no colour set
     QString foreground;
 
-    /** Function a button drives. Absent for everything else. */
+    /** Function a button drives, or the one a playback slider rides. */
     bool hasFunction = false;
     quint32 functionId = 0;
+
+    /* Sliders. QLC+ has three kinds and they do entirely different things:
+       Level drives fixture channels directly, Playback rides a function's
+       intensity, and Submaster scales other widgets. */
+    QString sliderMode;          //!< "level", "playback", "submaster", empty otherwise
+    int low = 0;                 //!< bottom of the slider's range
+    int high = 255;
+    int value = 0;               //!< the value stored in the project
+
+    /** Fixture and channel pairs a level slider writes to. */
+    QVector<QPair<quint32, quint32>> levelChannels;
 
     QVector<VcWidget> children;
 };

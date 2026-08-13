@@ -16,6 +16,7 @@ export function App() {
     () => (localStorage.getItem('orchid.theme') as Theme | null) ?? 'stage',
   )
   const [error, setError] = useState<string | null>(null)
+  const [levels, setLevels] = useState<Record<number, number>>({})
 
   const live = useRef<Live | null>(null)
 
@@ -23,13 +24,25 @@ export function App() {
     const feed = new Live({
       onFunctions: setFunctions,
       onConnection: setConnection,
+      onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
     })
     live.current = feed
     feed.connect()
 
     api
       .vc()
-      .then(setVc)
+      .then((console_) => {
+        setVc(console_)
+        // Seed the faders from the values the project was saved with, so the
+        // interface opens showing the desk as the show left it.
+        const seeded: Record<number, number> = {}
+        const visit = (w: VcWidget) => {
+          if (w.sliderMode && w.value !== undefined) seeded[w.id] = w.value
+          for (const child of w.children ?? []) visit(child)
+        }
+        visit(console_)
+        setLevels(seeded)
+      })
       // A project without a Virtual Console is normal, not a failure: plenty of
       // shows are driven straight from the function list.
       .catch(() => setVc(null))
@@ -54,6 +67,13 @@ export function App() {
   )
 
   const toggle = useCallback((id: number) => live.current?.toggle(id, running.has(id)), [running])
+
+  const setLevel = useCallback((id: number, value: number) => {
+    // Optimistic: the fader follows the finger and the engine catches up on its
+    // next tick. Waiting for a round trip would make a drag feel like mud.
+    setLevels((current) => ({ ...current, [id]: value }))
+    live.current?.setSlider(id, value)
+  }, [])
 
   const pages = vc ? pagesOf(vc) : []
   const current = pages[page] ?? pages[0]
@@ -97,7 +117,13 @@ export function App() {
         {error && <p className="empty">{error}</p>}
 
         {current ? (
-          <Surface widget={current} running={running} onToggle={toggle} />
+          <Surface
+            widget={current}
+            running={running}
+            onToggle={toggle}
+            levels={levels}
+            onLevel={setLevel}
+          />
         ) : (
           <FunctionList functions={functions} onToggle={toggle} />
         )}
@@ -110,10 +136,14 @@ function Surface({
   widget,
   running,
   onToggle,
+  levels,
+  onLevel,
 }: {
   widget: VcWidget
   running: Set<number>
   onToggle: (id: number) => void
+  levels: Record<number, number>
+  onLevel: (id: number, value: number) => void
 }) {
   const children = widget.children ?? []
   if (children.length === 0) {
@@ -133,6 +163,8 @@ function Surface({
               grow={growFactor(child, row)}
               running={running}
               onToggle={onToggle}
+              levels={levels}
+              onLevel={onLevel}
             />
           ))}
         </div>
@@ -146,11 +178,15 @@ function Widget({
   grow,
   running,
   onToggle,
+  levels,
+  onLevel,
 }: {
   widget: VcWidget
   grow: number
   running: Set<number>
   onToggle: (id: number) => void
+  levels: Record<number, number>
+  onLevel: (id: number, value: number) => void
 }) {
   const style = {
     '--grow': grow,
@@ -178,6 +214,17 @@ function Widget({
     )
   }
 
+  if (widget.sliderMode) {
+    return (
+      <Fader
+        widget={widget}
+        style={style}
+        value={levels[widget.id] ?? widget.value ?? 0}
+        onChange={onLevel}
+      />
+    )
+  }
+
   if (isContainer(widget)) {
     return (
       <div className="widget" style={style}>
@@ -195,6 +242,43 @@ function Widget({
       <br />
       <small>({widget.type})</small>
     </div>
+  )
+}
+
+function Fader({
+  widget,
+  style,
+  value,
+  onChange,
+}: {
+  widget: VcWidget
+  style: React.CSSProperties
+  value: number
+  onChange: (id: number, value: number) => void
+}) {
+  const low = widget.low ?? 0
+  const high = widget.high ?? 255
+  const percent = high > low ? Math.round(((value - low) / (high - low)) * 100) : 0
+
+  // A playback or submaster slider parses fine but has nothing behind it here
+  // yet. Showing it disabled is honest; showing it live would be a lie the
+  // operator only discovers when the light does not move.
+  const usable = widget.controllable === true
+
+  return (
+    <label className="widget fader" style={style} data-usable={usable}>
+      <span className="fader-caption">{widget.caption || `#${widget.id}`}</span>
+      <input
+        type="range"
+        min={low}
+        max={high}
+        value={value}
+        disabled={!usable}
+        aria-label={widget.caption}
+        onChange={(e) => onChange(widget.id, Number(e.target.value))}
+      />
+      <span className="fader-value">{usable ? `${percent}%` : widget.sliderMode}</span>
+    </label>
   )
 }
 

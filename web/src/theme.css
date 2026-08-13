@@ -218,3 +218,51 @@ button.danger {
     --basis: 10rem;
   }
 }
+
+/* Faders.
+   Vertical on wide screens, where they sit in a row like a real desk; the
+   browser default (horizontal) is easier to drag on a phone held in one hand,
+   so that is what narrow screens get. */
+.widget.fader {
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.5rem;
+  cursor: pointer;
+}
+
+.widget.fader[data-usable="false"] {
+  border-style: dashed;
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+.fader-caption {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.fader-value {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.widget.fader input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  /* Fat enough to grab without looking. */
+  height: 32px;
+  touch-action: none;
+}
+
+@media (min-width: 700px) {
+  .widget.fader {
+    min-height: 190px;
+  }
+  .widget.fader input[type="range"] {
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 32px;
+    flex: 1;
+  }
+}
