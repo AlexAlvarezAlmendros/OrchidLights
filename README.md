@@ -217,7 +217,31 @@ motor: el ritmo de la red se desacopla del ritmo del show, y un cliente lento no
 puede frenar la mesa. El motor además solo emite cuando los valores cambian, así
 que una escena estática no gasta ancho de banda.
 
-### Autenticación
+### Latencia
+
+El compromiso de F2 es **≤ 50 ms de *tap* a DMX**. Medido con
+`server/test/latency.mjs` contra el rig del P62, cronometrando desde que sale el
+comando hasta que el valor aparece en un frame del universo:
+
+| `--stream-rate` | intervalo de flush | mediana |
+|---|---|---|
+| 25 Hz (por defecto) | 40 ms | 40,0 ms |
+| 50 Hz | 20 ms | 20,0 ms |
+| 100 Hz | 10 ms | 20,0 ms |
+
+A 100 Hz el flush baja a 10 ms y la latencia no baja de 20: ese suelo es **el
+tick del motor** (50 Hz), y es el límite real.
+
+O sea que **la luz se mueve en unos 20 ms**. Los 20 ms extra del ajuste por
+defecto no retrasan la luz, solo el eco visual que devuelve el feed — y como la
+interfaz es optimista y mueve el control al instante, no se perciben. Subir el
+`--stream-rate` gasta ancho de banda sin acelerar un solo foco.
+
+```bash
+node server/test/latency.mjs ws://127.0.0.1:9998/ws <sliderId> 40
+```
+
+## Autenticación
 
 El daemon escucha **solo en loopback** por defecto y ahí no pide nada: el
 sistema operativo ya es la frontera.

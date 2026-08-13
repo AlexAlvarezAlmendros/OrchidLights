@@ -206,7 +206,8 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 - [ ] Sliders de playback y submaster, cue lists, XY pads y speed dial.
 - [ ] Editor de layout drag & drop **sobre grid**, guardado en una sección propia del `.qxw` para no tocar el `<VirtualConsole>` de QLC+.
-- [ ] Medir de verdad el presupuesto de **≤ 50 ms de tap a DMX**.
+- [x] **Presupuesto de latencia medido**, no declarado. `server/test/latency.mjs`, 40 muestras sobre el rig del P62: mediana **40 ms** con el flush por defecto de 25 Hz, **20 ms** a 50 Hz, y **20 ms** también a 100 Hz. El suelo de 20 ms es el tick del motor y no baja de ahí.
+  La medición corrigió el marco: lo que se cronometraba no era *tap a DMX* sino *tap a que el navegador se entera*. **La luz se mueve en ~20 ms**; los 20 ms extra del ajuste por defecto solo retrasan el eco visual, que la interfaz ya adelanta de forma optimista. Subir `--stream-rate` gasta ancho de banda sin acelerar ningún foco.
 - [ ] Modo operador en móvil sin edición posible, y PWA instalable.
 
 ### F3 — Patch y gestión de fixtures *(dolor #2)*

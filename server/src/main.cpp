@@ -142,6 +142,14 @@ int main(int argc, char **argv)
                        "This turns the bearer token on."));
     parser.addOption(listenAllOption);
 
+    QCommandLineOption streamRateOption(
+        QStringLiteral("stream-rate"),
+        QStringLiteral("How often DMX frames go out over the WebSocket, in Hz "
+                       "(default 25). The engine itself runs at 50."),
+        QStringLiteral("hz"),
+        QStringLiteral("25"));
+    parser.addOption(streamRateOption);
+
     QCommandLineOption requireAuthOption(
         QStringLiteral("require-auth"),
         QStringLiteral("Demand the bearer token even on loopback."));
@@ -219,6 +227,7 @@ int main(int argc, char **argv)
     apiOptions.port = quint16(port);
     apiOptions.listenAll = parser.isSet(listenAllOption);
     apiOptions.requireAuth = parser.isSet(requireAuthOption);
+    apiOptions.streamRate = parser.value(streamRateOption).toInt();
 
     ApiServer api(&engine);
     if (api.start(apiOptions, errorMessage) == false)
