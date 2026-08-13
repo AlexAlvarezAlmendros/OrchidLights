@@ -1,11 +1,21 @@
 name: build
 
 on:
+  # Every branch, not just main. Restricting push to main left work on a
+  # feature branch relying solely on the pull_request event, and when that
+  # event went missing a commit sat on the branch with no CI at all -- while
+  # `gh pr checks` cheerfully reported the *previous* run as green.
   push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+# A branch with an open pull request would otherwise build twice for the same
+# commit. Newer pushes also cancel older runs, which matters when a fix follows
+# a mistake by a minute.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   server-linux:
