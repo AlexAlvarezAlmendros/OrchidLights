@@ -1,0 +1,29 @@
+<!DOCTYPE Workspace>
+<!--
+  A project referencing a fixture definition that cannot exist.
+
+  The engine loads it anyway, patched at the right address, silently backed by
+  a generic dimmer with no channel names and no capabilities. This file exists
+  so CI can prove the daemon refuses to pretend that worked.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FunctionManager">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>OrchidLights Test</Manufacturer>
+   <Model>No Such Fixture</Model>
+   <Mode>Default</Mode>
+   <ID>0</ID>
+   <Name>Ghost</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>4</Channels>
+  </Fixture>
+ </Engine>
+</Workspace>

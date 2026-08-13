@@ -21,8 +21,7 @@
 #include <QGuiApplication>
 #include <QTextStream>
 
-#include "workspaceloader.h"
-#include "fixturelibrary.h"
+#include "enginehost.h"
 #include "qlcconfig.h"
 #include "qlcfile.h"
 #include "doc.h"
@@ -30,15 +29,51 @@
 #include "function.h"
 #include "inputoutputmap.h"
 
-/*
- * F0 scaffolding.
- *
- * At this stage the daemon only proves the point that matters before any API
- * work begins: the QLC+ engine can be driven with no user interface at all.
- * It loads a project, reports what is inside it and exits.
- *
- * The HTTP and WebSocket servers land in F1.
- */
+namespace
+{
+    void report(QTextStream &out, const EngineHost &engine)
+    {
+        out << "Fixture library: " << engine.manufacturerCount() << " manufacturers" << Qt::endl;
+        out << "  system: " << engine.fixtureLibraryPath() << Qt::endl;
+        for (const QString &path : engine.userFixturePaths())
+            out << "  user:   " << path << Qt::endl;
+
+        if (engine.pluginPath().isEmpty())
+        {
+            out << "Output plugins: none" << Qt::endl;
+        }
+        else
+        {
+            out << "Output plugins: " << engine.loadedPlugins().count()
+                << " from " << engine.pluginPath() << Qt::endl;
+            for (const QString &name : engine.loadedPlugins())
+                out << "  " << name << Qt::endl;
+        }
+    }
+
+    void describeProject(QTextStream &out, Doc *doc, const QString &fileName)
+    {
+        out << "Project: " << fileName << Qt::endl;
+        out << "Universes: " << doc->inputOutputMap()->universesCount() << Qt::endl;
+
+        out << "Fixtures: " << doc->fixtures().count() << Qt::endl;
+        for (Fixture *fixture : doc->fixtures())
+        {
+            out << "  U" << (fixture->universe() + 1)
+                << " @ " << (fixture->address() + 1)
+                << "-" << (fixture->address() + fixture->channels())
+                << "  " << fixture->name() << Qt::endl;
+        }
+
+        const QList<Function *> functions = doc->functions();
+        out << "Functions: " << functions.count() << Qt::endl;
+        for (Function *function : functions)
+        {
+            out << "  [" << Function::typeToString(function->type()) << "] "
+                << function->name() << Qt::endl;
+        }
+    }
+}
 
 int main(int argc, char **argv)
 {
@@ -69,6 +104,23 @@ int main(int argc, char **argv)
         QStringLiteral("dir"));
     parser.addOption(fixturesOption);
 
+    QCommandLineOption pluginsOption(
+        QStringLiteral("plugins"),
+        QStringLiteral("Directory holding the input/output plugins."),
+        QStringLiteral("dir"));
+    parser.addOption(pluginsOption);
+
+    QCommandLineOption noOutputOption(
+        QStringLiteral("no-output"),
+        QStringLiteral("Do not load the output plugins. The engine still runs and "
+                       "functions still execute, but no DMX reaches the network."));
+    parser.addOption(noOutputOption);
+
+    QCommandLineOption checkOption(
+        QStringLiteral("check"),
+        QStringLiteral("Load the project, report it and exit instead of staying up."));
+    parser.addOption(checkOption);
+
     parser.process(app);
 
     QTextStream out(stdout);
@@ -76,70 +128,56 @@ int main(int argc, char **argv)
 
     out << APPNAME << " " << APPVERSION << Qt::endl;
 
-    Doc doc(nullptr);
+    EngineHost::Options options;
+    options.fixtureDirectory = parser.value(fixturesOption);
+    options.pluginDirectory = parser.value(pluginsOption);
+    options.noOutput = parser.isSet(noOutputOption);
 
-    const FixtureLibrary::Result library =
-        FixtureLibrary::load(&doc, parser.value(fixturesOption));
-
-    out << "Fixture library: " << library.manufacturers << " manufacturers" << Qt::endl;
-    if (library.systemPath.isEmpty())
-    {
-        err << "WARNING: no system fixture library found. Every patched fixture will "
-               "fall back to a generic dimmer, losing its channel definitions. "
-               "Pass --fixtures <dir> or set ORCHID_FIXTURE_DIR." << Qt::endl;
-    }
-    else
-    {
-        out << "  system: " << library.systemPath << Qt::endl;
-    }
-    for (const QString &path : library.userPaths)
-        out << "  user:   " << path << Qt::endl;
-
-    const QStringList args = parser.positionalArguments();
-    if (args.isEmpty())
-    {
-        out << "No project given. Nothing to do yet -- the API server arrives in F1." << Qt::endl;
-        return 0;
-    }
-
+    EngineHost engine;
     QString errorMessage;
-    if (WorkspaceLoader::load(&doc, args.first(), errorMessage) == false)
+
+    if (engine.start(options, errorMessage) == false)
     {
-        err << "Failed to load project: " << errorMessage << Qt::endl;
+        err << "ERROR: " << errorMessage << Qt::endl;
         return 1;
     }
 
-    out << "Project: " << args.first() << Qt::endl;
-    out << "Universes: " << doc.inputOutputMap()->universesCount() << Qt::endl;
+    report(out, engine);
 
-    out << "Fixtures: " << doc.fixtures().count() << Qt::endl;
-    for (Fixture *fixture : doc.fixtures())
+    if (options.noOutput)
+        out << "Output disabled (--no-output): nothing will reach the network." << Qt::endl;
+    else if (engine.pluginPath().isEmpty())
+        err << "WARNING: no output plugin directory found, so no DMX can be sent. "
+               "Install the daemon or set ORCHID_PLUGIN_DIR." << Qt::endl;
+
+    const QStringList args = parser.positionalArguments();
+    if (args.isEmpty() == false)
     {
-        out << "  U" << (fixture->universe() + 1)
-            << " @ " << (fixture->address() + 1)
-            << "-" << (fixture->address() + fixture->channels())
-            << "  " << fixture->name() << Qt::endl;
+        if (engine.loadProject(args.first(), errorMessage) == false)
+        {
+            err << "Failed to load project: " << errorMessage << Qt::endl;
+            return 1;
+        }
+
+        describeProject(out, engine.doc(), args.first());
+
+        /* Doc records every fixture whose definition or mode could not be
+           resolved. Those fixtures still appear above, patched at the right
+           address, but they are backed by a generic dimmer -- no channel names,
+           no capabilities. That is silent data loss unless it is reported. */
+        const QString projectErrors = engine.projectErrors();
+        if (projectErrors.isEmpty() == false)
+        {
+            err << Qt::endl << "Project loaded with unresolved definitions:" << Qt::endl;
+            err << projectErrors << Qt::endl;
+            return 2;
+        }
     }
 
-    const QList<Function *> functions = doc.functions();
-    out << "Functions: " << functions.count() << Qt::endl;
-    for (Function *function : functions)
-    {
-        out << "  [" << Function::typeToString(function->type()) << "] "
-            << function->name() << Qt::endl;
-    }
+    if (parser.isSet(checkOption))
+        return 0;
 
-    /* Doc records every fixture whose definition or mode could not be resolved.
-       Those fixtures still appear above, patched at the right address, but they
-       are backed by a generic dimmer -- no channel names, no capabilities. That
-       is silent data loss unless it is reported. */
-    const QString errorLog = doc.errorLog();
-    if (errorLog.isEmpty() == false)
-    {
-        err << Qt::endl << "Project loaded with unresolved definitions:" << Qt::endl;
-        err << errorLog << Qt::endl;
-        return 2;
-    }
+    out << Qt::endl << "Engine running. The API server arrives later in F1." << Qt::endl;
 
-    return 0;
+    return app.exec();
 }

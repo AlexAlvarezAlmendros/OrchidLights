@@ -50,6 +50,26 @@ MasterTimerPrivate::~MasterTimerPrivate()
     stop();
 }
 
+void MasterTimerPrivate::start()
+{
+    /* The run flag is raised here, on the caller's thread, rather than inside
+       run() on the new one.
+     *
+     * Doing it in run() is a deadlock: a stop() that lands before the new
+     * thread reaches its loop sets m_run to false, the thread then sails past
+     * the guard, sets m_run back to true itself and spins forever, while
+     * stop() sits in wait() that never returns.
+     *
+     * That window is wide open for anything that loads a project right after
+     * bringing the engine up, which is exactly what a daemon does.
+     */
+    if (isRunning())
+        return;
+
+    m_run = true;
+    QThread::start();
+}
+
 void MasterTimerPrivate::stop()
 {
     m_run = false;
@@ -82,9 +102,8 @@ int MasterTimerPrivate::compareTime(struct timespec *time1, struct timespec *tim
 
 void MasterTimerPrivate::run()
 {
-    /* Don't start another thread */
-    if (m_run == true)
-        return;
+    /* Double starts are refused by start() through isRunning(), so there is no
+       flag check here: this thread must never decide its own run state. */
 
     MasterTimer* mt = qobject_cast <MasterTimer*> (parent());
     Q_ASSERT(mt != NULL);
@@ -120,10 +139,6 @@ void MasterTimerPrivate::run()
         qWarning() << Q_FUNC_INFO << "Unable to get the time accurately:"
                    << strerror(errno) << "- Stopping MasterTimerPrivate";
         m_run = false;
-    }
-    else
-    {
-        m_run = true;
     }
 
     while (m_run == true)

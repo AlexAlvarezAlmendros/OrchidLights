@@ -41,6 +41,12 @@ public:
     MasterTimerPrivate(MasterTimer* masterTimer);
     ~MasterTimerPrivate();
 
+    /** Start the timer thread.
+     *
+     *  Shadows QThread::start() on purpose: the run flag must be raised on the
+     *  caller's thread, before the new thread exists. See the implementation.
+     */
+    void start();
     void stop();
 
 private:

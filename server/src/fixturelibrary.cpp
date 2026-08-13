@@ -22,14 +22,11 @@
 #include <QDir>
 
 #include "fixturelibrary.h"
+#include "installpaths.h"
 #include "qlcfixturedefcache.h"
 #include "avolitesd4parser.h"
 #include "qlcfile.h"
 #include "doc.h"
-
-/* Mirrors the constant of the same name in qlcfixturedefcache.cpp, which is
-   private to that translation unit. */
-#define ORCHID_FIXTURES_MAP_NAME QStringLiteral("FixturesMap.xml")
 
 namespace
 {
@@ -40,19 +37,6 @@ namespace
 
         const QFileInfo info(path);
         return info.exists() && info.isDir() && info.isReadable();
-    }
-
-    /** Where QLC+ keeps user fixture definitions on this platform. */
-    QString legacyUserFixturePath()
-    {
-#if defined(Q_OS_WIN)
-        const QString home = qEnvironmentVariable("UserProfile");
-        return home.isEmpty() ? QString() : home + QStringLiteral("/QLC+/Fixtures");
-#elif defined(Q_OS_MACOS)
-        return QDir::homePath() + QStringLiteral("/Library/Application Support/QLC+/Fixtures");
-#else
-        return QDir::homePath() + QStringLiteral("/.qlcplus/fixtures");
-#endif
     }
 
     /** A QDir filtered the way QLCFixtureDefCache::load() expects, since it
@@ -66,52 +50,11 @@ namespace
                            << QString("*%1").arg(KExtAvolitesFixture));
         return dir;
     }
-
-    bool holdsSystemLibrary(const QString &path)
-    {
-        return isReadableDir(path)
-               && QFileInfo::exists(QDir(path).absoluteFilePath(ORCHID_FIXTURES_MAP_NAME));
-    }
 }
 
 QString FixtureLibrary::systemDirectory(const QString &override)
 {
-    QStringList candidates;
-
-    if (override.isEmpty() == false)
-        candidates << override;
-
-    if (qEnvironmentVariableIsSet("ORCHID_FIXTURE_DIR"))
-        candidates << qEnvironmentVariable("ORCHID_FIXTURE_DIR");
-
-    candidates << QLCFixtureDefCache::systemDefinitionDirectory().absolutePath();
-
-    /* Relocatable installs. QLCFile::systemDirectory() resolves its Linux path
-       against the process working directory rather than the binary, so a
-       bundle started from anywhere but its own bin/ would miss the library
-       entirely. Anchor it to the executable instead.
-
-       Two layouts to cover: a normal prefix install puts the binary in
-       <prefix>/bin and the data in <prefix>/share, while the AppImage keeps
-       the binary in <AppDir>/usr/bin but the data in <AppDir>/share. */
-    candidates << QDir(QCoreApplication::applicationDirPath()
-                       + QStringLiteral("/../share/orchidlights/fixtures")).absolutePath();
-    candidates << QDir(QCoreApplication::applicationDirPath()
-                       + QStringLiteral("/../../share/orchidlights/fixtures")).absolutePath();
-
-    /* Development convenience, deliberately last so it can never shadow a real
-       installation: the daemon sits in build/server/src/ and the library is
-       still sitting in the source tree. */
-    candidates << QDir(QCoreApplication::applicationDirPath()
-                       + QStringLiteral("/../../../resources/fixtures")).absolutePath();
-
-    for (const QString &candidate : candidates)
-    {
-        if (holdsSystemLibrary(candidate))
-            return QDir(candidate).absolutePath();
-    }
-
-    return QString();
+    return InstallPaths::fixtureLibrary(override);
 }
 
 QStringList FixtureLibrary::userDirectories()
@@ -123,8 +66,8 @@ QStringList FixtureLibrary::userDirectories()
     if (isReadableDir(own))
         paths << own;
 
-    const QString legacy = QDir(legacyUserFixturePath()).absolutePath();
-    if (isReadableDir(legacy) && paths.contains(legacy) == false)
+    const QString legacy = InstallPaths::legacyUserDirectory(QStringLiteral("fixtures"));
+    if (legacy.isEmpty() == false && paths.contains(legacy) == false)
         paths << legacy;
 
     return paths;

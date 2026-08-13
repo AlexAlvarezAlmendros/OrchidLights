@@ -131,16 +131,26 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 **Lección aprendida.** El primer arranque contra `17Julio.qxw` cargó los 22 fixtures y pareció correcto: direcciones bien, canales bien. Pero la librería estaba vacía y las 22 definiciones habían fallado, así que todos eran dimmers genéricos sin nombres de canal ni capacidades. El motor sólo lo dejaba caer en `qDebug`, mezclado con cientos de líneas de ruido. De ahí que el daemon ahora **falle con código 2** ante cualquier definición sin resolver: en este dominio, un error silencioso significa mandar valores al canal equivocado de una luz real.
 
-### F1 — Daemon headless + API core
-- Target `orchidlightsd`: `QGuiApplication` offscreen, carga un `.qxw`, arranca `MasterTimer` y los plugins de salida sin abrir ventana.
-- `QHttpServer` + `QWebSocketServer`, protocolo JSON versionado, autenticación por sesión.
-- Endpoints: proyecto (load/save/list), fixtures (lectura), universos (lectura + stream DMX), funciones (listado + run/stop).
-- ~~Fallback al directorio de usuario heredado~~ — hecho en F0. Queda pendiente el mismo tratamiento para los **perfiles de entrada** (`~/.qlcplus/inputprofiles`), que aún no se leen.
-- **Audio.** El daemon no tiene backend multimedia todavía, y el AppImage no empaqueta ninguno a propósito. Las funciones de audio de un proyecto cargarán pero no sonarán hasta engancharlo.
-- **Localización de los plugins de salida.** `IOPluginCache` los busca con `QLCFile::systemDirectory(PLUGINDIR)`, que en Linux devuelve la ruta **tal cual, relativa al directorio de trabajo del proceso** (`engine/src/ioplugincache.cpp:137`). En una instalación normal `PLUGINDIR` es absoluta y funciona, pero en el AppImage es `../lib/qt6/plugins/orchidlights` y nuestro `AppRun` preserva el CWD del usuario a propósito, así que no resolverá. Hay que anclarla al binario igual que se hizo con la librería de fixtures en `server/src/fixturelibrary.*`. **Bloquea que el AppImage saque DMX**, no solo que lo saque bien.
-- **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador en la URL del servidor.
-- Round-trip de `.qxw`: cargar y guardar un proyecto no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.
-- **Criterio de éxito: disparar el show del P62 Club desde `curl`/`wscat`, con luz real en la sala, sin abrir ninguna GUI.**
+### F1 — Daemon headless + API core 🔨
+
+**Motor en marcha** — hecho:
+
+- [x] **Resolución de rutas unificada** en `server/src/installpaths.*`: fixtures, plugins de E/S, scripts RGB, plantillas de modificadores y perfiles de entrada. Todos sufrían el mismo fallo — `QLCFile::systemDirectory()` devuelve en Linux la ruta *tal cual*, relativa al directorio de trabajo del proceso. Ahora cada búsqueda termina en candidatos **anclados al ejecutable** y cada candidato se confirma con un marcador antes de aceptarse.
+- [x] **`EngineHost`** (`server/src/enginehost.*`): cachés, plugins, universos y `MasterTimer`, en el orden que el motor exige, en un solo sitio legible.
+- [x] **13 plugins de salida cargando** (ArtNet, DMX USB, E1.31, OSC, MIDI, HID, uDMX, Peperoni, SPI, OS2L, ENTTEC Wing, DMX4Linux, Loopback) — tanto instalado como **desde dentro del AppImage**, que es el caso que la ruta compilada no puede resolver porque apunta a la máquina que construyó el bundle.
+- [x] Perfiles de entrada: se leen los del sistema, los nuestros y **los heredados de `~/.qlcplus/inputprofiles`**.
+- [x] Bandera `--no-output` para arrancar el motor sin tocar la red, y `--check` para cargar, reportar y salir.
+
+> **Bug corregido en el motor** (`engine/src/mastertimer-unix.cpp`). `MasterTimerPrivate::run()` levantaba su propia bandera `m_run` **dentro del hilo nuevo**, tras una guarda `if (m_run == true) return;`. Un `stop()` que llegase antes de que el hilo alcanzara su bucle ponía la bandera a `false`, el hilo pasaba la guarda, **se la volvía a poner a `true` él mismo** y giraba para siempre mientras `stop()` esperaba en un `wait()` que no volvía nunca. Es una ventana que se abre de par en par en cuanto algo carga un proyecto justo después de arrancar el motor — es decir, un daemon. La bandera se levanta ahora en el hilo que llama, y los arranques dobles los rechaza `isRunning()`. La variante Win32 no estaba afectada: su `start()` ya era síncrono.
+
+**Pendiente:**
+
+- [ ] `QHttpServer` + `QWebSocketServer`, protocolo JSON versionado, autenticación por sesión.
+- [ ] Endpoints: proyecto (load/save/list), fixtures (lectura), universos (lectura + stream DMX), funciones (listado + run/stop).
+- [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.
+- [ ] Round-trip de `.qxw`: cargar y guardar no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.
+- [ ] **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador.
+- [ ] **Criterio de éxito: disparar el show del P62 Club desde `curl`/`wscat`, con luz real en la sala, sin abrir ninguna GUI.**
 
 ### F2 — Shell web + Virtual Console en directo *(dolor #1)*
 - SPA con el layout responsive y los dos temas.
