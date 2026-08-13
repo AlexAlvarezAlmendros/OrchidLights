@@ -204,7 +204,11 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 **Pendiente:**
 
-- [ ] Sliders de playback y submaster, cue lists, XY pads y speed dial.
+- [x] **Speed dial funcionando.** Verificado sobre el rig: mover el dial de 430 ms a 3000 y a 500 cambia la duración de los tres chases y los dos EFX de movimiento del P62. Las velocidades (`fadeIn`/`fadeOut`/`duration`) se exponen ahora en `/api/v1/functions`, para que el efecto sea **observable** y no solo confirmado por un acuse.
+  Los flags del XML son índices en la tabla de multiplicadores de QLC+, donde `0 = None` significa "no toques esa velocidad" — por eso un dial que parece controlar un fade a menudo solo controla la duración.
+- [ ] Sliders de playback y submaster, cue lists, XY pads.
+
+> **Con esto, la consola del P62 no tiene ningún widget muerto**: 20 botones, 5 faders, el speed dial y las etiquetas, todos operativos desde el navegador.
 - [x] **Editor de orden sobre rejilla**, guardado en `<OrchidLightsLayout>`, una sección propia del `.qxw`. Verificado contra **QLC+ 5.2.1**: avisa `Unknown Workspace tag` y carga el proyecto con normalidad. Asimetría documentada: QLC+ no conserva secciones desconocidas, así que guardar desde QLC+ pierde el orden (y solo el orden).
 - [x] `web/src/arrange.ts` con 11 tests: un layout **nunca pierde un widget** ni oculta uno que no menciona — un botón añadido en QLC+ después de guardar el orden sigue apareciendo, porque esconderlo sería el peor fallo posible.
 - [x] En modo ordenar **ningún widget dispara su función**: mover un botón no debe además pulsarlo. Interacción por `pointerup`, no arrastre HTML5, que no existe en táctil.

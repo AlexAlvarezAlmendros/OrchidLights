@@ -43,6 +43,7 @@ export function App() {
         const seeded: Record<number, number> = {}
         const visit = (w: VcWidget) => {
           if (w.sliderMode && w.value !== undefined) seeded[w.id] = w.value
+          if (w.speedTargets && w.speedMs !== undefined) seeded[w.id] = w.speedMs
           for (const child of w.children ?? []) visit(child)
         }
         visit(console_)
@@ -76,6 +77,11 @@ export function App() {
   )
 
   const toggle = useCallback((id: number) => live.current?.toggle(id, running.has(id)), [running])
+
+  const setSpeed = useCallback((id: number, milliseconds: number) => {
+    setLevels((current) => ({ ...current, [id]: milliseconds }))
+    live.current?.setSpeedDial(id, milliseconds)
+  }, [])
 
   const setLevel = useCallback((id: number, value: number) => {
     // Optimistic: the fader follows the finger and the engine catches up on its
@@ -162,6 +168,7 @@ export function App() {
             onToggle={toggle}
             levels={levels}
             onLevel={setLevel}
+            onSpeed={setSpeed}
             editing={editing}
             dragging={dragging}
             onDragStart={setDragging}
@@ -181,6 +188,7 @@ function Surface({
   onToggle,
   levels,
   onLevel,
+  onSpeed,
   editing,
   dragging,
   onDragStart,
@@ -191,6 +199,7 @@ function Surface({
   onToggle: (id: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
+  onSpeed: (id: number, milliseconds: number) => void
   editing: boolean
   dragging: number | null
   onDragStart: (id: number | null) => void
@@ -216,6 +225,7 @@ function Surface({
                 onToggle={onToggle}
                 levels={levels}
                 onLevel={onLevel}
+                onSpeed={onSpeed}
                 editing={editing}
                 dragged={dragging === child.id}
                 onDragStart={onDragStart}
@@ -271,6 +281,7 @@ function Widget({
   onToggle,
   levels,
   onLevel,
+  onSpeed,
   editing,
   dragged,
   onDragStart,
@@ -281,6 +292,7 @@ function Widget({
   onToggle: (id: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
+  onSpeed: (id: number, milliseconds: number) => void
   editing: boolean
   dragged: boolean
   onDragStart: (id: number | null) => void
@@ -327,6 +339,17 @@ function Widget({
     )
   }
 
+  if (widget.speedTargets) {
+    return (
+      <SpeedDial
+        widget={widget}
+        style={style}
+        value={levels[widget.id] ?? widget.speedMs ?? 0}
+        onChange={onSpeed}
+      />
+    )
+  }
+
   if (widget.sliderMode) {
     return (
       <Fader
@@ -355,6 +378,41 @@ function Widget({
       <br />
       <small>({widget.type})</small>
     </div>
+  )
+}
+
+function SpeedDial({
+  widget,
+  style,
+  value,
+  onChange,
+}: {
+  widget: VcWidget
+  style: React.CSSProperties
+  value: number
+  onChange: (id: number, milliseconds: number) => void
+}) {
+  const min = widget.speedMin ?? 0
+  const max = widget.speedMax ?? 10000
+  const count = widget.speedTargets?.length ?? 0
+
+  return (
+    <label className="widget fader speeddial" style={style} data-usable="true">
+      <span className="fader-caption">{widget.caption || 'Velocidad'}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={10}
+        value={value}
+        aria-label={widget.caption}
+        onChange={(e) => onChange(widget.id, Number(e.target.value))}
+      />
+      <span className="fader-value">
+        {value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(2)} s`}
+        {count > 0 && <> · {count} fn</>}
+      </span>
+    </label>
   )
 }
 

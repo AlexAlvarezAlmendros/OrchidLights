@@ -65,6 +65,22 @@ struct VcWidget
     /** Fixture and channel pairs a level slider writes to. */
     QVector<QPair<quint32, quint32>> levelChannels;
 
+    /* Speed dials. Each entry names a function and, for each of its three
+       speeds, a multiplier index into QLC+'s table. Index 0 is None, meaning
+       "leave that speed alone" -- which is why a dial that looks like it should
+       change a fade often only changes a duration. */
+    struct SpeedTarget
+    {
+        quint32 functionId = 0;
+        int fadeIn = 0;
+        int fadeOut = 0;
+        int duration = 0;
+    };
+    QVector<SpeedTarget> speedTargets;
+    int speedMs = 0;       //!< the dial's stored position, in milliseconds
+    int speedMin = 0;
+    int speedMax = 10000;
+
     QVector<VcWidget> children;
 };
 

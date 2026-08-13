@@ -66,6 +66,7 @@ export class Live {
           this.handlers.onFunctions(message.functions)
           break
         case 'slider':
+        case 'speeddial':
           this.handlers.onSlider?.(message.id, message.value)
           break
       }
@@ -90,6 +91,10 @@ export class Live {
 
   toggle(id: number, running: boolean): void {
     this.send({ type: 'function', id, action: running ? 'stop' : 'start' })
+  }
+
+  setSpeedDial(id: number, milliseconds: number): void {
+    this.send({ type: 'speeddial', id, value: milliseconds })
   }
 
   setSlider(id: number, value: number): void {

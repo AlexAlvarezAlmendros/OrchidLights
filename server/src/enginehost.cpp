@@ -35,6 +35,7 @@
 #include "audioplugincache.h"
 #include "inputoutputmap.h"
 #include "mastertimer.h"
+#include "function.h"
 #include "doc.h"
 
 EngineHost::EngineHost(QObject *parent)
@@ -260,6 +261,55 @@ QString EngineHost::resolveProjectName(const QString &name) const
         return QString();
 
     return QDir(m_projectsDirectory).absoluteFilePath(name);
+}
+
+bool EngineHost::setSpeedDial(quint32 widgetId, int milliseconds)
+{
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root) == false)
+        return false;
+
+    /* QLC+'s multiplier table, times 1000. Index 0 is None: a speed the dial
+       leaves alone, which is why most dials touch only one of the three. */
+    static const int multipliers[] = {0, 0, 1000 / 16, 1000 / 8, 1000 / 4, 1000 / 2,
+                                      1000, 1000 * 2, 1000 * 4, 1000 * 8, 1000 * 16};
+    static const int multiplierCount = int(sizeof(multipliers) / sizeof(multipliers[0]));
+
+    QVector<const VcWidget *> pending;
+    pending.append(&root);
+
+    while (pending.isEmpty() == false)
+    {
+        const VcWidget *widget = pending.takeLast();
+
+        if (widget->id == widgetId && widget->speedTargets.isEmpty() == false)
+        {
+            for (const VcWidget::SpeedTarget &target : widget->speedTargets)
+            {
+                Function *function = m_doc->function(target.functionId);
+                if (function == nullptr)
+                    continue;
+
+                const auto scaled = [&](int multiplier) {
+                    return uint(qint64(milliseconds) * multipliers[multiplier] / 1000);
+                };
+
+                if (target.fadeIn > 0 && target.fadeIn < multiplierCount)
+                    function->setFadeInSpeed(scaled(target.fadeIn));
+                if (target.fadeOut > 0 && target.fadeOut < multiplierCount)
+                    function->setFadeOutSpeed(scaled(target.fadeOut));
+                if (target.duration > 0 && target.duration < multiplierCount)
+                    function->setDuration(scaled(target.duration));
+            }
+
+            return true;
+        }
+
+        for (const VcWidget &child : widget->children)
+            pending.append(&child);
+    }
+
+    return false;
 }
 
 QVector<ConsoleLayout::Page> EngineHost::layout() const

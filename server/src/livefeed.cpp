@@ -294,6 +294,35 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         return;
     }
 
+    if (type == QStringLiteral("speeddial"))
+    {
+        const quint32 id = quint32(message.value("id").toInt(-1));
+        const int ms = message.value("value").toInt(-1);
+
+        if (ms < 0 || m_engine->setSpeedDial(id, ms) == false)
+        {
+            QJsonObject error;
+            error["type"] = "error";
+            error["error"] = QStringLiteral("No such speed dial, or value out of range");
+            sendJson(socket, error);
+            return;
+        }
+
+        QJsonObject update;
+        update["type"] = "speeddial";
+        update["id"] = qint64(id);
+        update["value"] = ms;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(update).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated && it.key() != socket)
+                it.key()->sendTextMessage(payload);
+        }
+        return;
+    }
+
     if (type == QStringLiteral("function"))
     {
         Doc *doc = m_engine->doc();

@@ -70,6 +70,12 @@ QJsonObject JsonView::function(const Function *function)
     json["type"] = Function::typeToString(function->type());
     json["running"] = function->isRunning();
 
+    /* Speeds, in milliseconds. Exposed so a speed dial's effect is observable
+       rather than merely acknowledged. */
+    json["fadeIn"] = qint64(function->fadeInSpeed());
+    json["fadeOut"] = qint64(function->fadeOutSpeed());
+    json["duration"] = qint64(function->duration());
+
     return json;
 }
 
@@ -151,6 +157,25 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
 
     if (widget.hasFunction)
         json["functionId"] = qint64(widget.functionId);
+
+    if (widget.speedTargets.isEmpty() == false)
+    {
+        QJsonArray targets;
+        for (const VcWidget::SpeedTarget &target : widget.speedTargets)
+        {
+            QJsonObject entry;
+            entry["functionId"] = qint64(target.functionId);
+            entry["fadeIn"] = target.fadeIn;
+            entry["fadeOut"] = target.fadeOut;
+            entry["duration"] = target.duration;
+            targets.append(entry);
+        }
+        json["speedTargets"] = targets;
+        json["speedMs"] = widget.speedMs;
+        json["speedMin"] = widget.speedMin;
+        json["speedMax"] = widget.speedMax;
+        json["controllable"] = true;
+    }
 
     if (widget.sliderMode.isEmpty() == false)
     {
