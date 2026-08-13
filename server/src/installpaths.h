@@ -69,6 +69,10 @@ public:
     /** Shipped input profiles. Empty when none was found. */
     static QString inputProfiles();
 
+    /** The built web interface, i.e. the directory holding index.html.
+     *  Empty when it has not been built or installed. */
+    static QString webRoot();
+
     /**
      * The matching directory inside the legacy QLC+ user tree, or empty when
      * absent. `subdir` is the leaf as QLC+ names it on this platform, e.g.

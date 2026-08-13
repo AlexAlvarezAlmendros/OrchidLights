@@ -7,6 +7,7 @@ add_executable(${module_name}
     enginehost.cpp enginehost.h
     fixturelibrary.cpp fixturelibrary.h
     installpaths.cpp installpaths.h
+    virtualconsole.cpp virtualconsole.h
     jsonview.cpp jsonview.h
     livefeed.cpp livefeed.h
     workspaceloader.cpp workspaceloader.h

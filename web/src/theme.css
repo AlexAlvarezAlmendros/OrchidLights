@@ -1,0 +1,220 @@
+/*
+  Two themes, both dark, for two situations.
+
+  "stage" is the normal one: a lighting desk is used in the dark, so a light
+  theme would blind the operator and wash out the room.
+
+  "blackout" is for during a pass. Deep red and amber only, at low luminance:
+  night vision takes about twenty minutes to recover and a white screen in the
+  wings destroys it for the operator and everyone near them. It is not a
+  cosmetic variant, it is the difference between being able to see the stage or
+  not.
+*/
+
+:root,
+[data-theme="stage"] {
+  --bg: #0d0e11;
+  --surface: #16181d;
+  --surface-raised: #1f232a;
+  --border: #2a2f38;
+  --text: #e8eaee;
+  --text-dim: #9aa1ad;
+  --accent: #7c5cff;
+  --live: #38d9a9;
+  --danger: #ff5c5c;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+[data-theme="blackout"] {
+  --bg: #000000;
+  --surface: #0a0000;
+  --surface-raised: #140200;
+  --border: #3a0f00;
+  --text: #ff7a33;
+  --text-dim: #8a3a12;
+  --accent: #b23c00;
+  --live: #ff9a3c;
+  --danger: #ff3c00;
+  --shadow: none;
+}
+
+/* Widget colours from the show are muted here: the designer picked them for
+   stage lights, not for a screen an operator stares at in the dark. */
+[data-theme="blackout"] .widget {
+  --widget-bg: var(--surface-raised) !important;
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.chip {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  white-space: nowrap;
+}
+
+.chip[data-state="open"] {
+  color: var(--live);
+  border-color: var(--live);
+}
+.chip[data-state="closed"] {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Every control is at least 44 px: the smallest thing a finger reliably hits,
+   and this is used in the dark by someone who cannot look down. */
+button {
+  min-height: 44px;
+  min-width: 44px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow: var(--shadow);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.pages {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem 0;
+  overflow-x: auto;
+}
+
+.console {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* A row of the original console, reflowed. On a phone the widgets wrap onto
+   several lines instead of shrinking below the point of being usable. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.widget {
+  flex: var(--grow, 1) 1 var(--basis, 8rem);
+  min-width: 6.5rem;
+  background: var(--widget-bg, var(--surface-raised));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 56px;
+  word-break: break-word;
+}
+
+.widget.button {
+  font-weight: 600;
+}
+
+.widget.button[data-running="true"] {
+  outline: 3px solid var(--live);
+  outline-offset: -3px;
+}
+
+.widget.label {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  justify-content: flex-start;
+  min-height: 0;
+  padding: 0.35rem 0.2rem;
+  flex-basis: 100%;
+}
+
+.widget.unsupported {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  border-style: dashed;
+}
+
+.empty {
+  color: var(--text-dim);
+  padding: 2rem 1rem;
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* Designer mode: more room, so let rows breathe rather than stretch. */
+@media (min-width: 1025px) {
+  .console {
+    padding: 1rem 1.25rem;
+  }
+  .widget {
+    --basis: 10rem;
+  }
+}

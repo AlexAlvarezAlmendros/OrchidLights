@@ -18,6 +18,7 @@
 */
 
 #include "jsonview.h"
+#include "virtualconsole.h"
 
 #include "qlcfixturemode.h"
 #include "qlcfixturedef.h"
@@ -125,4 +126,39 @@ QJsonArray JsonView::universes(const Doc *doc)
         array.append(universe(list.at(i), i));
 
     return array;
+}
+
+QJsonObject JsonView::vcWidget(const VcWidget &widget)
+{
+    QJsonObject json;
+
+    json["type"] = widget.type;
+    json["id"] = qint64(widget.id);
+    if (widget.caption.isEmpty() == false)
+        json["caption"] = widget.caption;
+
+    QJsonObject geometry;
+    geometry["x"] = widget.geometry.x();
+    geometry["y"] = widget.geometry.y();
+    geometry["width"] = widget.geometry.width();
+    geometry["height"] = widget.geometry.height();
+    json["geometry"] = geometry;
+
+    if (widget.background.isEmpty() == false)
+        json["background"] = widget.background;
+    if (widget.foreground.isEmpty() == false)
+        json["foreground"] = widget.foreground;
+
+    if (widget.hasFunction)
+        json["functionId"] = qint64(widget.functionId);
+
+    if (widget.children.isEmpty() == false)
+    {
+        QJsonArray children;
+        for (const VcWidget &child : widget.children)
+            children.append(vcWidget(child));
+        json["children"] = children;
+    }
+
+    return json;
 }

@@ -23,11 +23,14 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QFileInfo>
+#include <QDir>
 
 #include "apiserver.h"
 #include "enginehost.h"
 #include "jsonview.h"
 #include "livefeed.h"
+#include "virtualconsole.h"
+#include "installpaths.h"
 #include "qlcconfig.h"
 
 #include "functionparent.h"
@@ -137,16 +140,48 @@ void ApiServer::registerRoutes()
         return m_auth.authorize(request) == false;
     };
 
-    /* Anything not under /api is the web interface's territory, which does not
-       exist yet. Say what this is rather than 404 at a confused browser. */
-    m_server->route("/", [this]() {
-        QJsonObject body;
-        body["name"] = QStringLiteral(APPNAME);
-        body["version"] = QStringLiteral(APPVERSION);
-        body["api"] = QStringLiteral("/api/v1");
-        body["ui"] = QStringLiteral("not built yet");
-        return QHttpServerResponse(body);
-    });
+    /* The web interface, served from the same origin as the API so a browser
+       needs no CORS and the operator needs one URL.
+     *
+     * Deliberately not a catch-all route: /<arg> would also swallow /api and
+     * /ws. The built app is a single page with hashless routing, so index.html
+     * plus the asset directory is the whole surface. */
+    const QString webRoot = InstallPaths::webRoot();
+
+    if (webRoot.isEmpty())
+    {
+        m_server->route("/", [this]() {
+            QJsonObject body;
+            body["name"] = QStringLiteral(APPNAME);
+            body["version"] = QStringLiteral(APPVERSION);
+            body["api"] = QStringLiteral("/api/v1");
+            body["ui"] = QStringLiteral("not built; run pnpm build in web/");
+            return QHttpServerResponse(body);
+        });
+    }
+    else
+    {
+        m_server->route("/", [webRoot]() {
+            return QHttpServerResponse::fromFile(QDir(webRoot).absoluteFilePath(
+                QStringLiteral("index.html")));
+        });
+
+        m_server->route("/assets/<arg>", [webRoot](const QString &name) {
+            /* Vite writes hashed names into assets/ and nothing else, but the
+               name still arrives from the network: refuse anything that could
+               climb out of the directory rather than trusting the generator. */
+            if (name.contains(QChar('/')) || name.contains(QStringLiteral("..")))
+                return jsonError(StatusCode::BadRequest, QStringLiteral("Bad asset name"));
+
+            const QString path = QDir(webRoot).absoluteFilePath(
+                QStringLiteral("assets/") + name);
+
+            if (QFileInfo::exists(path) == false)
+                return jsonError(StatusCode::NotFound, QStringLiteral("No such asset"));
+
+            return QHttpServerResponse::fromFile(path);
+        });
+    }
 
     m_server->route("/api/v1/status", [this, doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
@@ -236,6 +271,22 @@ void ApiServer::registerRoutes()
 
         return QHttpServerResponse(acknowledge(function, QStringLiteral("stop")),
                                    StatusCode::Accepted);
+    });
+
+    /* Read only, and parsed out of the very XML we preserve, so serving it
+       cannot disturb what goes back into the file. */
+    m_server->route("/api/v1/vc", [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        VcWidget root;
+        if (VirtualConsole::parse(m_engine->preservedSections(), root) == false)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("This project has no Virtual Console"));
+        }
+
+        return QHttpServerResponse(JsonView::vcWidget(root));
     });
 
     m_server->route("/api/v1/project", [this, doc, denied](const QHttpServerRequest &request) {

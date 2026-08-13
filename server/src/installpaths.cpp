@@ -172,6 +172,23 @@ QString InstallPaths::inputProfiles()
                        QString("*%1").arg(KExtInputProfile));
 }
 
+QString InstallPaths::webRoot()
+{
+    QStringList candidates;
+
+    if (qEnvironmentVariableIsSet("ORCHID_WEB_DIR"))
+        candidates << qEnvironmentVariable("ORCHID_WEB_DIR");
+
+    candidates << anchoredToBinary(QStringLiteral("share/orchidlights/web"));
+
+    /* Uninstalled: the daemon sits in build/server/src/ and Vite writes to
+       web/dist in the source tree. */
+    candidates << QDir(QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/../../../web/dist")).absolutePath();
+
+    return firstWithFile(candidates, QStringLiteral("index.html"));
+}
+
 QString InstallPaths::legacyUserDirectory(const QString &subdir)
 {
 #if defined(Q_OS_WIN)

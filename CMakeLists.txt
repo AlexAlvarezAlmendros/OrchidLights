@@ -96,6 +96,7 @@ if(server)
     # are deliberately excluded -- they are replaced by server/ + web/.
     message("Building OrchidLights server (headless daemon + web API)")
     add_subdirectory(server)
+    add_subdirectory(web)
 else()
     add_subdirectory(webaccess)
     if(qmlui)
