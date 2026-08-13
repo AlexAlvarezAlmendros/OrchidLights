@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.orchidlights.OrchidLights</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+
+  <name>OrchidLights</name>
+  <summary>DMX lighting control from the browser</summary>
+  <summary xml:lang="es">Control de iluminación DMX desde el navegador</summary>
+
+  <description>
+    <p>
+      OrchidLights drives DMX lighting rigs from a web interface: the same
+      controls work on the laptop in the booth, on a tablet at the stage and on
+      a phone during the show.
+    </p>
+    <p>
+      It builds on the lighting engine of QLC+, which supports Art-Net,
+      sACN/E1.31, DMX USB, OSC, MIDI and HID, and ships a library of more than
+      1700 fixture definitions. Project files remain interchangeable with QLC+.
+    </p>
+    <p>
+      This release provides the headless engine daemon. The web interface is
+      still in development.
+    </p>
+  </description>
+
+  <developer id="io.github.alexalvarezalmendros">
+    <name>Alex Alvarez</name>
+  </developer>
+
+  <launchable type="desktop-id">orchidlights.desktop</launchable>
+
+  <url type="homepage">https://github.com/AlexAlvarezAlmendros/OrchidLights</url>
+  <url type="bugtracker">https://github.com/AlexAlvarezAlmendros/OrchidLights/issues</url>
+
+  <provides>
+    <binary>orchidlightsd</binary>
+  </provides>
+
+  <categories>
+    <category>AudioVideo</category>
+  </categories>
+
+  <releases>
+    <release version="0.1.0" date="2026-08-13">
+      <description>
+        <p>Headless engine daemon: loads QLC+ project files with no user
+        interface and reports their fixtures, universes and functions.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+</component>

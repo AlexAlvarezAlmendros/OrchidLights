@@ -169,8 +169,10 @@ if (UNIX AND NOT APPLE)
    # Rules to make USB DMX devices readable & writable by normal users
    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/z65-dmxusb.rules"
            DESTINATION ${UDEVRULESDIR})
-   install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/org.qlcplus.QLCPlus.dmxusb.metainfo.xml"
-           DESTINATION ${METAINFODIR})
+   if (NOT server)
+       install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/org.qlcplus.QLCPlus.dmxusb.metainfo.xml"
+               DESTINATION ${METAINFODIR})
+   endif()
 elseif (WITH_D2XX)
     if (DEFINED ENV{MSYSTEM_CARCH})
         set(SYSTEM_ARCH "$ENV{MSYSTEM_CARCH}")

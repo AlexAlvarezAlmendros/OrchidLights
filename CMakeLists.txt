@@ -168,42 +168,57 @@ add_custom_target(lcov
 )
 
 # Translations
-if (qmlui)
-  add_custom_target(translations ALL
-    COMMAND ./translate.sh release qmlui
-    COMMENT "Translating qmlui translations..."
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-else ()
-  add_custom_target(translations ALL
-    COMMAND ./translate.sh release ui
-    COMMENT "Translating ui translations..."
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+#
+# The server build skips them entirely. They are Qt .qm catalogues for the
+# desktop interfaces, which this build does not compile, so they would be
+# generated and shipped for strings nothing ever looks up. The web interface
+# gets localised in the browser, not through Qt.
+if (NOT server)
+  if (qmlui)
+    add_custom_target(translations ALL
+      COMMAND ./translate.sh release qmlui
+      COMMENT "Translating qmlui translations..."
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  else ()
+    add_custom_target(translations ALL
+      COMMAND ./translate.sh release ui
+      COMMENT "Translating ui translations..."
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
+
+  ## Install the qm files
+  if (appimage)
+    set(translations_install_path "${TARGET_DIR}/${INSTALLROOT}/${TRANSLATIONDIR}")
+  else ()
+    set(translations_install_path "${INSTALLROOT}/${TRANSLATIONDIR}")
+  endif()
+
+  # Define the pattern for the .qm files
+  set(translations_qm_pattern "${CMAKE_CURRENT_SOURCE_DIR}/qlcplus_*.qm")
+
+  # Install command using a custom script
+  install(CODE "
+    file(GLOB qm_files \"${translations_qm_pattern}\")
+    foreach(file IN LISTS qm_files)
+      file(INSTALL DESTINATION \"${translations_install_path}\" TYPE FILE FILES \"\${file}\")
+    endforeach()
+  " COMPONENT translations)
+
+  ## Clean the generated files
+  set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${CMAKE_CURRENT_BINARY_DIR}/*.qm")
 endif()
-
-## Install the qm files
-if (appimage)
-  set(translations_install_path "${TARGET_DIR}/${INSTALLROOT}/${TRANSLATIONDIR}")
-else ()
-  set(translations_install_path "${INSTALLROOT}/${TRANSLATIONDIR}")
-endif()
-
-# Define the pattern for the .qm files
-set(translations_qm_pattern "${CMAKE_CURRENT_SOURCE_DIR}/qlcplus_*.qm")
-
-# Install command using a custom script
-install(CODE "
-  file(GLOB qm_files \"${translations_qm_pattern}\")
-  foreach(file IN LISTS qm_files)
-    file(INSTALL DESTINATION \"${translations_install_path}\" TYPE FILE FILES \"\${file}\")
-  endforeach()
-" COMPONENT translations)
-
-## Clean the generated files
-set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "${CMAKE_CURRENT_BINARY_DIR}/*.qm")
 
 # run
 if(UNIX)
-    if(qmlui)
+    if(server)
+       add_custom_target(run
+            COMMAND ${CMAKE_COMMAND} -E env
+                    LD_LIBRARY_PATH=engine/src:$ENV{LD_LIBRARY_PATH}
+                    QT_QPA_PLATFORM=offscreen
+                    server/src/orchidlightsd
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        )
+    elseif(qmlui)
        add_custom_target(run
             COMMAND ${CMAKE_COMMAND} -E env LD_LIBRARY_PATH=engine/src:$ENV{LD_LIBRARY_PATH} qmlui/qlcplus-qml
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -217,7 +232,7 @@ if(UNIX)
 endif()
 
 # run-fxe
-if(UNIX AND NOT qmlui)
+if(UNIX AND NOT qmlui AND NOT server)
     add_custom_target(run-fxe
         COMMAND ${CMAKE_COMMAND} -E env LD_LIBRARY_PATH=engine/src:ui/src:webaccess/src:$ENV{LD_LIBRARY_PATH} ./fixtureeditor/qlcplus-fixtureeditor
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -244,8 +259,13 @@ if(NOT TARGET uninstall)
 endif()
 
 SET(CPACK_GENERATOR "DEB")
-set(CPACK_PACKAGE_NAME "qlcplus")
-SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Massimo Callegari") #required
+if(server)
+    set(CPACK_PACKAGE_NAME "orchidlights")
+    SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Alex Alvarez") #required
+else()
+    set(CPACK_PACKAGE_NAME "qlcplus")
+    SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Massimo Callegari") #required
+endif()
 INCLUDE(CPack)
 
 # Leave this on the last row of this file

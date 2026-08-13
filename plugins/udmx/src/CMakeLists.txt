@@ -54,7 +54,7 @@ install(TARGETS ${module_name}
     RUNTIME DESTINATION ${INSTALLROOT}/${PLUGINDIR}
 )
 
-if (UNIX AND NOT APPLE)
+if (UNIX AND NOT APPLE AND NOT server)
    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/z65-anyma-udmx.rules"
            DESTINATION ${UDEVRULESDIR})
    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/org.qlcplus.QLCPlus.udmx.metainfo.xml"

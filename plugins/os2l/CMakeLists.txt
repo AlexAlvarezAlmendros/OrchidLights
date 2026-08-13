@@ -44,7 +44,7 @@ install(TARGETS ${module_name}
     RUNTIME DESTINATION ${INSTALLROOT}/${PLUGINDIR}
 )
 
-if (UNIX AND NOT APPLE)
+if (UNIX AND NOT APPLE AND NOT server)
    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/org.qlcplus.QLCPlus.os2l.metainfo.xml"
            DESTINATION ${METAINFODIR})
 endif()

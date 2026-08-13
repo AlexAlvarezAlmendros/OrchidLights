@@ -1,0 +1,24 @@
+#  systemd user unit for the OrchidLights daemon.
+#
+#  Enable it with:
+#      systemctl --user enable --now orchidlights
+#
+#  A lighting desk has to survive the operator closing a laptop lid, so if you
+#  want the daemon running without an active login session, also run:
+#      sudo loginctl enable-linger $USER
+
+[Unit]
+Description=OrchidLights lighting daemon
+Documentation=https://github.com/AlexAlvarezAlmendros/OrchidLights
+After=network.target sound.target
+
+[Service]
+Type=simple
+# No window is ever created, but the engine links QtGui.
+Environment=QT_QPA_PLATFORM=offscreen
+ExecStart=/usr/bin/orchidlightsd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

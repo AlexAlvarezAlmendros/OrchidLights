@@ -1,34 +1,53 @@
 project(icons)
 
-if(qmlui)
-    set(desktop_FILES qlcplus5.desktop)
+if(server)
+    # OrchidLights ships its own desktop integration. None of the inherited
+    # QLC+ entries may be installed here: they launch qlcplus and
+    # qlcplus-fixtureeditor, which this build does not produce, so they would
+    # land in the application menu as broken launchers.
+    install(FILES orchidlights.desktop DESTINATION ${INSTALLROOT}/share/applications/)
+
+    install(FILES ../../resources/icons/svg/orchidlights.svg
+            DESTINATION ${INSTALLROOT}/share/icons/hicolor/scalable/apps/)
+
+    install(FILES org.orchidlights.OrchidLights.metainfo.xml
+            DESTINATION ${INSTALLROOT}/share/metainfo/)
+
+    # systemd user unit. A daemon belongs under systemctl --user, not behind a
+    # menu entry that has to stay open for the show to keep running.
+    install(FILES orchidlights.service
+            DESTINATION ${INSTALLROOT}/lib/systemd/user/)
 else()
-    set(desktop_FILES
-        qlcplus.desktop
-        qlcplus-fixtureeditor.desktop)
-endif()
-install(FILES ${desktop_FILES} DESTINATION ${INSTALLROOT}/share/applications/)
+    if(qmlui)
+        set(desktop_FILES qlcplus5.desktop)
+    else()
+        set(desktop_FILES
+            qlcplus.desktop
+            qlcplus-fixtureeditor.desktop)
+    endif()
+    install(FILES ${desktop_FILES} DESTINATION ${INSTALLROOT}/share/applications/)
 
-set(icons_SRCS ../../resources/icons/png/qlcplus.png)
-if(NOT qmlui)
-    list(APPEND icons_SRCS ../../resources/icons/png/qlcplus-fixtureeditor.png)
-endif()
-install(FILES ${icons_SRCS} DESTINATION ${INSTALLROOT}/share/pixmaps/)
+    set(icons_SRCS ../../resources/icons/png/qlcplus.png)
+    if(NOT qmlui)
+        list(APPEND icons_SRCS ../../resources/icons/png/qlcplus-fixtureeditor.png)
+    endif()
+    install(FILES ${icons_SRCS} DESTINATION ${INSTALLROOT}/share/pixmaps/)
 
-install(FILES qlcplus.xml DESTINATION ${INSTALLROOT}/share/mime/packages)
+    install(FILES qlcplus.xml DESTINATION ${INSTALLROOT}/share/mime/packages)
 
-if(qmlui)
-    set(appdata_FILES org.qlcplus.QLCPlus5.appdata.xml)
-else()
-    set(appdata_FILES
-        org.qlcplus.QLCPlus.appdata.xml
-        org.qlcplus.QLCPlusFixtureEditor.appdata.xml)
-endif()
-install(FILES ${appdata_FILES} DESTINATION ${METAINFODIR})
+    if(qmlui)
+        set(appdata_FILES org.qlcplus.QLCPlus5.appdata.xml)
+    else()
+        set(appdata_FILES
+            org.qlcplus.QLCPlus.appdata.xml
+            org.qlcplus.QLCPlusFixtureEditor.appdata.xml)
+    endif()
+    install(FILES ${appdata_FILES} DESTINATION ${METAINFODIR})
 
-if(NOT qmlui)
-    file(GLOB manpages_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.1")
-    install(FILES ${manpages_FILES} DESTINATION ${INSTALLROOT}/${MANDIR})
+    if(NOT qmlui)
+        file(GLOB manpages_FILES "${CMAKE_CURRENT_SOURCE_DIR}/*.1")
+        install(FILES ${manpages_FILES} DESTINATION ${INSTALLROOT}/${MANDIR})
+    endif()
 endif()
 
 # install(FILES ../Sample.qxw DESTINATION ${INSTALLROOT}/${DATADIR})
@@ -59,7 +78,25 @@ if(appimage)
     )
 
     # Qt Libraries
-    if (QT_VERSION_MAJOR GREATER 5)
+    if (server)
+        # Exactly what ldd reports for orchidlightsd, libqlcplusengine and the
+        # output plugins, plus the two modules the API server links. The
+        # desktop bundle drags in Svg, OpenGL, MultimediaWidgets, PrintSupport
+        # and the FFmpeg stack; none of that is reachable from a headless
+        # daemon, and libavformat.so is not even present without the -dev
+        # package installed.
+        set(qtlibs_FILES
+            ${QT_LIBS_PATH}/libQt6Core.so
+            ${QT_LIBS_PATH}/libQt6DBus.so
+            ${QT_LIBS_PATH}/libQt6Gui.so
+            ${QT_LIBS_PATH}/libQt6Multimedia.so
+            ${QT_LIBS_PATH}/libQt6Network.so
+            ${QT_LIBS_PATH}/libQt6Qml.so
+            ${QT_LIBS_PATH}/libQt6SerialPort.so
+            ${QT_LIBS_PATH}/libQt6Widgets.so
+            ${QT_LIBS_PATH}/libQt6HttpServer.so
+            ${QT_LIBS_PATH}/libQt6WebSockets.so)
+    elseif (QT_VERSION_MAJOR GREATER 5)
         set(qtlibs_FILES
             ${QT_LIBS_PATH}/libQt6Core.so
             ${QT_LIBS_PATH}/libQt6Network.so
@@ -155,6 +192,16 @@ if(appimage)
         set(PLUGINS_DESTINATION ${INSTALLROOT}/${LIBSDIR}/qt5/plugins)
     endif()
 
+    if (server)
+        # A headless daemon needs no windowing system. offscreen is what the
+        # unit file and the smoke tests select; minimal is kept as a fallback.
+        install(
+            FILES
+                ${QT_PLUGINS_PATH}/platforms/libqoffscreen.so
+                ${QT_PLUGINS_PATH}/platforms/libqminimal.so
+            DESTINATION ${PLUGINS_DESTINATION}/platforms
+        )
+    else()
     install(
         FILES
             ${QT_PLUGINS_PATH}/platforms/libqlinuxfb.so
@@ -167,8 +214,13 @@ if(appimage)
         FILES ${QT_PLUGINS_PATH}/xcbglintegrations/libqxcb-glx-integration.so
         DESTINATION ${PLUGINS_DESTINATION}/xcbglintegrations
     )
+    endif()
 
-    if (QT_VERSION_MAJOR GREATER 5)
+    if (server)
+        # Audio playback is not wired into the daemon yet, so no multimedia
+        # backend is bundled. Audio functions in a project will stay silent
+        # until F1 hooks them up; that is tracked in docs/planning/ROADMAP.md.
+    elseif (QT_VERSION_MAJOR GREATER 5)
         install(
             FILES ${QT_PLUGINS_PATH}/multimedia/libffmpegmediaplugin.so
             DESTINATION ${PLUGINS_DESTINATION}/multimedia
@@ -197,11 +249,15 @@ if(appimage)
         )
     endif()
 
-    install(
-        FILES
-            ${QT_PLUGINS_PATH}/imageformats/libqsvg.so
-        DESTINATION ${PLUGINS_DESTINATION}/imageformats
-    )
+    # The SVG image format plugin links libQt6Svg, which the server bundle does
+    # not carry and the daemon never needs.
+    if (NOT server)
+        install(
+            FILES
+                ${QT_PLUGINS_PATH}/imageformats/libqsvg.so
+            DESTINATION ${PLUGINS_DESTINATION}/imageformats
+        )
+    endif()
 
     if(qmlui)
         install(

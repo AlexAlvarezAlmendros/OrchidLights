@@ -20,13 +20,14 @@ No es un mando a distancia de una aplicación de escritorio. **Es la aplicación
 
 ## Estado
 
-**En desarrollo temprano — todavía no hay nada usable.** Consulta el
-[roadmap](docs/planning/ROADMAP.md) para ver el plan por fases y en qué punto
-está.
+**En desarrollo temprano.** Hoy existe el daemon: carga proyectos de QLC+ sin
+interfaz y reporta su contenido. Todavía no controla luces ni sirve nada por
+HTTP — eso llega en F1. Consulta el [roadmap](docs/planning/ROADMAP.md) para el
+plan por fases.
 
 | Fase | Contenido | Estado |
 |---|---|---|
-| F0 | Fundación del fork: rebranding, poda del build, CI | 🔨 en curso |
+| F0 | Fundación del fork: rebranding, poda del build, empaquetado, CI | ✅ |
 | F1 | Daemon headless + API REST/WebSocket | ⬜ |
 | F2 | Interfaz web + Virtual Console en directo | ⬜ |
 | F3 | Patch y gestión de fixtures | ⬜ |
@@ -61,16 +62,22 @@ Requiere **Qt 6.4 o superior** (`QHttpServer` es módulo oficial desde 6.4).
 
 ```bash
 # Dependencias (Ubuntu / Debian)
-sudo apt install build-essential cmake ninja-build pkg-config \
-                 qt6-base-dev qt6-httpserver-dev qt6-websockets-dev \
-                 qt6-declarative-dev qt6-multimedia-dev qt6-tools-dev \
-                 qt6-serialport-dev \
-                 libasound2-dev libusb-1.0-0-dev libftdi1-dev libudev-dev libmad0-dev \
-                 libsndfile1-dev libfftw3-dev
+./install-deps.sh
 
 # Configurar y compilar solo el motor + los plugins + el daemon
 cmake -S . -B build -G Ninja -Dserver=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+
+# Arrancar sin instalar nada
+cmake --build build --target run
+```
+
+Para generar un AppImage autocontenido (unos 46 MB, con la librería de fixtures
+dentro):
+
+```bash
+./install-deps.sh --appimage
+./create-appimage.sh
 ```
 
 La opción `-Dserver=ON` excluye del build las dos interfaces de escritorio
@@ -93,6 +100,21 @@ y perderlos convierte cada fixture parcheado en un dimmer genérico.
 
 Si no aparece ninguna librería, el daemon **avisa y sale con código 2** en lugar
 de cargar el proyecto en silencio con las definiciones vacías.
+
+## Ejecutar como servicio
+
+Una mesa de luces tiene que sobrevivir a que el operador cierre el portátil, así
+que el daemon se instala con su unidad de systemd de usuario:
+
+```bash
+systemctl --user enable --now orchidlights
+
+# Para que siga vivo sin sesión iniciada:
+sudo loginctl enable-linger $USER
+```
+
+La entrada del menú de aplicaciones existe pero abre una terminal: hoy el daemon
+no tiene interfaz que mostrar. Pasará a abrir el navegador cuando llegue F2.
 
 ## Compatibilidad de proyectos
 

@@ -446,6 +446,11 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # AppStream metadata
+#
+# Note the plugins guard their own metainfo installs behind NOT server: each of
+# those files is an AppStream addon declaring
+# <extends>org.qlcplus.QLCPlus.desktop</extends>, and this build ships no such
+# component for them to extend.
 if(UNIX AND NOT APPLE)
     set(METAINFODIR "${INSTALLROOT}/share/metainfo")
 endif()

@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=OrchidLights
+GenericName=Lighting control
+GenericName[es]=Control de iluminación
+GenericName[ca]=Control d'il·luminació
+GenericName[fr]=Contrôle d'éclairage
+GenericName[de]=Lichtsteuerung
+GenericName[it]=Controllo luci
+Comment=DMX lighting engine with a web interface
+Comment[es]=Motor de iluminación DMX con interfaz web
+Comment[ca]=Motor d'il·luminació DMX amb interfície web
+Keywords=dmx;light;lighting;controller;artnet;sacn;e131;osc;midi;orchid;
+Exec=orchidlightsd
+Icon=orchidlights
+Terminal=true
+Categories=AudioVideo;

@@ -1,94 +1,69 @@
 #!/bin/bash
 #
-# Script to create a self contained AppImage using CMake
-# Requires wget and chrpath
-# If you want to use the official Qt packages, please export QTDIR before running this, like:
-#   export QTDIR=/home/user/Qt/5.15.2/gcc_64
-# Or you can use the system Qt libraries instead by not specifying QTDIR.
+# Build a self contained OrchidLights AppImage.
+#
+# Requires wget and chrpath. To bundle the official Qt packages instead of the
+# system ones, export QTDIR first:
+#   export QTDIR=/home/user/Qt/6.5.0/gcc_64
 
-# Exit on error
 set -e
 
-TARGET_DIR=$HOME/qlcplus.AppDir
-CMAKE_OPTS=""
+SOURCE_DIR=$(cd "$(dirname "$0")" && pwd)
+TARGET_DIR=${TARGET_DIR:-$HOME/orchidlights.AppDir}
+BUILD_DIR=$SOURCE_DIR/build-appimage
 
-if ! command -v chrpath 2>&1 >/dev/null
-then
-    echo "chrpath could not be found. Install it before running this script"
+for tool in chrpath wget; do
+    if ! command -v $tool >/dev/null 2>&1; then
+        echo "$tool could not be found. Install it before running this script"
+        exit 1
+    fi
+done
+
+rm -rf "$BUILD_DIR" "$TARGET_DIR"
+mkdir -p "$BUILD_DIR"
+
+if [ -n "$QTDIR" ]; then
+    QT_PREFIX="$QTDIR/lib/cmake/"
+else
+    QT_PREFIX="/usr/lib/x86_64-linux-gnu/cmake/Qt6"
+fi
+
+cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
+      -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -Dserver=ON -Dappimage=ON \
+      -DINSTALL_ROOT="$TARGET_DIR"
+
+cmake --build "$BUILD_DIR" --parallel "$(nproc || echo 8)"
+cmake --install "$BUILD_DIR"
+
+# The fixture library is not optional baggage. Without it every patched fixture
+# degrades to a generic dimmer, so a bundle that omits it is worse than useless:
+# it looks like it works.
+#
+# Note the AppImage layout: appimage=ON makes DATADIR relative, so the data
+# lands in <AppDir>/share while the binary stays in <AppDir>/usr/bin.
+if [ ! -f "$TARGET_DIR/share/orchidlights/fixtures/FixturesMap.xml" ]; then
+    echo "ERROR: the fixture library was not installed into the AppDir"
     exit 1
 fi
 
-if [ "$1" == "qmlui" ]; then
-    ./translate.sh release qmlui
-    CMAKE_OPTS="-Dqmlui=ON"
-else
-    ./translate.sh release ui
-fi
+cp -v "$SOURCE_DIR/resources/icons/svg/orchidlights.svg" "$TARGET_DIR/"
+cp -v "$SOURCE_DIR/platforms/linux/orchidlights.desktop" "$TARGET_DIR/"
 
-# Build
-if [ -d build ]; then
-    rm -rf build
-fi
-mkdir build
-cd build
+strip "$TARGET_DIR/usr/bin/orchidlightsd"
+find "$TARGET_DIR/usr/lib/" -name 'libqlcplusengine.so*' -exec strip -v {} \;
+chrpath -r "../lib" "$TARGET_DIR/usr/bin/orchidlightsd" || true
 
-if [ -n "$QTDIR" ]; then
-    cmake -DCMAKE_PREFIX_PATH="$QTDIR/lib/cmake/" $CMAKE_OPTS -Dappimage=ON -DINSTALL_ROOT=$TARGET_DIR ..
-else
-    cmake -DCMAKE_PREFIX_PATH="/usr/lib/x86_64-linux-gnu/cmake/Qt6" $CMAKE_OPTS -Dappimage=ON -DINSTALL_ROOT=$TARGET_DIR ..
-fi
+# Our own AppRun, not the AppImageKit one: see the comment inside it for why.
+cp -v "$SOURCE_DIR/platforms/linux/AppRun" "$TARGET_DIR/AppRun"
+chmod a+x "$TARGET_DIR/AppRun"
 
-NUM_CPUS=$(nproc) || true
-if [ -z "$NUM_CPUS" ]; then
-    NUM_CPUS=8
-fi
-
-make -j$NUM_CPUS
-make check
-
-if [ ! -d "$TARGET_DIR" ]; then
-    mkdir $TARGET_DIR
-fi
-make install
-
-cp -v ../resources/icons/svg/qlcplus.svg $TARGET_DIR
-cp -v ../platforms/linux/qlcplus.desktop $TARGET_DIR
-
-# Install base Qt translations
-cp $QTDIR/translations/qtbase_* $TARGET_DIR/share/qlcplus/translations/
-
-find $TARGET_DIR/usr/lib/ -name 'libqlcplusengine.so*' -exec strip -v {} \;
-
-if [ "$1" == "qmlui" ]; then
-    strip $TARGET_DIR/usr/bin/qlcplus-qml
-    # FIXME: no rpath or runpath tag found.
-    chrpath -r "../lib" $TARGET_DIR/usr/bin/qlcplus-qml || true
-
-    pushd $TARGET_DIR/usr/bin
-    find . -name plugins.qmltypes -type f -delete
-    find . -name *.qmlc -type f -delete
-    rm -rf Qt/test QtQuick/Extras QtQuick/Particles.2 QtQuick/XmlListModel
-    rm -rf QtQuick/Controls.2/designer QtQuick/Controls.2/Material
-    rm -rf QtQuick/Controls.2/Universal QtQuick/Controls.2/Fusion
-    rm -rf QtQuick/Controls.2/Imagine QtQuick/Controls.2/Scene2D
-    popd
-    sed -i -e 's/Exec=qlcplus --open %f/Exec=qlcplus-qml/g' $TARGET_DIR/qlcplus.desktop
-else
-    strip $TARGET_DIR/usr/bin/qlcplus
-    chrpath -r "../lib" $TARGET_DIR/usr/bin/qlcplus || true
-    sed -i -e 's/Exec=qlcplus --open %f/Exec=qlcplus/g' $TARGET_DIR/qlcplus.desktop
-fi
-
-# There might be a new version of the tool available.
-wget -c https://github.com/AppImage/AppImageKit/releases/download/continuous/AppRun-x86_64 -O $TARGET_DIR/AppRun
-chmod a+x $TARGET_DIR/AppRun
-
-# There might be a new version of the tool available.
-wget -c https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O /tmp/appimagetool-x86_64.AppImage
+wget -c https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+     -O /tmp/appimagetool-x86_64.AppImage
 chmod a+x /tmp/appimagetool-x86_64.AppImage
 
-pushd $TARGET_DIR/..
-/tmp/appimagetool-x86_64.AppImage -v $TARGET_DIR
-popd
+OUTPUT=${OUTPUT:-$SOURCE_DIR/OrchidLights-x86_64.AppImage}
+ARCH=x86_64 /tmp/appimagetool-x86_64.AppImage --no-appstream "$TARGET_DIR" "$OUTPUT"
 
-echo "The application is now available at ~/Q_Light_Controller_Plus-x86_64.AppImage"
+echo "The application is now available at $OUTPUT"

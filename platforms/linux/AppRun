@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# AppImage entry point.
+#
+# Deliberately NOT the stock AppImageKit AppRun: that one chdirs into the mount
+# point, which silently breaks every relative path the user types.
+#
+#     cd ~/shows && OrchidLights.AppImage tonight.qxw
+#
+# has to work, so the working directory is left exactly as the caller had it and
+# everything the bundle needs is addressed from $HERE instead.
+
+HERE="$(dirname "$(readlink -f "$0")")"
+
+export LD_LIBRARY_PATH="$HERE/usr/lib:$LD_LIBRARY_PATH"
+
+# Qt's own plugins (platform integration) and the QLC+ output plugins live in
+# two different trees inside the bundle.
+export QT_PLUGIN_PATH="$HERE/usr/plugins:$HERE/lib/qt6/plugins:$QT_PLUGIN_PATH"
+
+# No window is ever created; without this Qt would try to reach a display.
+if [ -z "$QT_QPA_PLATFORM" ]; then
+    export QT_QPA_PLATFORM=offscreen
+fi
+
+exec "$HERE/usr/bin/orchidlightsd" "$@"

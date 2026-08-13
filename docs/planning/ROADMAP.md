@@ -109,7 +109,7 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 ## 4. Fases
 
-### F0 — Fundación del fork 🔨
+### F0 — Fundación del fork ✅
 
 - [x] Repo propio con la historia completa de upstream preservada; `upstream` se mantiene como remote para cherry-picks puntuales.
 - [x] Rebranding en `variables.cmake`: `APPNAME`, `INSTALLROOT`, `DATADIR`, `USERDATADIR` (`~/.orchidlights`), `PLUGINDIR`. **El formato `.qxw` no se toca** — hay shows reales en producción que deben abrir en ambas aplicaciones.
@@ -121,8 +121,11 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - [x] Compilado en la máquina local: Qt 6.4.2 sobre Ubuntu 24.04, 659 targets, 3 min 30 s.
 - [x] **Resolución de la librería de fixtures** (`server/src/fixturelibrary.*`), adelantada desde F1 porque sin ella nada de lo anterior sirve: búsqueda del directorio de sistema con `--fixtures` → `$ORCHID_FIXTURE_DIR` → ruta instalada → árbol de fuentes; lectura de perfiles de usuario **tanto de `~/.orchidlights` como de `~/.qlcplus`**; y aviso explícito con salida 2 cuando no hay librería.
 - [x] **`17Julio.qxw` abre con sus 22 fixtures**, las direcciones DMX exactas del patch del P62, las 20 funciones, y **cero definiciones sin resolver**.
-- [ ] AppImage.
-- [ ] Icono y `.desktop` propios.
+- [x] **Icono propio** (`resources/icons/svg/orchidlights.svg`, SVG instalado en `hicolor/scalable`), entrada `.desktop`, metadatos AppStream y **unidad systemd de usuario**. Validados con `desktop-file-validate`, `appstreamcli validate` y `systemd-analyze verify`.
+- [x] **Limpieza de marca en la instalación.** El build de servidor instalaba los `.desktop` de QLC+ —que lanzan `qlcplus` y `qlcplus-fixtureeditor`, binarios que este build no produce—, más sus pixmaps, MIME, páginas de manual, 12 `metainfo` de plugins y las traducciones `.qm` de la UI de escritorio. Todo eso eran **lanzadores rotos y peso muerto**; ahora no se instala nada de ello.
+- [x] **AppImage autocontenido** (46 MB) con la librería de 1.735 fixtures dentro. `create-appimage.sh` falla explícitamente si la librería no acaba en el bundle.
+- [x] Dependencias centralizadas en `install-deps.sh`, que usan el README y los dos jobs de CI — no pueden desincronizarse.
+- [x] CI: job de AppImage que construye, prueba el bundle con `HOME` limpio y lo publica como artefacto.
 
 **Dependencias que el árbol de upstream no documenta** y sin las cuales no configura ni compila: `qt6-serialport-dev` (plugin dmxusb) y `libudev-dev` (hotplugmonitor).
 
@@ -133,6 +136,9 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - `QHttpServer` + `QWebSocketServer`, protocolo JSON versionado, autenticación por sesión.
 - Endpoints: proyecto (load/save/list), fixtures (lectura), universos (lectura + stream DMX), funciones (listado + run/stop).
 - ~~Fallback al directorio de usuario heredado~~ — hecho en F0. Queda pendiente el mismo tratamiento para los **perfiles de entrada** (`~/.qlcplus/inputprofiles`), que aún no se leen.
+- **Audio.** El daemon no tiene backend multimedia todavía, y el AppImage no empaqueta ninguno a propósito. Las funciones de audio de un proyecto cargarán pero no sonarán hasta engancharlo.
+- **Localización de los plugins de salida.** `IOPluginCache` los busca con `QLCFile::systemDirectory(PLUGINDIR)`, que en Linux devuelve la ruta **tal cual, relativa al directorio de trabajo del proceso** (`engine/src/ioplugincache.cpp:137`). En una instalación normal `PLUGINDIR` es absoluta y funciona, pero en el AppImage es `../lib/qt6/plugins/orchidlights` y nuestro `AppRun` preserva el CWD del usuario a propósito, así que no resolverá. Hay que anclarla al binario igual que se hizo con la librería de fixtures en `server/src/fixturelibrary.*`. **Bloquea que el AppImage saque DMX**, no solo que lo saque bien.
+- **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador en la URL del servidor.
 - Round-trip de `.qxw`: cargar y guardar un proyecto no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.
 - **Criterio de éxito: disparar el show del P62 Club desde `curl`/`wscat`, con luz real en la sala, sin abrir ninguna GUI.**
 

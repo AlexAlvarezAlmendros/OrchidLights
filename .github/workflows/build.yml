@@ -15,15 +15,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config \
-            qt6-base-dev qt6-httpserver-dev qt6-websockets-dev \
-            qt6-declarative-dev qt6-multimedia-dev qt6-tools-dev \
-            qt6-serialport-dev libgl1-mesa-dev libudev-dev \
-            libasound2-dev libusb-1.0-0-dev libftdi1-dev \
-            libmad0-dev libsndfile1-dev libfftw3-dev
+        run: ./install-deps.sh
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -Dserver=ON -DCMAKE_BUILD_TYPE=Release
@@ -58,6 +50,32 @@ jobs:
           # A zero exit also means Doc's error log was empty, so every fixture
           # resolved to a real definition rather than a generic dimmer.
 
+      - name: The install ships our desktop integration and none of QLC+'s
+        run: |
+          set -euo pipefail
+
+          for f in /usr/share/applications/orchidlights.desktop \
+                   /usr/share/icons/hicolor/scalable/apps/orchidlights.svg \
+                   /usr/share/metainfo/org.orchidlights.OrchidLights.metainfo.xml \
+                   /usr/lib/systemd/user/orchidlights.service; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+
+          # The inherited entries launch qlcplus and qlcplus-fixtureeditor,
+          # which this build does not produce. Shipping them would put broken
+          # launchers in the application menu.
+          leaked=$(find /usr/share/applications /usr/share/pixmaps \
+                        /usr/share/metainfo /usr/share/mime /usr/share/man \
+                        /usr/share/orchidlights/translations \
+                        -iname '*qlc*' 2>/dev/null || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::inherited QLC+ files leaked into the install:"
+            echo "$leaked"
+            exit 1
+          fi
+
+          sudo desktop-file-validate /usr/share/applications/orchidlights.desktop
+
       - name: Smoke test - a missing fixture library is reported, not swallowed
         run: |
           set -euo pipefail
@@ -83,3 +101,43 @@ jobs:
             || { echo "::error::the missing library was not reported"; exit 1; }
           echo "$out" | grep -q 'No fixture definition found for' \
             || { echo "::error::unresolved fixtures were not listed"; exit 1; }
+
+  appimage:
+    name: AppImage (Ubuntu 24.04, Qt 6)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: ./install-deps.sh --appimage
+
+      - name: Build the AppImage
+        # The runners have no FUSE, and appimagetool is itself an AppImage.
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: ./create-appimage.sh
+
+      - name: Smoke test - the bundle is self contained
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+
+          # A clean HOME, so nothing outside the bundle can supply the library.
+          home=$(mktemp -d)
+          out=$(HOME="$home" ./OrchidLights-x86_64.AppImage resources/samples/Sample.qxw)
+          echo "$out"
+
+          check() {
+            echo "$out" | grep -qE "$1" || { echo "::error::$2"; exit 1; }
+          }
+          check '^Fixture library: [1-9][0-9]{2,} manufacturers$' "the bundled fixture library was not found"
+          check '^Fixtures: 13$'                                  "the bundle did not load the project"
+          check '^Functions: 114$'                                "the bundle dropped functions"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OrchidLights-x86_64.AppImage
+          path: OrchidLights-x86_64.AppImage
+          if-no-files-found: error

@@ -86,6 +86,19 @@ QString FixtureLibrary::systemDirectory(const QString &override)
 
     candidates << QLCFixtureDefCache::systemDefinitionDirectory().absolutePath();
 
+    /* Relocatable installs. QLCFile::systemDirectory() resolves its Linux path
+       against the process working directory rather than the binary, so a
+       bundle started from anywhere but its own bin/ would miss the library
+       entirely. Anchor it to the executable instead.
+
+       Two layouts to cover: a normal prefix install puts the binary in
+       <prefix>/bin and the data in <prefix>/share, while the AppImage keeps
+       the binary in <AppDir>/usr/bin but the data in <AppDir>/share. */
+    candidates << QDir(QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/../share/orchidlights/fixtures")).absolutePath();
+    candidates << QDir(QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/../../share/orchidlights/fixtures")).absolutePath();
+
     /* Development convenience, deliberately last so it can never shadow a real
        installation: the daemon sits in build/server/src/ and the library is
        still sitting in the source tree. */

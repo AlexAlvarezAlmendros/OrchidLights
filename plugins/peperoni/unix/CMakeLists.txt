@@ -61,7 +61,7 @@ if (NOT APPLE)
         DESTINATION ${UDEVRULESDIR})
 endif()
 
-if (UNIX AND NOT APPLE)
+if (UNIX AND NOT APPLE AND NOT server)
    # Rules to make USB DMX devices readable & writable by normal users
    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/org.qlcplus.QLCPlus.peperoni.metainfo.xml"
            DESTINATION ${METAINFODIR})
