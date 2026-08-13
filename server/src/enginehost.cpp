@@ -24,6 +24,8 @@
 #include "installpaths.h"
 #include "fixturelibrary.h"
 #include "workspaceloader.h"
+#include "virtualconsole.h"
+#include "levelsource.h"
 
 #include "qlcfile.h"
 #include "qlcmodifierscache.h"
@@ -44,6 +46,11 @@ EngineHost::~EngineHost()
 {
     if (m_doc != nullptr && m_running)
         m_doc->masterTimer()->stop();
+
+    if (m_doc != nullptr && m_levels != nullptr)
+        m_doc->masterTimer()->unregisterDMXSource(m_levels);
+
+    delete m_levels;
 }
 
 bool EngineHost::start(const Options &options, QString &errorMessage)
@@ -131,10 +138,48 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
     m_doc->inputOutputMap()->setBeatGeneratorType(InputOutputMap::Internal);
     m_doc->inputOutputMap()->startUniverses();
 
+    /* Registered before the timer starts, so the first tick already has it. */
+    m_levels = new LevelSource(m_doc);
+    m_doc->masterTimer()->registerDMXSource(m_levels);
+
     m_doc->masterTimer()->start();
     m_running = true;
 
     return true;
+}
+
+void EngineHost::teachSliders()
+{
+    if (m_levels == nullptr)
+        return;
+
+    m_levels->forgetSliders();
+
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root) == false)
+        return;
+
+    /* Walk the whole tree: sliders live inside frames, sometimes nested. */
+    QVector<const VcWidget *> pending;
+    pending.append(&root);
+
+    while (pending.isEmpty() == false)
+    {
+        const VcWidget *widget = pending.takeLast();
+
+        if (widget->sliderMode == QStringLiteral("level")
+            && widget->levelChannels.isEmpty() == false)
+        {
+            QList<LevelSource::Channel> channels;
+            for (const auto &channel : widget->levelChannels)
+                channels.append(channel);
+
+            m_levels->defineSlider(widget->id, channels);
+        }
+
+        for (const VcWidget &child : widget->children)
+            pending.append(&child);
+    }
 }
 
 bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
@@ -160,6 +205,8 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
            which is where an operator expects "save" to put it. */
         if (m_projectsDirectory.isEmpty())
             m_projectsDirectory = QFileInfo(m_projectPath).absolutePath();
+
+        teachSliders();
     }
 
     return ok;
@@ -213,6 +260,30 @@ QString EngineHost::resolveProjectName(const QString &name) const
         return QString();
 
     return QDir(m_projectsDirectory).absoluteFilePath(name);
+}
+
+QVector<ConsoleLayout::Page> EngineHost::layout() const
+{
+    QVector<ConsoleLayout::Page> pages;
+    ConsoleLayout::parse(m_preserved.sections, pages);
+    return pages;
+}
+
+void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
+{
+    /* The layout lives among the preserved sections, which is what carries it
+       through a save. Replacing means dropping the copy that was read in --
+       otherwise the file would grow a second, stale arrangement every time. */
+    for (int i = m_preserved.sections.count() - 1; i >= 0; i--)
+    {
+        if (ConsoleLayout::isLayoutSection(m_preserved.sections.at(i)))
+            m_preserved.sections.removeAt(i);
+    }
+
+    if (pages.isEmpty() == false)
+        m_preserved.sections.append(ConsoleLayout::toXml(pages));
+
+    m_doc->setModified();
 }
 
 QString EngineHost::projectErrors() const

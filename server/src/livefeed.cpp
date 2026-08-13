@@ -31,6 +31,7 @@
 #include "enginehost.h"
 #include "apiauth.h"
 #include "jsonview.h"
+#include "levelsource.h"
 
 #include "functionparent.h"
 #include "inputoutputmap.h"
@@ -256,6 +257,40 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             list.append(int(id) + 1);
         ack["universes"] = list;
         sendJson(socket, ack);
+        return;
+    }
+
+    if (type == QStringLiteral("slider"))
+    {
+        const quint32 id = quint32(message.value("id").toInt(-1));
+        const int raw = message.value("value").toInt(-1);
+
+        if (raw < 0 || raw > 255 || m_engine->levels()->knows(id) == false)
+        {
+            QJsonObject error;
+            error["type"] = "error";
+            error["error"] = QStringLiteral("No such slider, or value out of range");
+            sendJson(socket, error);
+            return;
+        }
+
+        m_engine->levels()->setValue(id, uchar(raw));
+
+        /* Echoed to the other clients only: the one that moved it is already
+           showing the new position, and bouncing it back makes a dragged
+           fader stutter. */
+        QJsonObject update;
+        update["type"] = "slider";
+        update["id"] = qint64(id);
+        update["value"] = raw;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(update).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated && it.key() != socket)
+                it.key()->sendTextMessage(payload);
+        }
         return;
     }
 

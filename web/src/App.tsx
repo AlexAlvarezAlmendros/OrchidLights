@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FunctionState, api } from './api'
-import { type VcWidget, groupIntoRows, growFactor, isContainer, pagesOf } from './layout'
+import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
+import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './layout'
 import { type Connection, Live } from './live'
 
 type Theme = 'stage' | 'blackout'
@@ -16,6 +17,11 @@ export function App() {
     () => (localStorage.getItem('orchid.theme') as Theme | null) ?? 'stage',
   )
   const [error, setError] = useState<string | null>(null)
+  const [levels, setLevels] = useState<Record<number, number>>({})
+  const [editing, setEditing] = useState(false)
+  const [layout, setLayout] = useState<LayoutRows | null>(null)
+  const [dragging, setDragging] = useState<number | null>(null)
+  const [dirty, setDirty] = useState(false)
 
   const live = useRef<Live | null>(null)
 
@@ -23,18 +29,34 @@ export function App() {
     const feed = new Live({
       onFunctions: setFunctions,
       onConnection: setConnection,
+      onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
     })
     live.current = feed
     feed.connect()
 
     api
       .vc()
-      .then(setVc)
+      .then((console_) => {
+        setVc(console_)
+        // Seed the faders from the values the project was saved with, so the
+        // interface opens showing the desk as the show left it.
+        const seeded: Record<number, number> = {}
+        const visit = (w: VcWidget) => {
+          if (w.sliderMode && w.value !== undefined) seeded[w.id] = w.value
+          for (const child of w.children ?? []) visit(child)
+        }
+        visit(console_)
+        setLevels(seeded)
+      })
       // A project without a Virtual Console is normal, not a failure: plenty of
       // shows are driven straight from the function list.
       .catch(() => setVc(null))
 
     api.functions().then(setFunctions).catch(setErrorMessage)
+    api
+      .layout()
+      .then((l) => setLayout(l.pages[0]?.rows ?? null))
+      .catch(() => setLayout(null))
 
     return () => feed.close()
 
@@ -55,8 +77,35 @@ export function App() {
 
   const toggle = useCallback((id: number) => live.current?.toggle(id, running.has(id)), [running])
 
+  const setLevel = useCallback((id: number, value: number) => {
+    // Optimistic: the fader follows the finger and the engine catches up on its
+    // next tick. Waiting for a round trip would make a drag feel like mud.
+    setLevels((current) => ({ ...current, [id]: value }))
+    live.current?.setSlider(id, value)
+  }, [])
+
   const pages = vc ? pagesOf(vc) : []
   const current = pages[page] ?? pages[0]
+  const rows = current ? resolveRows(current.children ?? [], layout) : []
+
+  const drop = useCallback(
+    (rowIndex: number, beforeId: number | null) => {
+      if (dragging === null) return
+      setLayout((currentLayout) =>
+        moveWidget(currentLayout ?? rowsToLayout(rows), dragging, rowIndex, beforeId),
+      )
+      setDragging(null)
+      setDirty(true)
+    },
+    [dragging, rows],
+  )
+
+  const persist = useCallback(async () => {
+    const pageId = current?.id ?? 0
+    await api.putLayout({ pages: [{ id: pageId, rows: layout ?? rowsToLayout(rows) }] })
+    await api.saveProject()
+    setDirty(false)
+  }, [current, layout, rows])
 
   return (
     <div className="app">
@@ -78,6 +127,16 @@ export function App() {
         >
           {theme === 'stage' ? '🌙' : '☀'}
         </button>
+        {vc && (
+          <button type="button" onClick={() => setEditing(!editing)} aria-pressed={editing}>
+            {editing ? 'Listo' : 'Ordenar'}
+          </button>
+        )}
+        {editing && dirty && (
+          <button type="button" onClick={persist}>
+            Guardar
+          </button>
+        )}
         <button type="button" className="danger" onClick={() => api.blackout(true)}>
           BLACKOUT
         </button>
@@ -97,7 +156,17 @@ export function App() {
         {error && <p className="empty">{error}</p>}
 
         {current ? (
-          <Surface widget={current} running={running} onToggle={toggle} />
+          <Surface
+            rows={rows}
+            running={running}
+            onToggle={toggle}
+            levels={levels}
+            onLevel={setLevel}
+            editing={editing}
+            dragging={dragging}
+            onDragStart={setDragging}
+            onDrop={drop}
+          />
         ) : (
           <FunctionList functions={functions} onToggle={toggle} />
         )}
@@ -107,37 +176,91 @@ export function App() {
 }
 
 function Surface({
-  widget,
+  rows,
   running,
   onToggle,
+  levels,
+  onLevel,
+  editing,
+  dragging,
+  onDragStart,
+  onDrop,
 }: {
-  widget: VcWidget
+  rows: Row[]
   running: Set<number>
   onToggle: (id: number) => void
+  levels: Record<number, number>
+  onLevel: (id: number, value: number) => void
+  editing: boolean
+  dragging: number | null
+  onDragStart: (id: number | null) => void
+  onDrop: (rowIndex: number, beforeId: number | null) => void
 }) {
-  const children = widget.children ?? []
-  if (children.length === 0) {
+  if (rows.length === 0) {
     return <p className="empty">Esta página está vacía.</p>
   }
 
-  const rows = groupIntoRows(children)
-
   return (
     <>
-      {rows.map((row) => (
-        <div className="row" key={`${row.top}-${row.widgets[0]?.id}`}>
+      {rows.map((row, rowIndex) => (
+        <div className="row" key={`${rowIndex}-${row.widgets[0]?.id}`} data-editing={editing}>
           {row.widgets.map((child) => (
-            <Widget
-              key={child.id}
-              widget={child}
-              grow={growFactor(child, row)}
-              running={running}
-              onToggle={onToggle}
-            />
+            <Fragment key={child.id}>
+              {editing && dragging !== null && dragging !== child.id && (
+                <DropSlot onDrop={() => onDrop(rowIndex, child.id)} />
+              )}
+              <Widget
+                widget={child}
+                grow={growFactor(child, row)}
+                running={running}
+                onToggle={onToggle}
+                levels={levels}
+                onLevel={onLevel}
+                editing={editing}
+                dragged={dragging === child.id}
+                onDragStart={onDragStart}
+              />
+            </Fragment>
           ))}
+          {editing && dragging !== null && <DropSlot onDrop={() => onDrop(rowIndex, null)} />}
         </div>
       ))}
+
+      {editing && dragging !== null && (
+        <div className="row">
+          <DropSlot wide onDrop={() => onDrop(rows.length, null)} label="Nueva fila" />
+        </div>
+      )}
     </>
+  )
+}
+
+/**
+ * A place a dragged widget can land.
+ *
+ * pointerup rather than a drag event: HTML5 drag and drop does not fire on
+ * touch at all, and this is meant to be used on a phone.
+ */
+function DropSlot({
+  onDrop,
+  wide,
+  label,
+}: {
+  onDrop: () => void
+  wide?: boolean
+  label?: string
+}) {
+  return (
+    <button
+      type="button"
+      className="dropslot"
+      data-wide={wide === true}
+      onPointerUp={onDrop}
+      onClick={onDrop}
+      aria-label={label ?? 'Soltar aquí'}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -146,17 +269,43 @@ function Widget({
   grow,
   running,
   onToggle,
+  levels,
+  onLevel,
+  editing,
+  dragged,
+  onDragStart,
 }: {
   widget: VcWidget
   grow: number
   running: Set<number>
   onToggle: (id: number) => void
+  levels: Record<number, number>
+  onLevel: (id: number, value: number) => void
+  editing: boolean
+  dragged: boolean
+  onDragStart: (id: number | null) => void
 }) {
   const style = {
     '--grow': grow,
     ...(widget.background ? { '--widget-bg': widget.background } : {}),
     ...(widget.foreground ? { color: widget.foreground } : {}),
   } as React.CSSProperties
+
+  // While arranging, every widget is a handle and nothing fires its function:
+  // moving a button must never also press it.
+  if (editing) {
+    return (
+      <button
+        type="button"
+        className={`widget ${widget.type} arranging`}
+        style={style}
+        data-dragged={dragged}
+        onPointerDown={() => onDragStart(dragged ? null : widget.id)}
+      >
+        {widget.caption || widget.type}
+      </button>
+    )
+  }
 
   if (widget.type === 'label') {
     return <div className="widget label">{widget.caption}</div>
@@ -178,6 +327,17 @@ function Widget({
     )
   }
 
+  if (widget.sliderMode) {
+    return (
+      <Fader
+        widget={widget}
+        style={style}
+        value={levels[widget.id] ?? widget.value ?? 0}
+        onChange={onLevel}
+      />
+    )
+  }
+
   if (isContainer(widget)) {
     return (
       <div className="widget" style={style}>
@@ -195,6 +355,43 @@ function Widget({
       <br />
       <small>({widget.type})</small>
     </div>
+  )
+}
+
+function Fader({
+  widget,
+  style,
+  value,
+  onChange,
+}: {
+  widget: VcWidget
+  style: React.CSSProperties
+  value: number
+  onChange: (id: number, value: number) => void
+}) {
+  const low = widget.low ?? 0
+  const high = widget.high ?? 255
+  const percent = high > low ? Math.round(((value - low) / (high - low)) * 100) : 0
+
+  // A playback or submaster slider parses fine but has nothing behind it here
+  // yet. Showing it disabled is honest; showing it live would be a lie the
+  // operator only discovers when the light does not move.
+  const usable = widget.controllable === true
+
+  return (
+    <label className="widget fader" style={style} data-usable={usable}>
+      <span className="fader-caption">{widget.caption || `#${widget.id}`}</span>
+      <input
+        type="range"
+        min={low}
+        max={high}
+        value={value}
+        disabled={!usable}
+        aria-label={widget.caption}
+        onChange={(e) => onChange(widget.id, Number(e.target.value))}
+      />
+      <span className="fader-value">{usable ? `${percent}%` : widget.sliderMode}</span>
+    </label>
   )
 }
 

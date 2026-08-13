@@ -152,6 +152,19 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
     if (widget.hasFunction)
         json["functionId"] = qint64(widget.functionId);
 
+    if (widget.sliderMode.isEmpty() == false)
+    {
+        json["sliderMode"] = widget.sliderMode;
+        json["low"] = widget.low;
+        json["high"] = widget.high;
+        json["value"] = widget.value;
+        /* Only a level slider with channels behind it can actually be moved
+           from here; saying so keeps the interface from offering a control
+           that would do nothing. */
+        json["controllable"] = (widget.sliderMode == QStringLiteral("level")
+                                && widget.levelChannels.isEmpty() == false);
+    }
+
     if (widget.children.isEmpty() == false)
     {
         QJsonArray children;
