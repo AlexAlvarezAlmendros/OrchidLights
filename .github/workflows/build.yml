@@ -54,6 +54,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Validation tools, not build dependencies, so they are not in
+          # install-deps.sh.
+          sudo apt-get install -y --no-install-recommends desktop-file-utils appstream
+
           for f in /usr/share/applications/orchidlights.desktop \
                    /usr/share/icons/hicolor/scalable/apps/orchidlights.svg \
                    /usr/share/metainfo/org.orchidlights.OrchidLights.metainfo.xml \
@@ -82,7 +86,9 @@ jobs:
             exit 1
           fi
 
-          sudo desktop-file-validate /usr/share/applications/orchidlights.desktop
+          desktop-file-validate /usr/share/applications/orchidlights.desktop
+          appstreamcli validate --no-net \
+            /usr/share/metainfo/org.orchidlights.OrchidLights.metainfo.xml
 
       - name: Smoke test - a missing fixture library is reported, not swallowed
         run: |
