@@ -125,6 +125,14 @@ jobs:
       - name: Smoke test - the web API drives the engine
         run: ./server/test/api-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      # The test client uses Node's built-in WebSocket, which landed in 21.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Smoke test - the live feed streams DMX
+        run: ./server/test/ws-smoke.sh orchidlightsd resources/samples/Sample.qxw
+
       - name: Smoke test - an unresolvable fixture is reported, not swallowed
         run: |
           set -euo pipefail

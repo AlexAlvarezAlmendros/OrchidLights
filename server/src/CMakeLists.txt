@@ -8,6 +8,7 @@ add_executable(${module_name}
     fixturelibrary.cpp fixturelibrary.h
     installpaths.cpp installpaths.h
     jsonview.cpp jsonview.h
+    livefeed.cpp livefeed.h
     workspaceloader.cpp workspaceloader.h
 )
 

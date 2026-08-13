@@ -155,9 +155,18 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 - [x] **Autenticación por token** (`server/src/apiauth.*`): 32 bytes del CSPRNG del sistema, generados en el primer arranque, guardados con permisos `600`, comparados en tiempo constante. `--listen-all` la activa sola; `--require-auth` la exige también en loopback. Cubierta por el smoke test, lecturas **y** comandos.
 
+**Feed en vivo (WebSocket)** — hecho:
+
+- [x] `/ws` en el **mismo puerto** que el API: `QAbstractHttpServer` entrega los sockets que piden upgrade, así que el navegador necesita un solo origen y un solo puerto abierto.
+- [x] Estado en JSON (`hello`, `authenticated`, `functions`, `subscribed`, `error`) y **DMX en frames binarios**: 2 bytes de universo 1-based little endian + valores de canal.
+- [x] Suscripción por universo, y frames **agrupados y emitidos a 25 Hz** en vez de a los 50 del motor — el ritmo de red se desacopla del show y un cliente lento no puede frenar la mesa. Medido: 75 frames en 3 s con un chaser corriendo.
+- [x] Token en el **primer mensaje**, no en la URL: un navegador no puede poner cabeceras `Authorization` en un WebSocket, y un token en la query acaba en logs de proxy e historial.
+- [x] `server/test/ws-smoke.sh` + `ws-client.mjs` (WebSocket nativo de Node 22, sin dependencias): feed abierto, token incorrecto y token correcto.
+
+> **Trampa de Qt que costó encontrar.** `qabstracthttpserver.cpp:88` condiciona el upgrade a `handleRequest(...) && isSignalConnected(...)`. Sin una ruta para `/ws`, `handleRequest` devuelve `false` y Qt rechaza la conexión con *"WebSocket received but no slots connected"* — un mensaje que culpa a la señal, que estaba perfectamente conectada. Y al añadir una ruta normal, el handler **escribe su respuesta** antes de que Qt entregue el socket, así que el cliente lee el HTTP y abandona. La salida es la forma de `route()` con `QHttpServerResponder&&` y retorno `void`: ahí `responseImpl()` no llama a `sendResponse()`, y un handler que no escribe nada deja el socket limpio para el handshake.
+
 **Pendiente:**
 
-- [ ] `QWebSocketServer`: estado en vivo y stream DMX en frames binarios.
 - [ ] Endpoints de proyecto: load/save/list.
 - [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.
 - [ ] Round-trip de `.qxw`: cargar y guardar no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.

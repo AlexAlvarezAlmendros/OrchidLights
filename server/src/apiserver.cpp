@@ -26,6 +26,7 @@
 #include "apiserver.h"
 #include "enginehost.h"
 #include "jsonview.h"
+#include "livefeed.h"
 #include "qlcconfig.h"
 
 #include "functionparent.h"
@@ -91,6 +92,12 @@ bool ApiServer::start(const Options &options, QString &errorMessage)
     m_listenAll = options.listenAll;
 
     registerRoutes();
+
+    /* The live feed shares the port: QAbstractHttpServer hands over sockets
+       that ask to upgrade, so a browser needs one origin and one open port. */
+    m_feed = new LiveFeed(m_engine, &m_auth, this);
+    m_feed->setStreamRate(options.streamRate);
+    m_feed->attach(m_server);
 
     const QHostAddress address = options.listenAll ? QHostAddress::Any
                                                    : QHostAddress::LocalHost;

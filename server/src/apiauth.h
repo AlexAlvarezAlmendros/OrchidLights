@@ -54,6 +54,15 @@ public:
     /** True when the request may proceed. */
     bool authorize(const QHttpServerRequest &request) const;
 
+    /**
+     * True when presented is the token, compared in constant time.
+     *
+     * Exposed because a browser cannot set an Authorization header on a
+     * WebSocket, so that path presents the token in its first message instead
+     * and needs the same comparison.
+     */
+    bool matches(const QByteArray &presented) const;
+
     QByteArray token() const { return m_token; }
 
     /** Where the token is stored, for telling the operator where to find it. */

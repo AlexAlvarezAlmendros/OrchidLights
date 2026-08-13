@@ -107,13 +107,18 @@ bool ApiAuth::load(QString &errorMessage)
     return true;
 }
 
+bool ApiAuth::matches(const QByteArray &presented) const
+{
+    if (m_token.isEmpty() || presented.isEmpty())
+        return false;
+
+    return secureEquals(presented, m_token);
+}
+
 bool ApiAuth::authorize(const QHttpServerRequest &request) const
 {
     if (m_required == false)
         return true;
-
-    if (m_token.isEmpty())
-        return false;
 
     QByteArray presented;
     for (const auto &header : request.headers())
@@ -129,8 +134,5 @@ bool ApiAuth::authorize(const QHttpServerRequest &request) const
         break;
     }
 
-    if (presented.isEmpty())
-        return false;
-
-    return secureEquals(presented, m_token);
+    return matches(presented);
 }

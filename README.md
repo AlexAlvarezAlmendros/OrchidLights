@@ -130,6 +130,43 @@ Las direcciones DMX y los universos van **1-based** en el API, como están
 impresos en los focos y como se teclean en una mesa. El motor cuenta desde 0
 internamente; la conversión ocurre en un solo sitio, `server/src/jsonview.cpp`.
 
+### El feed en vivo (WebSocket)
+
+Mismo puerto, en `/ws`. Estado en JSON, DMX en binario.
+
+```js
+const s = new WebSocket('ws://mesa.local:9998/ws')
+s.binaryType = 'arraybuffer'
+
+s.onmessage = (e) => {
+  if (e.data instanceof ArrayBuffer) {
+    const f = new Uint8Array(e.data)
+    const universo = f[0] | (f[1] << 8)   // 1-based, little endian
+    const canales = f.subarray(2)          // valores DMX
+    return
+  }
+  const msg = JSON.parse(e.data)   // hello · authenticated · functions · subscribed · error
+}
+
+// Si hello.authRequired, esto va primero y nada más se acepta antes:
+s.send(JSON.stringify({ type: 'auth', token }))
+
+s.send(JSON.stringify({ type: 'subscribe', universes: [1] }))
+s.send(JSON.stringify({ type: 'function', id: 3, action: 'start' }))
+```
+
+**Por qué binario:** 512 canales por universo como array JSON de números pesa
+unas diez veces lo mismo para la misma información.
+
+**Por qué el token va en el primer mensaje** y no en la URL: un navegador no
+puede poner cabeceras `Authorization` en un WebSocket, y un token en la query
+acaba en los logs del proxy y en el historial del navegador.
+
+Los frames se **agrupan por universo y se envían a 25 Hz**, no a los 50 del
+motor: el ritmo de la red se desacopla del ritmo del show, y un cliente lento no
+puede frenar la mesa. El motor además solo emite cuando los valores cambian, así
+que una escena estática no gasta ancho de banda.
+
 ### Autenticación
 
 El daemon escucha **solo en loopback** por defecto y ahí no pide nada: el

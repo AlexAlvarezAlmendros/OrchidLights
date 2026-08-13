@@ -27,6 +27,7 @@
 
 class QHttpServer;
 class EngineHost;
+class LiveFeed;
 
 /**
  * The HTTP side of the daemon.
@@ -65,6 +66,10 @@ public:
          * that is not good enough, hence this.
          */
         bool requireAuth = false;
+
+        /** How often DMX frames go out over the WebSocket, in Hz. The engine
+         *  itself runs at 50. */
+        int streamRate = 25;
     };
 
     explicit ApiServer(EngineHost *engine, QObject *parent = nullptr);
@@ -85,6 +90,7 @@ private:
 
     EngineHost *m_engine = nullptr;
     QHttpServer *m_server = nullptr;
+    LiveFeed *m_feed = nullptr;
     ApiAuth m_auth;
     quint16 m_port = 0;
     bool m_listenAll = false;
