@@ -248,6 +248,47 @@ try {
     await screenshot('05-cuelist')
   }
 
+  /* The patch: universes, their output, and the fixtures in them. This is what
+     makes light come out, and until now none of it was reachable from a
+     browser at all. */
+  check('the patch opens', (await click('Patch')) === 'ok')
+  await sleep(1200)
+
+  const universes = await evaluate(
+    "document.querySelectorAll('.setup .card > header .chip').length",
+  )
+  check('universes are listed', universes > 0, `${universes}`)
+
+  // 512 slots, and the ones a fixture holds are coloured. A clash shows up
+  // here before it shows up as a light that will not respond.
+  const mapped = await evaluate(`(async () => {
+    const link = [...document.querySelectorAll('.linkish')][0]
+    if (!link) return 'no channel map link'
+    link.click()
+    await new Promise(r => setTimeout(r, 900))
+    const cells = document.querySelectorAll('.channelmap span').length
+    const held = document.querySelectorAll('.channelmap span[data-held="true"]').length
+    return cells === 512 ? 'ok ' + held + ' held' : cells + ' cells'
+  })()`)
+  check('the channel map shows 512 channels', mapped.startsWith('ok'), mapped)
+  await screenshot('06-patch')
+
+  const patched = await evaluate(`(async () => {
+    const tab = [...document.querySelectorAll('.tabs button')].find(b => b.textContent.startsWith('Fixtures'))
+    if (!tab) return 'no fixtures tab'
+    tab.click()
+    await new Promise(r => setTimeout(r, 700))
+
+    const rows = document.querySelectorAll('.table-row').length
+    document.querySelector('details.card').open = true
+    await new Promise(r => setTimeout(r, 1500))
+
+    const makers = document.querySelectorAll('.setup details select')[0]?.options.length ?? 0
+    return rows > 0 && makers > 10 ? 'ok' : rows + ' fixtures, ' + makers + ' manufacturers'
+  })()`)
+  check('the fixture list and the library are there', patched === 'ok', patched)
+  await screenshot('07-fixtures')
+
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {
   check('the run completed', false, error.message)

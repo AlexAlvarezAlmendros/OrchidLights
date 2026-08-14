@@ -28,6 +28,34 @@ export interface FixtureState {
   address: number
   channels: number
   resolved: boolean
+  manufacturer?: string
+  model?: string
+  mode?: string
+}
+
+/** Universes are numbered from 1 here, as they are on a desk. */
+export interface UniverseState {
+  id: number
+  name: string
+  outputs: { plugin: string; output: string }[]
+  input?: { plugin: string; line: string; profile: string }
+  passthrough: boolean
+  /** False means this universe reaches nothing, however healthy the rest of
+   *  the project looks. */
+  patched: boolean
+}
+
+export interface IoOptions {
+  outputPlugins: { name: string; lines: string[] }[]
+  inputPlugins: { name: string; lines: string[] }[]
+  inputProfiles: string[]
+}
+
+export interface UniverseMap {
+  universe: number
+  used: number
+  free: number
+  fixtures: { id: number; name: string; address: number; channels: number }[]
 }
 
 /** One fixture with its channels named. Only the detail route carries these. */
@@ -88,6 +116,73 @@ export const api = {
   functionBody: (id: number) => json<FunctionBody>(`/api/v1/functions/${id}/body`),
   fixtures: () => json<FixtureState[]>('/api/v1/fixtures'),
   fixture: (id: number) => json<FixtureDetail>(`/api/v1/fixtures/${id}`),
+
+  /* Patching: universes, their output, and the fixtures in them. This is what
+     makes light come out, and until now none of it was reachable from a
+     browser. */
+  universes: () => json<UniverseState[]>('/api/v1/universes'),
+  universeMap: (id: number) => json<UniverseMap>(`/api/v1/universes/${id}/map`),
+  io: () => json<IoOptions>('/api/v1/io'),
+
+  addUniverse: (name?: string) =>
+    json<{ id: number }>('/api/v1/universes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(name === undefined ? {} : { name }),
+    }),
+  removeUniverse: (id: number) =>
+    json<{ removed: number }>(`/api/v1/universes/${id}`, { method: 'DELETE' }),
+  patchUniverse: (
+    id: number,
+    patch: {
+      name?: string
+      passthrough?: boolean
+      output?: { plugin: string; line: string }
+      input?: { plugin: string; line: string; profile?: string }
+    },
+  ) =>
+    json<unknown>(`/api/v1/universes/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+
+  manufacturers: (search?: string) =>
+    json<{ manufacturers: string[]; total: number }>(
+      `/api/v1/library${search ? `?q=${encodeURIComponent(search)}` : ''}`,
+    ),
+  models: (manufacturer: string) =>
+    json<{ models: string[] }>(`/api/v1/library/${encodeURIComponent(manufacturer)}`),
+  modes: (manufacturer: string, model: string) =>
+    json<{ modes: { name: string; channels: number }[] }>(
+      `/api/v1/library/${encodeURIComponent(manufacturer)}/${encodeURIComponent(model)}`,
+    ),
+
+  addFixtures: (body: {
+    manufacturer: string
+    model: string
+    mode: string
+    name?: string
+    universe: number
+    address: number
+    quantity?: number
+    gap?: number
+  }) =>
+    json<{ created: number[] }>('/api/v1/fixtures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  patchFixture: (id: number, patch: { name?: string; universe?: number; address?: number }) =>
+    json<FixtureState>(`/api/v1/fixtures/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  removeFixture: (id: number) =>
+    json<{ removed: number; consoleReferencesRemoved: number }>(`/api/v1/fixtures/${id}`, {
+      method: 'DELETE',
+    }),
 
   /** Give every widget an id, so a console from QLC+ 4 can be edited at all. */
   assignWidgetIds: () => json<{ assigned: number }>('/api/v1/vc/widgets/ids', { method: 'POST' }),

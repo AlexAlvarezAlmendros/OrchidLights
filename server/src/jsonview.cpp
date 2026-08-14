@@ -24,6 +24,7 @@
 #include "qlcfixturedef.h"
 #include "inputoutputmap.h"
 #include "outputpatch.h"
+#include "inputpatch.h"
 #include "universe.h"
 #include "fixture.h"
 #include "qlcchannel.h"
@@ -119,6 +120,21 @@ QJsonObject JsonView::universe(const Universe *universe, int index)
     /* No output patch means this universe reaches nothing, however healthy the
        rest of the project looks. */
     json["patched"] = (outputs.isEmpty() == false);
+
+    const InputPatch *input = universe->inputPatch();
+    if (input != nullptr)
+    {
+        QJsonObject in;
+        in["plugin"] = input->pluginName();
+        in["line"] = input->inputName();
+        in["profile"] = input->profileName();
+        json["input"] = in;
+    }
+
+    /* Passthrough sends what arrives on the input straight back out. Worth
+       reporting, because a universe in passthrough ignores the desk and an
+       operator staring at unresponsive lights has no other way to find out. */
+    json["passthrough"] = universe->passthrough();
 
     return json;
 }

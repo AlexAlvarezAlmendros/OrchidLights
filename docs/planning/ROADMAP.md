@@ -258,16 +258,14 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 - [ ] Deshacer. QLC+ v5 tiene `Tardis`; sin equivalente, editar desde el
       navegador da miedo y con razón.
 
-### F4 — Fixtures y universos
+### F4 — Fixtures y universos 🔨
 
-- [ ] Fixtures: alta, baja, edición de dirección, universo, modo y nombre.
-- [ ] Buscador de la librería (1.735 perfiles) por fabricante, modelo, tipo y
-      número de canales.
-- [ ] Mapa de 512 canales por universo con **detección de solapes**.
-- [ ] Grupos de fixtures y grupos de canales.
-- [ ] Universos: alta, baja, nombre, passthrough, monitor.
-- [ ] Patch de entrada y salida por universo, con los plugins y perfiles
-      disponibles. **Esto es lo que hace que salga luz**, y hoy solo se lee.
+- [x] Fixtures: alta, baja, edición de dirección, universo y nombre — API y **pantalla de patch en el navegador**.
+- [x] Buscador de la librería por fabricante → modelo → modo, que son los tres pasos que da un operador.
+- [x] **Mapa de 512 canales** por universo, con cada fixture de un color: un solape se ve antes de convertirse en una luz que no responde. La alta ya lo rechaza (`Channel 1 of universe 1 is already used by "Par 1"`).
+- [x] Universos: alta, baja, nombre, passthrough, y **patch de salida** con los plugins y líneas que el daemon tiene cargados. Un universo sin salida sale marcado, porque no llega a nada y el proyecto se ve igual de sano.
+- [x] `GET /api/v1/universes` informa ahora también del patch de entrada y del passthrough: un universo en passthrough ignora la mesa, y el operador no tenía otra forma de enterarse.
+- [ ] Grupos de fixtures y grupos de canales en la interfaz (la API ya está).
 - [ ] Modificadores de canal.
 
 ### F5 — Funciones: los diez tipos 🔨
