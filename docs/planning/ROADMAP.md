@@ -179,9 +179,9 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 **Pendiente:**
 - [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.
-- [ ] Round-trip de `.qxw`: cargar y guardar no debe alterar las secciones que el motor no gestiona (Virtual Console, Simple Desk). Test en CI con proyectos reales.
+- [x] Round-trip de `.qxw`: cargar y guardar no altera las secciones que el motor no gestiona (Virtual Console, Simple Desk). `roundtrip-smoke.sh` y `xmltree-roundtrip.sh` en CI, contra los seis proyectos de la máquina.
 - [ ] **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador.
-- [ ] **Criterio de éxito: disparar el show del P62 Club desde `curl`/`wscat`, con luz real en la sala, sin abrir ninguna GUI.**
+- [x] **Criterio de éxito cumplido: el show del P62 se dispara desde `curl`/`wscat` con luz real, sin GUI.** Verificado por Art-Net: 512 bytes, 76 canales activos con el espaciado de 8 canales de los Theatre Spots.
 
 ### F2 — Shell web + Virtual Console en directo *(dolor #1)* 🔨
 
@@ -206,7 +206,8 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 - [x] **Speed dial funcionando.** Verificado sobre el rig: mover el dial de 430 ms a 3000 y a 500 cambia la duración de los tres chases y los dos EFX de movimiento del P62. Las velocidades (`fadeIn`/`fadeOut`/`duration`) se exponen ahora en `/api/v1/functions`, para que el efecto sea **observable** y no solo confirmado por un acuse.
   Los flags del XML son índices en la tabla de multiplicadores de QLC+, donde `0 = None` significa "no toques esa velocidad" — por eso un dial que parece controlar un fade a menudo solo controla la duración.
-- [ ] Sliders de playback y submaster, cue lists, XY pads.
+- [x] Cue lists y XY pads (ver F6).
+- [ ] Sliders de playback y submaster.
 
 > **Con esto, la consola del P62 no tiene ningún widget muerto**: 20 botones, 5 faders, el speed dial y las etiquetas, todos operativos desde el navegador.
 - [x] **Editor de orden sobre rejilla**, guardado en `<OrchidLightsLayout>`, una sección propia del `.qxw`. Verificado contra **QLC+ 5.2.1**: avisa `Unknown Workspace tag` y carga el proyecto con normalidad. Asimetría documentada: QLC+ no conserva secciones desconocidas, así que guardar desde QLC+ pierde el orden (y solo el orden).
@@ -247,14 +248,16 @@ superficies.
 
 Sin esto no hay CRUD de nada, así que va primero y va completa.
 
-- [ ] Mutaciones sobre `Doc` desde el hilo correcto. El motor corre en su propio
-      hilo y añadir o borrar un fixture bajo un `MasterTimer` que está escribiendo
-      DMX es el mismo problema de concurrencia que ya apareció al cargar proyectos.
-- [ ] Estado `modified` propagado, y `POST /project/save` como único punto de
-      persistencia. Editar no debe escribir en disco por sorpresa.
-- [ ] Difusión por WebSocket de cada cambio, para que dos clientes no diverjan.
-- [ ] Validación en el borde: un patch que se solapa, un modo que no existe, un
-      universo fuera de rango. Rechazar con un mensaje que diga qué está mal.
+- [x] Mutaciones sobre `Doc` desde el hilo correcto (`EngineHost::withFixturesLocked`, y
+      `stopAndWait` antes de tocar la lista de fixtures de un EFX).
+- [x] Estado `modified` propagado, y `POST /project/save` como único punto de
+      persistencia. Ninguna edición escribe en disco por sorpresa.
+- [x] Validación en el borde, con el motivo dentro: un patch que se solapa, un modo que
+      no existe, un canal más allá del último del fixture, una escena donde una cue list
+      necesita un chaser.
+- [ ] **Difusión por WebSocket de cada cambio.** Hoy se replican los faders, los pads y
+      el estado de las funciones; una edición (un widget, un fixture, una función) no.
+      Dos navegadores editando el mismo show divergen hasta que uno recarga.
 - [ ] Deshacer. QLC+ v5 tiene `Tardis`; sin equivalente, editar desde el
       navegador da miedo y con razón.
 
