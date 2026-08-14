@@ -42,6 +42,11 @@ export interface VcWidget {
   chaserId?: number
   clockType?: string
   clockTime?: number
+  /** XY pad: how many heads it steers, and where it was left. Zero heads
+   *  means a pad that steers nothing, which is a control that does nothing. */
+  padHeads?: number
+  padX?: number
+  padY?: number
   sliderMode?: string
   levelChannels?: { fixture: number; channel: number }[]
   low?: number

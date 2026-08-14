@@ -329,8 +329,11 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 - [x] **Cue lists en el navegador.** Los pasos, el que está en marcha resaltado, transporte de play/stop/anterior/siguiente, y salto directo a un cue — que es lo que hace un operador cuando el show se salta un número. El cue actual viene por el feed en vivo, así que dos móviles corriendo el mismo show ven el mismo cue.
 - [x] **`GET /api/v1/functions/{id}/body`**: pasos de un chaser, valores de una escena, miembros de una collection, con nombres. La escritura ya existía; sin la lectura un cliente cambia un cuerpo que no puede ver, y eso no es editar, es adivinar.
-- [ ] Control completo: `xypad`, `audiotriggers`, `animation` (control de RGB
-      Matrix), `soloframe` con su semántica de solo, `slider` en modos playback y
+- [x] **XY pads funcionando.** `LevelSource` aprende a apuntar cabezas: la posición es una fracción del tramo de recorrido que el proyecto le permite a cada cabeza, escalada al espacio de 16 bits que comparten el canal grueso y el fino. Límites, ejes invertidos y canales finos, todo del proyecto — un foco colgado boca abajo se apunta invirtiendo un eje, e ignorarlo lo manda al techo.
+- [x] `server/test/xypad-smoke.sh` **lee el universo de vuelta**. Todo lo demás de un pad puede funcionar sin que se mueva una luz: la posición se aparca bajo mutex, se replica a los otros clientes y se reporta bien, llegue o no a un canal. Con tres MAC500 (dos gruesos, uno con finos) comprueba el origen, la esquina, el eje invertido, el tilt limitado a la mitad superior, y que un tercio del recorrido da 85 grueso **y 85 fino** — en 8 bits el fino saldría cero y la cabeza daría 512 pasos en vez de 65.536.
+- [x] `GET /vc` cuenta las cabezas **que de verdad se pueden apuntar**, consultando a `Doc`: un pad puede nombrar un fixture sin pan ni tilt, y entonces es un control que se ve bien y no mueve nada.
+- [ ] Control completo: `audiotriggers`, `animation` (control de RGB Matrix),
+      `soloframe` con su semántica de solo, `slider` en modos playback y
       submaster, paginación de `frame`.
 - [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
       (MIDI/OSC) por widget.

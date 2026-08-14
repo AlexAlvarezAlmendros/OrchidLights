@@ -60,9 +60,16 @@ namespace JsonView
      */
     QJsonObject functionBody(const Doc *doc, const Function *function);
 
-    /** The Virtual Console tree, geometry included: the interface needs the
-        original coordinates to group widgets into rows and reflow them. */
-    QJsonObject vcWidget(const VcWidget &widget);
+    /**
+     * The Virtual Console tree, geometry included: the interface needs the
+     * original coordinates to group widgets into rows and reflow them.
+     *
+     * `doc` is optional and used for one thing: an XY pad's heads are only
+     * steerable if the fixtures behind them actually have pan or tilt, and
+     * that is a question only Doc can answer. Without it the pad is reported
+     * as it is written in the file, which may promise more than it can do.
+     */
+    QJsonObject vcWidget(const VcWidget &widget, const Doc *doc = nullptr);
 }
 
 #endif // JSONVIEW_H

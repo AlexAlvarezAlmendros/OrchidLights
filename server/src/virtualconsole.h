@@ -83,6 +83,28 @@ struct VcWidget
     bool hasChaser = false;
     quint32 chaserId = 0;
 
+    /**
+     * XY pad: the heads it steers, and how much of their travel it may use.
+     *
+     * The limits are fractions of each head's full range and they are not
+     * decoration -- a pad set to the front half of the stage must not swing a
+     * lamp into the audience because a phone screen is a different shape.
+     */
+    struct PadHead
+    {
+        quint32 fixtureId = 0;
+        int head = 0;
+        double xMin = 0.0, xMax = 1.0;
+        double yMin = 0.0, yMax = 1.0;
+        bool xReverse = false;
+        bool yReverse = false;
+    };
+    QVector<PadHead> padHeads;
+
+    /** Where the pad was left, 0..1 on each axis. */
+    double padX = 0.0;
+    double padY = 0.0;
+
     /** Clock: "stopwatch", "countdown" or "clock", and its target time. */
     QString clockType;
     int clockTime = 0;

@@ -259,7 +259,7 @@ QJsonArray JsonView::universes(const Doc *doc)
     return array;
 }
 
-QJsonObject JsonView::vcWidget(const VcWidget &widget)
+QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc)
 {
     QJsonObject json;
 
@@ -292,6 +292,37 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
     {
         json["chaserId"] = qint64(widget.chaserId);
         json["controllable"] = true;
+    }
+
+    if (widget.padHeads.isEmpty() == false)
+    {
+        /* The heads themselves are not sent: an interface steers the pad, not
+           the lamps, and their limits are the project's business. What it does
+           need is whether there is anything steerable behind this pad, and
+           where it was left.
+         *
+         * Counted against Doc rather than taken from the file, because a pad
+         * can name a fixture that has no pan or tilt at all -- and then it is
+         * a control that looks right and moves nothing. */
+        int steerable = 0;
+        for (const VcWidget::PadHead &head : widget.padHeads)
+        {
+            const Fixture *fixture = doc != nullptr ? doc->fixture(head.fixtureId) : nullptr;
+            if (doc == nullptr
+                || (fixture != nullptr
+                    && (fixture->channelNumber(QLCChannel::Pan, QLCChannel::MSB, head.head)
+                            != QLCChannel::invalid()
+                        || fixture->channelNumber(QLCChannel::Tilt, QLCChannel::MSB, head.head)
+                            != QLCChannel::invalid())))
+            {
+                steerable++;
+            }
+        }
+
+        json["padHeads"] = steerable;
+        json["padX"] = widget.padX;
+        json["padY"] = widget.padY;
+        json["controllable"] = (steerable > 0);
     }
 
     if (widget.clockType.isEmpty() == false)
@@ -348,7 +379,7 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
     {
         QJsonArray children;
         for (const VcWidget &child : widget.children)
-            children.append(vcWidget(child));
+            children.append(vcWidget(child, doc));
         json["children"] = children;
     }
 

@@ -238,6 +238,73 @@ namespace
                     }
                 }
             }
+            else if (name == QStringLiteral("Fixture") && widget.type == QStringLiteral("xypad"))
+            {
+                /* A head of an XY pad, with the slice of pan and tilt travel it
+                   is allowed. The limits are fractions of the head's full
+                   range, and they are not decoration: a pad set to the front
+                   half of the stage must not swing a lamp into the audience. */
+                VcWidget::PadHead head;
+                head.fixtureId = reader.attributes().value(QStringLiteral("ID")).toUInt();
+                head.head = reader.attributes().value(QStringLiteral("Head")).toInt();
+
+                while (reader.readNextStartElement())
+                {
+                    if (reader.name() == QStringLiteral("Axis"))
+                    {
+                        const QXmlStreamAttributes axis = reader.attributes();
+                        const bool isX =
+                            axis.value(QStringLiteral("ID")) == QStringLiteral("X");
+
+                        const double low = axis.value(QStringLiteral("LowLimit")).toDouble();
+                        const double high = axis.value(QStringLiteral("HighLimit")).toDouble();
+                        /* QLC+ writes "True"/"False" here, and reads anything
+                           that is not "False" as reversed. */
+                        const bool reverse =
+                            axis.value(QStringLiteral("Reverse")).toString().compare(
+                                QStringLiteral("false"), Qt::CaseInsensitive) != 0;
+
+                        if (isX)
+                        {
+                            head.xMin = low;
+                            head.xMax = high;
+                            head.xReverse = reverse;
+                        }
+                        else
+                        {
+                            head.yMin = low;
+                            head.yMax = high;
+                            head.yReverse = reverse;
+                        }
+                    }
+                    reader.skipCurrentElement();
+                }
+
+                widget.padHeads.append(head);
+            }
+            else if (name == QStringLiteral("Pan") || name == QStringLiteral("Tilt"))
+            {
+                /* Stored in a 0..256 space, which is what the desktop pad's
+                   canvas uses. Normalised here so nothing downstream has to
+                   know that number. */
+                const double position =
+                    reader.attributes().value(QStringLiteral("Position")).toDouble() / 256.0;
+
+                if (name == QStringLiteral("Pan"))
+                    widget.padX = position;
+                else
+                    widget.padY = position;
+
+                reader.skipCurrentElement();
+            }
+            else if (name == QStringLiteral("Position"))
+            {
+                /* The pre-5.0 shape, which carried both axes on one element. */
+                const QXmlStreamAttributes attributes = reader.attributes();
+                widget.padX = attributes.value(QStringLiteral("X")).toDouble() / 256.0;
+                widget.padY = attributes.value(QStringLiteral("Y")).toDouble() / 256.0;
+                reader.skipCurrentElement();
+            }
             else if (isWidgetElement(name))
             {
                 VcWidget child;

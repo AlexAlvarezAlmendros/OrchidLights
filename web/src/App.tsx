@@ -8,6 +8,7 @@ import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './lay
 import { type Connection, Live } from './live'
 import { Setup } from './setup'
 import { CREATABLE, placeBelow } from './widgets'
+import { XYPad } from './xypad'
 
 type Theme = 'stage' | 'blackout'
 
@@ -51,6 +52,7 @@ export function App() {
   const [selected, setSelected] = useState<number | null>(null)
   const [fixtures, setFixtures] = useState<FixtureState[]>([])
   const [view, setView] = useState<View>('console')
+  const [pads, setPads] = useState<Record<number, { x: number; y: number }>>({})
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
@@ -60,6 +62,7 @@ export function App() {
       onFunctions: setFunctions,
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
+      onPad: (id, x, y) => setPads((current) => ({ ...current, [id]: { x, y } })),
     })
     live.current = feed
     feed.connect()
@@ -71,15 +74,18 @@ export function App() {
         // Seed the faders from the values the project was saved with, so the
         // interface opens showing the desk as the show left it.
         const seeded: Record<number, number> = {}
+        const seededPads: Record<number, { x: number; y: number }> = {}
         const visit = (w: VcWidget) => {
           if (w.id !== undefined) {
             if (w.sliderMode && w.value !== undefined) seeded[w.id] = w.value
             if (w.speedTargets && w.speedMs !== undefined) seeded[w.id] = w.speedMs
+            if (w.padHeads) seededPads[w.id] = { x: w.padX ?? 0, y: w.padY ?? 0 }
           }
           for (const child of w.children ?? []) visit(child)
         }
         visit(console_)
         setLevels(seeded)
+        setPads(seededPads)
       })
       // A project without a Virtual Console is normal, not a failure: plenty of
       // shows are driven straight from the function list.
@@ -121,6 +127,13 @@ export function App() {
 
   const cueList = useCallback((chaser: number, action: CueAction, index = -1) => {
     live.current?.cuelist(chaser, action, index)
+  }, [])
+
+  const movePad = useCallback((id: number, x: number, y: number) => {
+    // Optimistic, like a fader: the dot follows the finger and the engine
+    // catches up on its next tick.
+    setPads((current) => ({ ...current, [id]: { x, y } }))
+    live.current?.setPad(id, x, y)
   }, [])
 
   const setLevel = useCallback((id: number, value: number) => {
@@ -379,6 +392,8 @@ export function App() {
                 allFunctions={functions}
                 onToggle={toggle}
                 onCueList={cueList}
+                pads={pads}
+                onPad={movePad}
                 levels={levels}
                 onLevel={setLevel}
                 onSpeed={setSpeed}
@@ -417,6 +432,8 @@ function Surface({
   allFunctions,
   onToggle,
   onCueList,
+  pads,
+  onPad,
   levels,
   onLevel,
   onSpeed,
@@ -433,6 +450,8 @@ function Surface({
   allFunctions: FunctionState[]
   onToggle: (id: number) => void
   onCueList: (chaser: number, action: CueAction, index?: number) => void
+  pads: Record<number, { x: number; y: number }>
+  onPad: (id: number, x: number, y: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -466,6 +485,8 @@ function Surface({
                 allFunctions={allFunctions}
                 onToggle={onToggle}
                 onCueList={onCueList}
+                pads={pads}
+                onPad={onPad}
                 levels={levels}
                 onLevel={onLevel}
                 onSpeed={onSpeed}
@@ -527,6 +548,8 @@ function Widget({
   allFunctions,
   onToggle,
   onCueList,
+  pads,
+  onPad,
   levels,
   onLevel,
   onSpeed,
@@ -543,6 +566,8 @@ function Widget({
   allFunctions: FunctionState[]
   onToggle: (id: number) => void
   onCueList: (chaser: number, action: CueAction, index?: number) => void
+  pads: Record<number, { x: number; y: number }>
+  onPad: (id: number, x: number, y: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -617,6 +642,17 @@ function Widget({
       >
         {widget.caption || `#${id}`}
       </button>
+    )
+  }
+
+  if (widget.type === 'xypad') {
+    return (
+      <XYPad
+        widget={widget}
+        style={style}
+        position={pads[widget.id ?? -1] ?? { x: widget.padX ?? 0, y: widget.padY ?? 0 }}
+        onMove={onPad}
+      />
     )
   }
 

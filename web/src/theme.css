@@ -772,3 +772,44 @@ button.linkish.left {
   flex: 1;
   min-width: 5rem;
 }
+
+/* XY pads.
+   Square, because pan and tilt are not the same range but the surface is how
+   the operator thinks about the stage, and a stretched pad makes a straight
+   sweep curve. */
+.widget.xypad {
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  --basis: 12rem;
+  /* Capped, because the surface is square: left to stretch across a desktop
+     row it becomes 900 px tall and pushes the rest of the console off screen. */
+  max-width: 22rem;
+}
+
+.xypad-surface {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: linear-gradient(var(--border), var(--border)) center / 100% 1px no-repeat,
+    linear-gradient(var(--border), var(--border)) center / 1px 100% no-repeat, var(--surface);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.xypad-surface[data-dragging="true"] {
+  border-color: var(--accent);
+}
+
+.xypad-dot {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
