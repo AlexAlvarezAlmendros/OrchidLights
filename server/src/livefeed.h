@@ -101,6 +101,9 @@ private:
     void sendFunctions(QWebSocket *socket);
     void rejectSocket(QWebSocket *socket, const QString &reason);
 
+    /** One universe's values, framed for the wire. */
+    static QByteArray framePayload(quint32 universeId, const QByteArray &values);
+
     EngineHost *m_engine = nullptr;
     const ApiAuth *m_auth = nullptr;
 

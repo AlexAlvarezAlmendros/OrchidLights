@@ -243,6 +243,11 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
            the path makes the next save refuse instead. */
         m_projectPath.clear();
         m_preserved = WorkspaceLoader::Preserved();
+
+        /* A different project entirely, so the values go too: an id that means
+           one fader here meant another one there. */
+        if (m_levels != nullptr)
+            m_levels->forgetEverything();
         teachSliders();
     }
 
@@ -255,6 +260,8 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
         if (m_projectsDirectory.isEmpty())
             m_projectsDirectory = QFileInfo(m_projectPath).absolutePath();
 
+        if (m_levels != nullptr)
+            m_levels->forgetEverything();
         teachSliders();
     }
 
