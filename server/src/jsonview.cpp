@@ -19,6 +19,7 @@
 
 #include "jsonview.h"
 #include "virtualconsole.h"
+#include "levelsource.h"
 
 #include "qlcfixturemode.h"
 #include "qlcfixturedef.h"
@@ -259,7 +260,8 @@ QJsonArray JsonView::universes(const Doc *doc)
     return array;
 }
 
-QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc)
+QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
+                               const LevelSource *levels)
 {
     QJsonObject json;
 
@@ -373,11 +375,24 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc)
          * A submaster is not, yet: it scales the widgets around it, and that
            is not modelled. Offering it would be a lie the operator discovers
            when nothing dims. */
-        json["controllable"] =
-            (widget.sliderMode == QStringLiteral("level")
-             && widget.levelChannels.isEmpty() == false)
-            || (widget.sliderMode == QStringLiteral("playback") && widget.hasFunction
-                && widget.functionId != UINT_MAX);
+        if (widget.sliderMode == QStringLiteral("submaster"))
+        {
+            /* A submaster is movable when it encloses something a submaster
+               actually scales -- a fader with channels, a playback, a button,
+               a cue list. One alone in a frame of labels and XY pads is a
+               control that would do nothing, and saying otherwise is the exact
+               failure this project exists to avoid. */
+            json["controllable"] = (levels != nullptr && levels->scales(widget.id));
+            json["scales"] = (levels != nullptr) ? levels->scaledCount(widget.id) : 0;
+        }
+        else
+        {
+            json["controllable"] =
+                (widget.sliderMode == QStringLiteral("level")
+                 && widget.levelChannels.isEmpty() == false)
+                || (widget.sliderMode == QStringLiteral("playback") && widget.hasFunction
+                    && widget.functionId != UINT_MAX);
+        }
 
         /* The channels themselves, so an editor can show what a fader is
            actually holding and send the list back changed. */
@@ -396,7 +411,7 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc)
     {
         QJsonArray children;
         for (const VcWidget &child : widget.children)
-            children.append(vcWidget(child, doc));
+            children.append(vcWidget(child, doc, levels));
         json["children"] = children;
     }
 

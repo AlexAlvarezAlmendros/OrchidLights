@@ -40,11 +40,13 @@ LevelSource::LevelSource(Doc *doc)
 
 LevelSource::~LevelSource() = default;
 
-void LevelSource::defineSlider(quint32 sliderId, const QList<Channel> &channels)
+void LevelSource::defineSlider(quint32 sliderId, const QList<Channel> &channels,
+                               const Scope &submasters)
 {
     QMutexLocker locker(&m_mutex);
 
     m_sliders.insert(sliderId, channels);
+    m_scopes.insert(sliderId, submasters);
     if (m_values.contains(sliderId) == false)
         m_values.insert(sliderId, 0);
 
@@ -55,15 +57,112 @@ void LevelSource::defineSlider(quint32 sliderId, const QList<Channel> &channels)
     m_dirty.insert(sliderId, true);
 }
 
-void LevelSource::definePlayback(quint32 sliderId, quint32 functionId)
+void LevelSource::definePlayback(quint32 sliderId, quint32 functionId,
+                                 const Scope &submasters)
 {
     QMutexLocker locker(&m_mutex);
 
     m_playbacks.insert(sliderId, functionId);
+    m_scopes.insert(sliderId, submasters);
     if (m_values.contains(sliderId) == false)
         m_values.insert(sliderId, 0);
 
     m_dirty.insert(sliderId, true);
+}
+
+void LevelSource::defineSubmaster(quint32 sliderId, int low, int high, uchar initial)
+{
+    QMutexLocker locker(&m_mutex);
+
+    Submaster submaster;
+    submaster.low = qBound(0, low, 255);
+    submaster.high = qBound(submaster.low, high, 255);
+    m_submasters.insert(sliderId, submaster);
+
+    /* Seeded from the show, not from zero: a submaster saved at full and
+       restored at zero is a rig that opens black. */
+    if (m_values.contains(sliderId) == false)
+        m_values.insert(sliderId, initial);
+
+    /* Everything below it has to be re-scaled on the next tick, because the
+       console was just re-read and the factors went with it. */
+    m_submastersDirty = true;
+}
+
+void LevelSource::defineButton(quint32 widgetId, quint32 functionId, const Scope &submasters)
+{
+    QMutexLocker locker(&m_mutex);
+
+    m_functionWidgets.insert(widgetId, functionId);
+    m_scopes.insert(widgetId, submasters);
+}
+
+void LevelSource::defineCueList(quint32 widgetId, quint32 chaserId, const Scope &submasters)
+{
+    QMutexLocker locker(&m_mutex);
+
+    m_functionWidgets.insert(widgetId, chaserId);
+    m_scopes.insert(widgetId, submasters);
+}
+
+qreal LevelSource::factorFor(quint32 widgetId) const
+{
+    qreal factor = 1.0;
+
+    for (quint32 id : m_scopes.value(widgetId))
+    {
+        const Submaster submaster = m_submasters.value(id);
+        const int raw = int(m_values.value(id, 255));
+
+        /* The limits are the slider's own, shared with level mode. The divisor
+           is 255 and the division is done in floating point, so a submaster at
+           127 over a channel at 255 lands on 127 -- which is the number QLC+'s
+           own tests pin. */
+        factor *= qreal(qBound(submaster.low, raw, submaster.high)) / qreal(UCHAR_MAX);
+    }
+
+    return factor;
+}
+
+qreal LevelSource::submasterFactor(quint32 widgetId) const
+{
+    QMutexLocker locker(&m_mutex);
+    return factorFor(widgetId);
+}
+
+bool LevelSource::isScalable(quint32 widgetId) const
+{
+    QMutexLocker locker(&m_mutex);
+
+    /* What a submaster actually reaches. Pads are absent on purpose: they write
+       pan and tilt, which are never flagged Intensity, so a submaster cannot
+       touch them in QLC+ either -- and scaling them would swing lamps toward
+       their zero position, which is not dimming, it is pointing somewhere
+       else. */
+    return (m_sliders.contains(widgetId) && m_sliders.value(widgetId).isEmpty() == false)
+           || m_playbacks.contains(widgetId)
+           || m_functionWidgets.contains(widgetId);
+}
+
+int LevelSource::scaledCount(quint32 submasterId) const
+{
+    QMutexLocker locker(&m_mutex);
+
+    int count = 0;
+    for (auto it = m_scopes.constBegin(); it != m_scopes.constEnd(); ++it)
+    {
+        if (it.value().contains(submasterId) == false)
+            continue;
+
+        const quint32 id = it.key();
+        if ((m_sliders.contains(id) && m_sliders.value(id).isEmpty() == false)
+            || m_playbacks.contains(id) || m_functionWidgets.contains(id))
+        {
+            count++;
+        }
+    }
+
+    return count;
 }
 
 void LevelSource::definePad(quint32 padId, const QList<PadHead> &heads)
@@ -115,6 +214,9 @@ void LevelSource::forgetSliders()
 
     m_sliders.clear();
     m_dirty.clear();
+    m_scopes.clear();
+    m_submasters.clear();
+    m_functionWidgets.clear();
 
     /* The values stay. This runs after every edit to the console, and a
        rename should not black out a fader that is holding a look -- which is
@@ -157,6 +259,13 @@ void LevelSource::setValue(quint32 sliderId, uchar value)
 {
     QMutexLocker locker(&m_mutex);
 
+    if (m_submasters.contains(sliderId))
+    {
+        m_values.insert(sliderId, value);
+        m_submastersDirty = true;
+        return;
+    }
+
     if (m_sliders.contains(sliderId) == false && m_playbacks.contains(sliderId) == false)
         return;
 
@@ -173,7 +282,8 @@ uchar LevelSource::value(quint32 sliderId) const
 bool LevelSource::knows(quint32 sliderId) const
 {
     QMutexLocker locker(&m_mutex);
-    return m_sliders.contains(sliderId) || m_playbacks.contains(sliderId);
+    return m_sliders.contains(sliderId) || m_playbacks.contains(sliderId)
+           || m_submasters.contains(sliderId);
 }
 
 /**
@@ -227,7 +337,9 @@ void LevelSource::writePads(const QList<Universe *> &universes)
             const ushort pan = scaled(at.first, head.xMin, head.xMax, head.xReverse);
             const ushort tilt = scaled(at.second, head.yMin, head.yMax, head.yReverse);
 
-            QSharedPointer<GenericFader> fader = faderFor(universeId, universe);
+            /* Pads get their own fader per universe, under the pad's own id.
+               Nothing scales them, so the intensity stays at 1. */
+            QSharedPointer<GenericFader> fader = faderFor(it.key(), universeId, universe);
 
             const auto aim = [&](quint32 channel, uchar value) {
                 if (channel == QLCChannel::invalid())
@@ -271,6 +383,30 @@ void LevelSource::writePads(const QList<Universe *> &universes)
  */
 void LevelSource::writePlaybacks(MasterTimer *timer)
 {
+    /* Buttons and cue lists, every tick rather than on a dirty flag.
+     *
+     * They are started and stopped by the operator, not from here, so there is
+     * no message to hang a flag on: a function pressed while a submaster is
+     * down has to come up scaled, not come up full and dim on the next move.
+     * Holding an override is idempotent and there are only ever a handful of
+     * these, so checking is cheaper than tracking. */
+    for (auto it = m_functionWidgets.constBegin(); it != m_functionWidgets.constEnd(); ++it)
+    {
+        Function *function = m_doc->function(it.value());
+        if (function == nullptr)
+            continue;
+
+        if (function->stopped())
+        {
+            /* Given back when it stops, so the next start asks for a fresh one
+               rather than adjusting a slot that means nothing now. */
+            m_overrides.remove(it.key());
+            continue;
+        }
+
+        ride(it.key(), function, factorFor(it.key()));
+    }
+
     if (m_dirty.isEmpty())
         return;
 
@@ -283,6 +419,10 @@ void LevelSource::writePlaybacks(MasterTimer *timer)
         if (function == nullptr)
             continue;
 
+        /* The stop test uses the slider's OWN level, not the scaled one. A
+           submaster at zero must leave a playback running at intensity zero:
+           stopping it would mean restoring the submaster brought back nothing.
+           QLC+ does the same -- its submaster path never stops a function. */
         const uchar level = m_values.value(it.key(), 0);
 
         if (level == 0)
@@ -297,33 +437,54 @@ void LevelSource::writePlaybacks(MasterTimer *timer)
         if (function->stopped())
             function->start(timer, FunctionParent::master());
 
-        const qreal intensity = qreal(level) / qreal(UCHAR_MAX);
-
-        if (m_overrides.contains(it.key()) == false)
-        {
-            m_overrides.insert(it.key(),
-                               function->requestAttributeOverride(Function::Intensity, intensity));
-        }
-        else
-        {
-            function->adjustAttribute(intensity, m_overrides.value(it.key()));
-        }
+        ride(it.key(), function, qreal(level) / qreal(UCHAR_MAX) * factorFor(it.key()));
     }
 }
 
-QSharedPointer<GenericFader> LevelSource::faderFor(quint32 universeId, Universe *universe)
+/**
+ * Hold a function's intensity at a value.
+ *
+ * The first call asks the function for an override slot and remembers the id;
+ * every later one adjusts through it. Function::Intensity is registered
+ * Multiply|Single, so there is exactly one slot per function: two widgets
+ * pointing at the same function share it, last writer wins. That is QLC+'s
+ * behaviour and not something to quietly improve on -- a show built around it
+ * would change under the operator.
+ */
+void LevelSource::ride(quint32 widgetId, Function *function, qreal intensity)
 {
-    /* Cached per universe id, and re-requested whenever the universe object
-       behind that id is not the one the fader belongs to. Universes are
+    if (m_overrides.contains(widgetId) == false)
+    {
+        m_overrides.insert(widgetId,
+                           function->requestAttributeOverride(Function::Intensity, intensity));
+    }
+    else
+    {
+        function->adjustAttribute(intensity, m_overrides.value(widgetId));
+    }
+}
+
+QSharedPointer<GenericFader> LevelSource::faderFor(quint32 ownerId, quint32 universeId,
+                                                  Universe *universe)
+{
+    /* Cached per owner and universe, and re-requested whenever the universe
+       object behind that id is not the one the fader belongs to. Universes are
        recreated when one is added or removed, so a fader held from before
        points at an object nobody writes any more -- and the symptom is a
        control that moves in the interface while its lamp sits still. */
-    QSharedPointer<GenericFader> fader = m_faders.value(universeId);
-    if (fader.isNull() || m_faderUniverses.value(universeId) != universe)
+    const FaderKey key = qMakePair(ownerId, universeId);
+
+    QSharedPointer<GenericFader> fader = m_faders.value(key);
+    if (fader.isNull() || m_faderUniverses.value(key) != universe)
     {
         fader = universe->requestFader(Universe::Auto);
-        m_faders.insert(universeId, fader);
-        m_faderUniverses.insert(universeId, universe);
+
+        /* Seeded with the factor as it stands, so a fader first touched after a
+           submaster has already moved does not come up at full. */
+        fader->adjustIntensity(factorFor(ownerId));
+
+        m_faders.insert(key, fader);
+        m_faderUniverses.insert(key, universe);
     }
 
     return fader;
@@ -344,6 +505,32 @@ void LevelSource::writeDMX(MasterTimer *timer, QList<Universe *> universes)
                 entry.first->dismissFader(entry.second);
         }
         m_dismissed.clear();
+    }
+
+    /* A submaster move changes what every fader below it is worth, and does it
+       without any of them being touched.
+     *
+     * Setting the fader's intensity is enough: Universe::write walks every
+       registered fader each tick regardless of what this source did, and
+       GenericFader applies the intensity only to channels flagged Intensity --
+       so gobo and colour-wheel channels are left alone, exactly as in QLC+.
+       Multiplying into the target instead would dim a gobo wheel into a
+       different gobo. */
+    if (m_submastersDirty)
+    {
+        for (auto it = m_faders.constBegin(); it != m_faders.constEnd(); ++it)
+        {
+            if (it.value().isNull() == false)
+                it.value()->adjustIntensity(factorFor(it.key().first));
+        }
+
+        /* Functions are ridden only on dirty ticks, so they need waking. */
+        for (auto it = m_playbacks.constBegin(); it != m_playbacks.constEnd(); ++it)
+            m_dirty.insert(it.key(), true);
+        for (auto it = m_functionWidgets.constBegin(); it != m_functionWidgets.constEnd(); ++it)
+            m_dirty.insert(it.key(), true);
+
+        m_submastersDirty = false;
     }
 
     writePads(universes);
@@ -372,7 +559,7 @@ void LevelSource::writeDMX(MasterTimer *timer, QList<Universe *> universes)
 
             Universe *universe = universes.at(int(universeId));
 
-            QSharedPointer<GenericFader> fader = faderFor(universeId, universe);
+            QSharedPointer<GenericFader> fader = faderFor(it.key(), universeId, universe);
 
             FadeChannel *fc = fader->getChannelFader(m_doc, universe,
                                                      channel.first, channel.second);

@@ -947,12 +947,13 @@ function Fader({
   const high = widget.high ?? 255
   const percent = high > low ? Math.round(((value - low) / (high - low)) * 100) : 0
 
-  /* A playback or submaster slider parses fine but has nothing behind it here
-     yet. Nor does one with no id: the engine keys its level sliders by widget
+  /* Movable when the daemon says there is something behind it: channels for a
+     level fader, a function for a playback, something worth scaling for a
+     submaster. And never without an id -- the engine keys its sliders by widget
      id, so a fader without one has nothing to address.
    *
-   * Disabled is honest either way. Showing it live would be a lie the operator
-   * only discovers when the light does not move. */
+   * Disabled is honest. Showing it live would be a lie the operator only
+   * discovers when the light does not move. */
   const usable = widget.controllable === true && widget.id !== undefined
 
   return (

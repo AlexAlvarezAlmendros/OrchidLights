@@ -167,31 +167,59 @@ void EngineHost::teachSliders()
     if (VirtualConsole::parse(m_preserved.sections, root) == false)
         return;
 
-    /* Walk the whole tree: sliders live inside frames, sometimes nested. */
-    QVector<const VcWidget *> pending;
-    pending.append(&root);
+    /* The walk carries the submasters enclosing each widget.
+     *
+     * A submaster scales the frame that holds it and everything below, so what
+     * a widget ends up at is the product of the whole chain above it. The tree
+     * has no parent pointers, so the chain is threaded down instead -- which is
+     * also why this is resolved here, where the tree lives, rather than in
+     * LevelSource, which never has to learn what a frame is. */
+    struct Pending
+    {
+        const VcWidget *widget;
+        LevelSource::Scope scope;
+    };
+
+    QVector<Pending> pending;
+    pending.append({&root, LevelSource::Scope()});
 
     while (pending.isEmpty() == false)
     {
-        const VcWidget *widget = pending.takeLast();
+        const Pending item = pending.takeLast();
+        const VcWidget *widget = item.widget;
 
-        if (widget->sliderMode == QStringLiteral("level")
-            && widget->levelChannels.isEmpty() == false)
+        if (widget->sliderMode == QStringLiteral("submaster"))
+        {
+            m_levels->defineSubmaster(widget->id, widget->low, widget->high,
+                                      uchar(qBound(0, widget->value, 255)));
+        }
+        else if (widget->sliderMode == QStringLiteral("level")
+                 && widget->levelChannels.isEmpty() == false)
         {
             QList<LevelSource::Channel> channels;
             for (const auto &channel : widget->levelChannels)
                 channels.append(channel);
 
-            m_levels->defineSlider(widget->id, channels);
+            m_levels->defineSlider(widget->id, channels, item.scope);
         }
-
-        /* A playback slider rides a function instead of writing channels, and
-           names it as element text inside <Playback> rather than as an
-           attribute -- which is why it reported none for so long. */
-        if (widget->sliderMode == QStringLiteral("playback") && widget->hasFunction
-            && widget->functionId != UINT_MAX)
+        else if (widget->sliderMode == QStringLiteral("playback") && widget->hasFunction
+                 && widget->functionId != UINT_MAX)
         {
-            m_levels->definePlayback(widget->id, widget->functionId);
+            /* A playback slider rides a function instead of writing channels,
+               and names it as element text inside <Playback> rather than as an
+               attribute -- which is why it reported none for so long. */
+            m_levels->definePlayback(widget->id, widget->functionId, item.scope);
+        }
+        else if (widget->type == QStringLiteral("button") && widget->hasFunction
+                 && widget->functionId != UINT_MAX)
+        {
+            /* Not started from here -- that is the operator's business. Only
+               scaled, while it runs. */
+            m_levels->defineButton(widget->id, widget->functionId, item.scope);
+        }
+        else if (widget->type == QStringLiteral("cuelist") && widget->hasChaser)
+        {
+            m_levels->defineCueList(widget->id, widget->chaserId, item.scope);
         }
 
         if (widget->padHeads.isEmpty() == false)
@@ -214,8 +242,27 @@ void EngineHost::teachSliders()
             m_levels->definePad(widget->id, heads);
         }
 
+        /* A frame's own submaster sliders extend the chain for everything below
+           it -- but never for those submasters themselves.
+         *
+         * QLC+ excludes the sender when a submaster propagates, and with two in
+         * one frame it is order-dependent and ratchets darker on every repeat.
+         * Taking the product and leaving every submaster out of its own frame's
+         * chain gives the same answer for every sane console and a defined,
+         * idempotent one for the pathological case. It is a knowing difference,
+         * and this is where it lives. */
+        LevelSource::Scope below = item.scope;
         for (const VcWidget &child : widget->children)
-            pending.append(&child);
+        {
+            if (child.sliderMode == QStringLiteral("submaster") && child.hasId)
+                below.append(child.id);
+        }
+
+        for (const VcWidget &child : widget->children)
+        {
+            const bool isSubmaster = (child.sliderMode == QStringLiteral("submaster"));
+            pending.append({&child, isSubmaster ? item.scope : below});
+        }
     }
 }
 
