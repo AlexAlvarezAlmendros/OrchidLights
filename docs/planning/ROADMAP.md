@@ -280,7 +280,10 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 
 - [x] Cuerpos de **EFX** (algoritmo de entre 7, geometría con rangos validados, fixtures participantes) y **Sequence** (escena vinculada).
 
-**Pendiente:** cuerpo de `Show` — el timeline multipista, que es F7.
+- [x] **Gestor de funciones en el navegador.** Lista agrupada por tipo, crear los diez, renombrar, tiempos, arrancar/parar y borrar. El borrado enseña a quién le hace falta la función antes de forzarlo, en vez de dejar pasos de chaser apuntando a nada.
+- [x] Edición de cuerpo para las tres formas que son listas de cosas: valores de una **escena** (por fixture y canal, con nombre), pasos de un **chaser**, miembros de una **colección**. Los demás tipos lo dicen en vez de enseñar un editor vacío que se leería como "esta función no tiene nada".
+
+**Pendiente:** cuerpo de `Show` — el timeline multipista, que es F7. Y la edición de EFX, RGBMatrix, Script, Audio y Vídeo desde la interfaz: la API ya está.
 
 > **Peligro que el mapeo destapó y que ahora se respeta**: `EFX::m_fixtures` es una `QList` sin mutex que `EFX::write()` recorre **en el hilo del `MasterTimer` cada 20 ms**. Reconstruirla en caliente libera objetos que ese hilo está usando. Cambiar los fixtures de un EFX **lo para y espera** antes de tocar la lista, igual que hacen los dos editores de escritorio. Lo mismo para rebindear la escena de un Sequence, cuyos pasos solo significan algo contra ella.
 

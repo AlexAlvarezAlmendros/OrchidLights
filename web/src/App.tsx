@@ -3,6 +3,7 @@ import { type FixtureState, type FunctionState, type WidgetPatch, api } from './
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
 import { CueList } from './cuelist'
 import { WidgetEditor } from './editor'
+import { Functions } from './functions'
 import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './layout'
 import { type Connection, Live } from './live'
 import { Setup } from './setup'
@@ -26,7 +27,7 @@ type Mode = 'run' | 'arrange' | 'edit'
  * the fixtures in them -- which is what makes light come out and which, until
  * now, was reachable only with curl.
  */
-type View = 'console' | 'setup'
+type View = 'console' | 'setup' | 'functions'
 
 /** Transport for a cue list: a chaser plus next and previous. */
 type CueAction = 'play' | 'stop' | 'next' | 'previous' | 'step'
@@ -212,6 +213,16 @@ export function App() {
       .catch(() => undefined)
   }, [])
 
+  /* Functions change under the console: a widget can point at one that has
+     just been renamed or deleted, so both lists are re-read together. */
+  const reloadFunctions = useCallback(() => {
+    api
+      .functions()
+      .then(setFunctions)
+      .catch(() => undefined)
+    setDirty(true)
+  }, [])
+
   const assignIds = useCallback(async () => {
     await api.assignWidgetIds()
     await refresh()
@@ -254,17 +265,20 @@ export function App() {
         >
           {theme === 'stage' ? '🌙' : '☀'}
         </button>
-        <button
-          type="button"
-          aria-pressed={view === 'setup'}
-          onClick={() => {
-            setView(view === 'setup' ? 'console' : 'setup')
-            setMode('run')
-            setSelected(null)
-          }}
-        >
-          {view === 'setup' ? 'Consola' : 'Patch'}
-        </button>
+        {(['console', 'functions', 'setup'] as const).map((target) => (
+          <button
+            key={target}
+            type="button"
+            aria-pressed={view === target}
+            onClick={() => {
+              setView(target)
+              setMode('run')
+              setSelected(null)
+            }}
+          >
+            {target === 'console' ? 'Consola' : target === 'functions' ? 'Funciones' : 'Patch'}
+          </button>
+        ))}
         {view === 'console' &&
           vc &&
           /* One control at a time. Showing "Ordenar" beside "Listo" made it
@@ -342,6 +356,16 @@ export function App() {
           {/* The patch changes what the console is pointing at, so a fixture
               added or removed here has to reach the widget editor too. */}
           <Setup onChanged={reloadFixtures} />
+        </main>
+      ) : view === 'functions' ? (
+        <main className="console">
+          <Functions
+            functions={functions}
+            fixtures={fixtures}
+            running={running}
+            onToggle={toggle}
+            onChanged={reloadFunctions}
+          />
         </main>
       ) : (
         <div className="workspace">
