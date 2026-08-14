@@ -282,6 +282,29 @@ namespace
 
                 widget.padHeads.append(head);
             }
+            else if (name == QStringLiteral("Multipage"))
+            {
+                /* A frame that carries pages. Its children each name theirs in
+                   @Page, so without this every page is drawn on top of the
+                   others. */
+                const QXmlStreamAttributes attributes = reader.attributes();
+                widget.pages = attributes.value(QStringLiteral("PagesNum")).toInt();
+                widget.currentPage = attributes.value(QStringLiteral("CurrentPage")).toInt();
+                reader.skipCurrentElement();
+            }
+            else if (name == QStringLiteral("ShowHeader"))
+            {
+                /* A frame without a header is a grouping the designer wanted
+                   invisible, so drawing a titled box around it would be adding
+                   furniture nobody asked for. */
+                widget.showHeader =
+                    reader.readElementText().trimmed().compare(QStringLiteral("0")) != 0;
+            }
+            else if (name == QStringLiteral("Collapsed"))
+            {
+                widget.collapsed =
+                    reader.readElementText().trimmed().compare(QStringLiteral("0")) != 0;
+            }
             else if (name == QStringLiteral("Pan") || name == QStringLiteral("Tilt"))
             {
                 /* Stored in a 0..256 space, which is what the desktop pad's

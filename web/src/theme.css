@@ -813,3 +813,54 @@ button.linkish.left {
   box-shadow: 0 0 0 2px var(--surface);
   pointer-events: none;
 }
+
+/* Frames inside a page.
+   Drawn as a grey box until now, which on a console built out of frames meant
+   most of the show was invisible. */
+.widget.frame {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  text-align: left;
+  background: transparent;
+  border-style: dashed;
+}
+
+.widget.frame[data-solo="true"] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.frame-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.frame-head > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.frame-pages {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.frame-pages button {
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0 0.4rem;
+  font-size: 0.8rem;
+}
+
+.frame-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}

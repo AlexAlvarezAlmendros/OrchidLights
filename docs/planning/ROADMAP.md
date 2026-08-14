@@ -333,9 +333,11 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 - [x] **XY pads funcionando.** `LevelSource` aprende a apuntar cabezas: la posición es una fracción del tramo de recorrido que el proyecto le permite a cada cabeza, escalada al espacio de 16 bits que comparten el canal grueso y el fino. Límites, ejes invertidos y canales finos, todo del proyecto — un foco colgado boca abajo se apunta invirtiendo un eje, e ignorarlo lo manda al techo.
 - [x] `server/test/xypad-smoke.sh` **lee el universo de vuelta**. Todo lo demás de un pad puede funcionar sin que se mueva una luz: la posición se aparca bajo mutex, se replica a los otros clientes y se reporta bien, llegue o no a un canal. Con tres MAC500 (dos gruesos, uno con finos) comprueba el origen, la esquina, el eje invertido, el tilt limitado a la mitad superior, y que un tercio del recorrido da 85 grueso **y 85 fino** — en 8 bits el fino saldría cero y la cabeza daría 512 pasos en vez de 65.536.
 - [x] `GET /vc` cuenta las cabezas **que de verdad se pueden apuntar**, consultando a `Doc`: un pad puede nombrar un fixture sin pan ni tilt, y entonces es un control que se ve bien y no mueve nada.
+- [x] **Marcos anidados, paginados y solo.** Un marco se dibujaba como una caja gris vacía, que en una consola construida a base de marcos significa que casi todo el show es invisible: el `Sample.qxw` de QLC+ tiene 125 widgets y **cuatro** salían en pantalla. Ahora se dibujan con lo que llevan dentro, refluido por la misma regla que la página.
+- [x] **Paginación por marco**, que es como lo guarda QLC+ — por marco, no por consola, y cada hijo nombra su página en `@Page`. Ignorarlo dibuja todas las páginas superpuestas, que parece una página con el doble de botones.
+- [x] **Semántica de solo**, en el daemon y no en la interfaz: un marco solo que solo lo fuera en un navegador es peor que uno que no lo sea. Arrancar rojo tira azul; una función fuera del marco no es hermana de nadie y sobrevive.
 - [ ] Control completo: `audiotriggers`, `animation` (control de RGB Matrix),
-      `soloframe` con su semántica de solo, `slider` en modos playback y
-      submaster, paginación de `frame`.
+      `slider` en modos playback y submaster.
 - [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
       (MIDI/OSC) por widget.
 

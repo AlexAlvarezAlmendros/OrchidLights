@@ -463,7 +463,21 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
 
         const QString action = message.value("action").toString();
         if (action == QStringLiteral("start") && function->isRunning() == false)
+        {
+            /* A solo frame's contents are mutually exclusive -- the colour bank
+               where picking red should drop blue. Enforced here rather than in
+               the interface because two clients have to agree about it: if one
+               browser did it and another did not, the frame would only be solo
+               for whoever pressed last. */
+            for (quint32 sibling : m_engine->soloSiblings(function->id()))
+            {
+                Function *other = doc->function(sibling);
+                if (other != nullptr && other->isRunning())
+                    other->stop(FunctionParent::master());
+            }
+
             function->start(doc->masterTimer(), FunctionParent::master());
+        }
         else if (action == QStringLiteral("stop") && function->isRunning())
             function->stop(FunctionParent::master());
 
