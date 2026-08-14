@@ -53,6 +53,9 @@ export function App() {
   const [fixtures, setFixtures] = useState<FixtureState[]>([])
   const [view, setView] = useState<View>('console')
   const [pads, setPads] = useState<Record<number, { x: number; y: number }>>({})
+  /** Bumped whenever the project changed under us, so the screens that keep
+   *  their own state know to re-read it. */
+  const [revision, setRevision] = useState(0)
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
@@ -63,6 +66,40 @@ export function App() {
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
       onPad: (id, x, y) => setPads((current) => ({ ...current, [id]: { x, y } })),
+      /* Somebody else edited the show. Re-read what they touched rather than
+         patching a local copy from the message: the daemon decides what a
+         change means, and two clients guessing at it is how they drift. */
+      onChanged: (what) => {
+        const all = what.includes('project')
+        if (all || what.includes('vc'))
+          api
+            .vc()
+            .then(setVc)
+            .catch(() => undefined)
+        if (all || what.includes('fixtures')) {
+          api
+            .fixtures()
+            .then(setFixtures)
+            .catch(() => undefined)
+        }
+        if (all) {
+          api
+            .layout()
+            .then((l) => setLayout(l.pages[0]?.rows ?? null))
+            .catch(() => undefined)
+        }
+        /* The patch screen holds its own state; this is what tells it to look
+           again.
+         *
+         * Deliberately not bumped for a plain "functions" change: the function
+         * list already has a live channel of its own, and bumping here made the
+         * open function editor re-read the body of a function that had just
+         * been deleted -- a 404 for something the client should have known was
+         * gone. */
+        if (all || what.includes('vc') || what.includes('groups')) {
+          setRevision((n) => n + 1)
+        }
+      },
     })
     live.current = feed
     feed.connect()
@@ -368,7 +405,7 @@ export function App() {
         <main className="console">
           {/* The patch changes what the console is pointing at, so a fixture
               added or removed here has to reach the widget editor too. */}
-          <Setup onChanged={reloadFixtures} />
+          <Setup revision={revision} onChanged={reloadFixtures} />
         </main>
       ) : view === 'functions' ? (
         <main className="console">
@@ -376,6 +413,7 @@ export function App() {
             functions={functions}
             fixtures={fixtures}
             running={running}
+            revision={revision}
             onToggle={toggle}
             onChanged={reloadFunctions}
           />

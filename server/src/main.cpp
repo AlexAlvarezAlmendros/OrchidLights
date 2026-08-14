@@ -18,8 +18,10 @@
 */
 
 #include <QCommandLineParser>
+#include <QDesktopServices>
 #include <QGuiApplication>
 #include <QTextStream>
+#include <QUrl>
 
 #include "enginehost.h"
 #include "apiserver.h"
@@ -150,6 +152,14 @@ int main(int argc, char **argv)
         QStringLiteral("25"));
     parser.addOption(streamRateOption);
 
+    QCommandLineOption openOption(
+        QStringList() << QStringLiteral("open"),
+        QStringLiteral("Open the web interface in the default browser once the "
+                       "engine is up. This is what the menu entry uses; on a "
+                       "server it is off, because there is nobody there to see "
+                       "it."));
+    parser.addOption(openOption);
+
     QCommandLineOption requireAuthOption(
         QStringLiteral("require-auth"),
         QStringLiteral("Demand the bearer token even on loopback."));
@@ -248,6 +258,20 @@ int main(int argc, char **argv)
     else
     {
         out << "Authentication: not required on loopback (see --require-auth)" << Qt::endl;
+    }
+
+    if (parser.isSet(openOption))
+    {
+        /* Queued, so the browser is only launched once the event loop is
+           running and the server is actually accepting: opening it from here
+           can beat listen() to the first request and show a connection error
+           on a daemon that came up perfectly. */
+        const QString url = api.url();
+        QMetaObject::invokeMethod(&app, [url]() {
+            QDesktopServices::openUrl(QUrl(url));
+        }, Qt::QueuedConnection);
+
+        out << "Opening " << url << " in the browser" << Qt::endl;
     }
 
     return app.exec();

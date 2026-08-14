@@ -177,6 +177,20 @@ public:
     /** Anything the engine could not resolve while loading the project. */
     QString projectErrors() const;
 
+signals:
+    /**
+     * The Virtual Console changed.
+     *
+     * It lives outside Doc, in the preserved XML, so none of Doc's signals fire
+     * for it -- without this a widget edited on one phone would not appear on
+     * another until it was reloaded.
+     */
+    void consoleChanged();
+
+    /** A different project is loaded. Everything a client is showing is stale,
+     *  including the parts nothing else reports. */
+    void projectReplaced();
+
 private:
     /** Read the project's level sliders and hand them to the level source. */
     void teachSliders();

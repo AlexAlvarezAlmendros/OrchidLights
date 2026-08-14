@@ -70,6 +70,23 @@ private slots:
     void onDisconnected();
     void onUniverseWritten(quint32 index, const QByteArray &data);
     void onFunctionListChanged();
+
+    /**
+     * Something about the project itself changed.
+     *
+     * Doc::modified fires on every mutation without exception, so it is the
+     * guarantee: whatever else is missed, a client is told to look again. The
+     * specific slots below only narrow that down, so a browser showing the
+     * console does not re-read the fixture library because someone renamed a
+     * universe.
+     */
+    void onProjectModified(bool modified);
+    void onFixturesChanged();
+    void onFunctionsChanged();
+    void onGroupsChanged();
+    void onConsoleChanged();
+    void onProjectReplaced();
+
     void flush();
 
 private:
@@ -93,6 +110,12 @@ private:
         the coalescing: a client never needs the frame before last. */
     QHash<quint32, QByteArray> m_pending;
     bool m_functionsDirty = false;
+
+    /** What changed since the last flush, and whether anything did at all.
+     *  Coalesced for the same reason DMX frames are: an edit that touches ten
+     *  things is one thing to tell a client about. */
+    QSet<QString> m_changed;
+    bool m_projectDirty = false;
 
     /** Where each running chaser had got to at the last flush.
      *

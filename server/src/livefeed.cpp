@@ -67,6 +67,28 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(doc->masterTimer(), &MasterTimer::functionListChanged,
             this, &LiveFeed::onFunctionListChanged, Qt::QueuedConnection);
 
+    /* Edits. Doc::modified fires on every mutation without exception, so it is
+       the guarantee that nothing is missed; the rest only narrow it down, so a
+       browser showing the console does not re-read the fixture library because
+       someone renamed a universe. */
+    connect(doc, &Doc::modified, this, &LiveFeed::onProjectModified);
+
+    connect(doc, &Doc::fixtureAdded, this, &LiveFeed::onFixturesChanged);
+    connect(doc, &Doc::fixtureRemoved, this, &LiveFeed::onFixturesChanged);
+    connect(doc, &Doc::fixtureChanged, this, &LiveFeed::onFixturesChanged);
+
+    connect(doc, &Doc::functionAdded, this, &LiveFeed::onFunctionsChanged);
+    connect(doc, &Doc::functionRemoved, this, &LiveFeed::onFunctionsChanged);
+    connect(doc, &Doc::functionChanged, this, &LiveFeed::onFunctionsChanged);
+    connect(doc, &Doc::functionNameChanged, this, &LiveFeed::onFunctionsChanged);
+
+    connect(doc, &Doc::fixtureGroupAdded, this, &LiveFeed::onGroupsChanged);
+    connect(doc, &Doc::fixtureGroupRemoved, this, &LiveFeed::onGroupsChanged);
+    connect(doc, &Doc::fixtureGroupChanged, this, &LiveFeed::onGroupsChanged);
+
+    connect(m_engine, &EngineHost::consoleChanged, this, &LiveFeed::onConsoleChanged);
+    connect(m_engine, &EngineHost::projectReplaced, this, &LiveFeed::onProjectReplaced);
+
     connect(&m_flushTimer, &QTimer::timeout, this, &LiveFeed::flush);
     setStreamRate(25);
 }
@@ -477,6 +499,51 @@ void LiveFeed::onFunctionListChanged()
     m_functionsDirty = true;
 }
 
+void LiveFeed::onProjectModified(bool modified)
+{
+    /* Only the rising edge. resetModified() fires on save and on load, and
+       neither is news: a save changed nothing a client is showing, and a load
+       announces itself separately. */
+    if (modified)
+        m_projectDirty = true;
+}
+
+void LiveFeed::onFixturesChanged()
+{
+    m_changed.insert(QStringLiteral("fixtures"));
+    m_projectDirty = true;
+}
+
+void LiveFeed::onFunctionsChanged()
+{
+    m_changed.insert(QStringLiteral("functions"));
+    m_projectDirty = true;
+
+    /* The function list carries names and timings, so an edit has to reach the
+       clients as state, not only as an invitation to ask again. */
+    m_functionsDirty = true;
+}
+
+void LiveFeed::onGroupsChanged()
+{
+    m_changed.insert(QStringLiteral("groups"));
+    m_projectDirty = true;
+}
+
+void LiveFeed::onConsoleChanged()
+{
+    m_changed.insert(QStringLiteral("vc"));
+    m_projectDirty = true;
+}
+
+void LiveFeed::onProjectReplaced()
+{
+    /* Everything is stale, including the parts nothing else reports. Cleared
+       rather than added to, so the message says exactly that. */
+    m_changed.clear();
+    m_projectDirty = true;
+}
+
 void LiveFeed::flush()
 {
     if (m_clients.isEmpty())
@@ -484,6 +551,8 @@ void LiveFeed::flush()
         m_pending.clear();
         m_functionsDirty = false;
         m_chaserSteps.clear();
+        m_changed.clear();
+        m_projectDirty = false;
         return;
     }
 
@@ -500,6 +569,39 @@ void LiveFeed::flush()
         {
             m_chaserSteps.insert(function->id(), step);
             m_functionsDirty = true;
+        }
+    }
+
+    if (m_projectDirty)
+    {
+        m_projectDirty = false;
+
+        /* Nothing specific fired, so the change is one nothing reports in
+           detail -- a universe renamed, an output patched. Naming the whole
+           project is the honest answer, and the client reads everything back. */
+        QJsonArray what;
+        if (m_changed.isEmpty())
+        {
+            what.append(QStringLiteral("project"));
+        }
+        else
+        {
+            for (const QString &item : m_changed)
+                what.append(item);
+        }
+        m_changed.clear();
+
+        QJsonObject message;
+        message["type"] = "changed";
+        message["what"] = what;
+
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
         }
     }
 
