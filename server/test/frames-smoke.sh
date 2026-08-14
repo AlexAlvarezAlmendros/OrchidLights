@@ -63,6 +63,12 @@ assert paged["pages"] == 2, paged
 # that an absent Page is not read as something else.
 assert widgets[8].get("page", 0) == 0, widgets[8]
 assert widgets[9]["page"] == 1, widgets[9]
+
+# A playback slider is movable: there is a function behind it. Reporting it as
+# not would leave a control greyed out that works perfectly.
+playback = widgets[10]
+assert playback["sliderMode"] == "playback", playback
+assert playback["controllable"] is True, playback
 ' || fail "GET /vc did not describe the frames"
 
 # Loopback with no --require-auth needs no token, but pass one when there is a

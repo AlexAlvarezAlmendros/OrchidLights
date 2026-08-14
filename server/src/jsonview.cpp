@@ -366,11 +366,18 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc)
         json["low"] = widget.low;
         json["high"] = widget.high;
         json["value"] = widget.value;
-        /* Only a level slider with channels behind it can actually be moved
-           from here; saying so keeps the interface from offering a control
-           that would do nothing. */
-        json["controllable"] = (widget.sliderMode == QStringLiteral("level")
-                                && widget.levelChannels.isEmpty() == false);
+        /* A slider is movable when there is something behind it: channels for
+           a level slider, a function for a playback one. Saying so keeps the
+           interface from offering a control that would do nothing.
+         *
+         * A submaster is not, yet: it scales the widgets around it, and that
+           is not modelled. Offering it would be a lie the operator discovers
+           when nothing dims. */
+        json["controllable"] =
+            (widget.sliderMode == QStringLiteral("level")
+             && widget.levelChannels.isEmpty() == false)
+            || (widget.sliderMode == QStringLiteral("playback") && widget.hasFunction
+                && widget.functionId != UINT_MAX);
 
         /* The channels themselves, so an editor can show what a fader is
            actually holding and send the list back changed. */

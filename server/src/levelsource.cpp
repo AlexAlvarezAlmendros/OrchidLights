@@ -22,6 +22,9 @@
 
 #include "levelsource.h"
 
+#include "functionparent.h"
+#include "mastertimer.h"
+#include "function.h"
 #include "genericfader.h"
 #include "fadechannel.h"
 #include "qlcchannel.h"
@@ -42,6 +45,15 @@ void LevelSource::defineSlider(quint32 sliderId, const QList<Channel> &channels)
     QMutexLocker locker(&m_mutex);
 
     m_sliders.insert(sliderId, channels);
+    if (m_values.contains(sliderId) == false)
+        m_values.insert(sliderId, 0);
+}
+
+void LevelSource::definePlayback(quint32 sliderId, quint32 functionId)
+{
+    QMutexLocker locker(&m_mutex);
+
+    m_playbacks.insert(sliderId, functionId);
     if (m_values.contains(sliderId) == false)
         m_values.insert(sliderId, 0);
 }
@@ -86,6 +98,12 @@ void LevelSource::forgetSliders()
     m_values.clear();
     m_dirty.clear();
 
+    /* The overrides belong to functions in a document that is about to be
+       replaced. Dropping the ids here means the next slider asks for its own
+       rather than adjusting an attribute that now belongs to somebody else. */
+    m_playbacks.clear();
+    m_overrides.clear();
+
     m_pads.clear();
     m_positions.clear();
     m_padsDirty.clear();
@@ -101,7 +119,7 @@ void LevelSource::setValue(quint32 sliderId, uchar value)
 {
     QMutexLocker locker(&m_mutex);
 
-    if (m_sliders.contains(sliderId) == false)
+    if (m_sliders.contains(sliderId) == false && m_playbacks.contains(sliderId) == false)
         return;
 
     m_values.insert(sliderId, value);
@@ -117,7 +135,7 @@ uchar LevelSource::value(quint32 sliderId) const
 bool LevelSource::knows(quint32 sliderId) const
 {
     QMutexLocker locker(&m_mutex);
-    return m_sliders.contains(sliderId);
+    return m_sliders.contains(sliderId) || m_playbacks.contains(sliderId);
 }
 
 /**
@@ -206,6 +224,55 @@ void LevelSource::writePads(const QList<Universe *> &universes)
     m_padsDirty.clear();
 }
 
+/**
+ * Ride the functions the playback sliders drive.
+ *
+ * At zero the function stops and the override is given back, so the next move
+ * asks for a fresh one -- holding it across a stop is how a slider ends up
+ * adjusting an attribute of a function that is no longer running.
+ */
+void LevelSource::writePlaybacks(MasterTimer *timer)
+{
+    if (m_dirty.isEmpty())
+        return;
+
+    for (auto it = m_dirty.constBegin(); it != m_dirty.constEnd(); ++it)
+    {
+        if (m_playbacks.contains(it.key()) == false)
+            continue;
+
+        Function *function = m_doc->function(m_playbacks.value(it.key()));
+        if (function == nullptr)
+            continue;
+
+        const uchar level = m_values.value(it.key(), 0);
+
+        if (level == 0)
+        {
+            if (function->stopped() == false)
+                function->stop(FunctionParent::master());
+
+            m_overrides.remove(it.key());
+            continue;
+        }
+
+        if (function->stopped())
+            function->start(timer, FunctionParent::master());
+
+        const qreal intensity = qreal(level) / qreal(UCHAR_MAX);
+
+        if (m_overrides.contains(it.key()) == false)
+        {
+            m_overrides.insert(it.key(),
+                               function->requestAttributeOverride(Function::Intensity, intensity));
+        }
+        else
+        {
+            function->adjustAttribute(intensity, m_overrides.value(it.key()));
+        }
+    }
+}
+
 QSharedPointer<GenericFader> LevelSource::faderFor(quint32 universeId, Universe *universe)
 {
     /* Cached per universe id, and re-requested whenever the universe object
@@ -226,17 +293,19 @@ QSharedPointer<GenericFader> LevelSource::faderFor(quint32 universeId, Universe 
 
 void LevelSource::writeDMX(MasterTimer *timer, QList<Universe *> universes)
 {
-    Q_UNUSED(timer)
-
     QMutexLocker locker(&m_mutex);
 
     writePads(universes);
+    writePlaybacks(timer);
 
     if (m_dirty.isEmpty())
         return;
 
     for (auto it = m_dirty.constBegin(); it != m_dirty.constEnd(); ++it)
     {
+        if (m_sliders.contains(it.key()) == false)
+            continue;
+
         const quint32 sliderId = it.key();
         const uchar level = m_values.value(sliderId, 0);
 
