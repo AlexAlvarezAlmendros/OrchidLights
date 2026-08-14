@@ -218,10 +218,18 @@ namespace
             }
             else if (name == QStringLiteral("Level"))
             {
+                /* Only what is actually written. toInt() on a missing attribute
+                   is 0, and a HighLimit of 0 means a fader that can never rise
+                   -- or, for a submaster, a rig that is black with nothing to
+                   show why. The defaults on VcWidget are the honest fallback. */
                 const QXmlStreamAttributes attributes = reader.attributes();
-                widget.low = attributes.value(QStringLiteral("LowLimit")).toInt();
-                widget.high = attributes.value(QStringLiteral("HighLimit")).toInt();
-                widget.value = attributes.value(QStringLiteral("Value")).toInt();
+
+                if (attributes.hasAttribute(QStringLiteral("LowLimit")))
+                    widget.low = attributes.value(QStringLiteral("LowLimit")).toInt();
+                if (attributes.hasAttribute(QStringLiteral("HighLimit")))
+                    widget.high = attributes.value(QStringLiteral("HighLimit")).toInt();
+                if (attributes.hasAttribute(QStringLiteral("Value")))
+                    widget.value = attributes.value(QStringLiteral("Value")).toInt();
 
                 while (reader.readNextStartElement())
                 {

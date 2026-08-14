@@ -366,7 +366,7 @@ void ApiServer::registerRoutes()
                              QStringLiteral("This project has no Virtual Console"));
         }
 
-        return QHttpServerResponse(JsonView::vcWidget(root, doc));
+        return QHttpServerResponse(JsonView::vcWidget(root, doc, m_engine->levels()));
     });
 
     /* Editing the console. These reach the same preserved XML the route above
@@ -442,7 +442,7 @@ void ApiServer::registerRoutes()
             return QHttpServerResponse(QJsonObject());
 
         const VcWidget *patched = findWidget(root, widgetId.toUInt());
-        return QHttpServerResponse(patched ? JsonView::vcWidget(*patched, doc) : QJsonObject());
+        return QHttpServerResponse(patched ? JsonView::vcWidget(*patched, doc, m_engine->levels()) : QJsonObject());
     });
 
     m_server->route("/api/v1/vc/widgets/<arg>", QHttpServerRequest::Method::Delete,

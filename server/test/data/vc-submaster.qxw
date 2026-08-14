@@ -1,0 +1,116 @@
+<!DOCTYPE Workspace>
+<!--
+  Submasters: nested, and over every kind of widget one can reach.
+
+  The MAC500 is here for one reason: it has an Intensity channel AND a colour
+  wheel AND pan/tilt. A submaster must dim the first and leave the other two
+  exactly alone, because QLC+ applies its factor only to channels in the
+  Intensity group. An implementation that multiplied the value into the target
+  instead would dim a colour wheel into a different colour and swing a lamp
+  toward its zero position, and both look like a working submaster until
+  somebody notices the gobo changed.
+
+  The outer frame holds the master; the inner frame holds its own. A fader
+  inside both is worth the product of the two.
+
+  The XY pad is here to prove a negative: nothing a submaster does may reach it.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Martin</Manufacturer>
+   <Model>MAC500</Model>
+   <Mode>DMX1</Mode>
+   <ID>0</ID>
+   <Name>Spot</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Martin</Manufacturer>
+   <Model>MAC500</Model>
+   <Mode>DMX1</Mode>
+   <ID>1</ID>
+   <Name>Spot anidado</Name>
+   <Universe>0</Universe>
+   <Address>12</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Function ID="0" Type="Scene" Name="Playback">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">1,255</FixtureVal>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <Slider Caption="Master" ID="1" WidgetStyle="Slider" InvertedAppearance="false">
+    <WindowState Visible="True" X="10" Y="10" Width="60" Height="200"/>
+    <SliderMode ValueDisplayStyle="Exact">Submaster</SliderMode>
+    <Level LowLimit="0" HighLimit="255" Value="255"/>
+   </Slider>
+   <!-- Intensity is channel 1 of a MAC500; Color1 is channel 2. One fader
+        owns both, so the two can be compared after a submaster move. -->
+   <Slider Caption="Spot" ID="2" WidgetStyle="Slider" InvertedAppearance="false">
+    <WindowState Visible="True" X="80" Y="10" Width="60" Height="200"/>
+    <SliderMode ValueDisplayStyle="Exact">Level</SliderMode>
+    <Level LowLimit="0" HighLimit="255" Value="0">
+     <Channel Fixture="0">1</Channel>
+     <Channel Fixture="0">2</Channel>
+    </Level>
+   </Slider>
+   <!-- A button, so the function path is exercised: a submaster does not press
+        one, it scales what one started. -->
+   <Button Caption="Escena" ID="10">
+    <WindowState Visible="True" X="80" Y="220" Width="100" Height="50"/>
+    <Function ID="0"/>
+    <Action>Toggle</Action>
+   </Button>
+   <XYPad Caption="Cabeza" ID="3">
+    <WindowState Visible="True" X="150" Y="10" Width="200" Height="200"/>
+    <Fixture ID="0" Head="0">
+     <Axis ID="X" LowLimit="0" HighLimit="1" Reverse="False"/>
+     <Axis ID="Y" LowLimit="0" HighLimit="1" Reverse="False"/>
+    </Fixture>
+    <Pan Position="0"/>
+    <Tilt Position="0"/>
+   </XYPad>
+   <Frame Caption="Anidado" ID="4">
+    <WindowState Visible="True" X="360" Y="10" Width="300" Height="200"/>
+    <Slider Caption="Sub anidado" ID="5" WidgetStyle="Slider" InvertedAppearance="false">
+     <WindowState Visible="True" X="370" Y="20" Width="60" Height="180"/>
+     <SliderMode ValueDisplayStyle="Exact">Submaster</SliderMode>
+     <Level LowLimit="0" HighLimit="255" Value="255"/>
+    </Slider>
+    <Slider Caption="Spot anidado" ID="6" WidgetStyle="Slider" InvertedAppearance="false">
+     <WindowState Visible="True" X="440" Y="20" Width="60" Height="180"/>
+     <SliderMode ValueDisplayStyle="Exact">Level</SliderMode>
+     <Level LowLimit="0" HighLimit="255" Value="0">
+      <Channel Fixture="1">1</Channel>
+     </Level>
+    </Slider>
+   </Frame>
+   <!-- A frame with nothing a submaster can reach: its master has to report
+        itself as not operable rather than pretend. -->
+   <Frame Caption="Sin nada que escalar" ID="7">
+    <WindowState Visible="True" X="700" Y="10" Width="300" Height="200"/>
+    <Slider Caption="Sub vacio" ID="8" WidgetStyle="Slider" InvertedAppearance="false">
+     <WindowState Visible="True" X="710" Y="20" Width="60" Height="180"/>
+     <SliderMode ValueDisplayStyle="Exact">Submaster</SliderMode>
+     <Level LowLimit="0" HighLimit="255" Value="255"/>
+    </Slider>
+    <Label Caption="Solo una etiqueta" ID="9">
+     <WindowState Visible="True" X="780" Y="20" Width="200" Height="40"/>
+    </Label>
+   </Frame>
+  </Frame>
+ </VirtualConsole>
+</Workspace>

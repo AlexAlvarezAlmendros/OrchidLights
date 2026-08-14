@@ -24,6 +24,7 @@
 #include <QJsonArray>
 
 struct VcWidget;
+class LevelSource;
 class Fixture;
 class Function;
 class Universe;
@@ -68,8 +69,12 @@ namespace JsonView
      * steerable if the fixtures behind them actually have pan or tilt, and
      * that is a question only Doc can answer. Without it the pad is reported
      * as it is written in the file, which may promise more than it can do.
+     *
+     * `levels` answers the same kind of question for a submaster: whether
+     * anything it encloses is something a submaster actually scales.
      */
-    QJsonObject vcWidget(const VcWidget &widget, const Doc *doc = nullptr);
+    QJsonObject vcWidget(const VcWidget &widget, const Doc *doc = nullptr,
+                         const LevelSource *levels = nullptr);
 }
 
 #endif // JSONVIEW_H
