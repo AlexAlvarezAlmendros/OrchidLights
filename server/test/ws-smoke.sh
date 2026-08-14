@@ -21,6 +21,13 @@ fail() {
     exit 1
 }
 
+# A daemon already on this port would answer every request below, and the test
+# would pass or fail against a project nobody chose. Cheap to check, and it has
+# already cost one confusing failure.
+if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/" 2>/dev/null; then
+    fail "something is already listening on port $PORT; set PORT= to another one"
+fi
+
 wait_for_port() {
     local expect=$1 pid=$2
     for _ in $(seq 1 100); do

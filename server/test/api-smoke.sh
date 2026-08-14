@@ -21,6 +21,13 @@ fail() {
     exit 1
 }
 
+# A daemon already on this port would answer every request below, and the test
+# would pass or fail against a project nobody chose. Cheap to check, and it has
+# already cost one confusing failure.
+if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/" 2>/dev/null; then
+    fail "something is already listening on port $PORT; set PORT= to another one"
+fi
+
 # --no-output: this is a test, it has no business putting DMX on the network.
 "$DAEMON" --port "$PORT" --no-output "$PROJECT" > /tmp/orchid-api-smoke.log 2>&1 &
 DAEMON_PID=$!

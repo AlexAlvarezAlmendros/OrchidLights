@@ -341,6 +341,48 @@ try {
   check('the fixture list and the library are there', patched === 'ok', patched)
   await screenshot('07-fixtures')
 
+  /* Two people on the same show. An edit made anywhere else has to arrive
+     here, or the second phone is quietly showing a console that no longer
+     exists -- and the first anyone finds out is mid-cue. */
+  check('back to the console', (await click('Consola')) === 'ok')
+  await sleep(700)
+
+  const followed = await evaluate(`(async () => {
+    /* Adding a widget from outside, exactly as another client would: nothing
+       in this page asked for it, so only the broadcast can bring it here.
+       Counting rather than reading a caption, because which widgets a console
+       happens to show is the project's business. */
+    const count = () => document.querySelectorAll('.widget').length
+    const before = count()
+
+    const created = await (await fetch('/api/v1/vc/widgets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'label', caption: 'Desde fuera', geometry: { y: 5000 } }),
+    })).json()
+    if (created.id === undefined) return 'the widget was not created: ' + JSON.stringify(created)
+
+    let arrived = false
+    for (let i = 0; i < 40 && !arrived; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      arrived = count() === before + 1
+    }
+
+    // And away again, so the file comparison at the end still holds.
+    await fetch('/api/v1/vc/widgets/' + created.id, { method: 'DELETE' })
+
+    let gone = false
+    for (let i = 0; i < 40 && !gone; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      gone = count() === before
+    }
+
+    return arrived && gone ? 'ok'
+         : !arrived ? 'it never appeared'
+         : 'it appeared but never went'
+  })()`)
+  check('an edit made elsewhere arrives without a reload', followed === 'ok', followed)
+
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {
   check('the run completed', false, error.message)

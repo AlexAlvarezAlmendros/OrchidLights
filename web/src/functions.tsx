@@ -38,12 +38,14 @@ export function Functions({
   functions,
   fixtures,
   running,
+  revision,
   onToggle,
   onChanged,
 }: {
   functions: FunctionState[]
   fixtures: FixtureState[]
   running: Set<number>
+  revision: number
   onToggle: (id: number) => void
   onChanged: () => void
 }) {
@@ -153,6 +155,7 @@ export function Functions({
           fn={current}
           functions={functions}
           fixtures={fixtures}
+          revision={revision}
           onRun={run}
           onClose={() => setSelected(null)}
         />
@@ -165,12 +168,14 @@ function FunctionEditor({
   fn,
   functions,
   fixtures,
+  revision,
   onRun,
   onClose,
 }: {
   fn: FunctionState
   functions: FunctionState[]
   fixtures: FixtureState[]
+  revision: number
   onRun: (action: () => Promise<unknown>) => Promise<void>
   onClose: () => void
 }) {
@@ -193,7 +198,7 @@ function FunctionEditor({
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadBody is keyed on fn.id
   useEffect(() => {
     reloadBody()
-  }, [fn.id])
+  }, [fn.id, revision])
 
   const apply = (action: () => Promise<unknown>) =>
     onRun(action)

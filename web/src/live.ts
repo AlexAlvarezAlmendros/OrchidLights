@@ -17,6 +17,9 @@ export interface LiveHandlers {
   /** Another client moved a fader; ours needs to follow. */
   onSlider?: (id: number, value: number) => void
   onPad?: (id: number, x: number, y: number) => void
+  /** The project changed under us. `what` names what, or ["project"] when the
+   *  change is one nothing reports in detail. */
+  onChanged?: (what: string[]) => void
   onUniverse?: (universe: number, channels: Uint8Array) => void
 }
 
@@ -72,6 +75,9 @@ export class Live {
           break
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)
+          break
+        case 'changed':
+          this.handlers.onChanged?.(message.what ?? ['project'])
           break
       }
     })

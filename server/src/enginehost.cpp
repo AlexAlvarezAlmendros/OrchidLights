@@ -247,6 +247,10 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
         teachSliders();
     }
 
+    /* Announced either way: a load that failed cleared the document, and a
+       client still showing the old show is showing something that is gone. */
+    emit projectReplaced();
+
     return ok;
 }
 
@@ -393,6 +397,7 @@ void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
         m_preserved.sections.append(ConsoleLayout::toXml(merged));
 
     m_doc->setModified();
+    emit consoleChanged();
 }
 
 void EngineHost::releaseLevels(const QList<LevelSource::Channel> &channels)
@@ -553,6 +558,7 @@ VcPatch::Result EngineHost::editWidget(const QString &widgetId, const QJsonObjec
        later, and a stale LevelSource writes DMX nobody asked for. */
     teachSliders();
     m_doc->setModified();
+    emit consoleChanged();
 
     return result;
 }
@@ -571,6 +577,7 @@ VcPatch::Result EngineHost::addWidget(const QString &type, const QString &parent
 
     teachSliders();
     m_doc->setModified();
+    emit consoleChanged();
 
     return result;
 }
@@ -630,6 +637,7 @@ VcPatch::Result EngineHost::removeWidget(const QString &widgetId)
     forgetLayoutIds(removedIds);
 
     m_doc->setModified();
+    emit consoleChanged();
 
     return result;
 }
@@ -644,6 +652,7 @@ VcPatch::Result EngineHost::assignWidgetIds(int &assigned)
            become drivable at this point and not before. */
         teachSliders();
         m_doc->setModified();
+        emit consoleChanged();
     }
 
     return result;
@@ -657,6 +666,7 @@ int EngineHost::forgetFixture(quint32 fixtureId)
     {
         teachSliders();
         m_doc->setModified();
+        emit consoleChanged();
     }
 
     return removed;

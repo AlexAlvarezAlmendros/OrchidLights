@@ -180,7 +180,7 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 **Pendiente:**
 - [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.
 - [x] Round-trip de `.qxw`: cargar y guardar no altera las secciones que el motor no gestiona (Virtual Console, Simple Desk). `roundtrip-smoke.sh` y `xmltree-roundtrip.sh` en CI, contra los seis proyectos de la máquina.
-- [ ] **Entrada del menú.** El `.desktop` abre una terminal porque hoy no hay nada que mostrar; en F2 pasa a abrir el navegador.
+- [x] **Entrada del menú.** El `.desktop` ya no abre una terminal: `orchidlightsd --open` levanta el motor y abre la interfaz en el navegador. Encolado tras el bucle de eventos, porque abrirlo antes de que `listen()` acepte enseña un error de conexión en un daemon que arrancó perfectamente.
 - [x] **Criterio de éxito cumplido: el show del P62 se dispara desde `curl`/`wscat` con luz real, sin GUI.** Verificado por Art-Net: 512 bytes, 76 canales activos con el espaciado de 8 canales de los Theatre Spots.
 
 ### F2 — Shell web + Virtual Console en directo *(dolor #1)* 🔨
@@ -255,9 +255,7 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 - [x] Validación en el borde, con el motivo dentro: un patch que se solapa, un modo que
       no existe, un canal más allá del último del fixture, una escena donde una cue list
       necesita un chaser.
-- [ ] **Difusión por WebSocket de cada cambio.** Hoy se replican los faders, los pads y
-      el estado de las funciones; una edición (un widget, un fixture, una función) no.
-      Dos navegadores editando el mismo show divergen hasta que uno recarga.
+- [x] **Difusión por WebSocket de cada cambio.** `Doc::modified` se dispara en toda mutación sin excepción, así que es la garantía: pase lo que pase, al cliente se le dice que vuelva a mirar. Las señales concretas de `Doc` y `EngineHost::consoleChanged` solo lo afinan, para que un navegador con la consola abierta no relea la librería de fixtures porque alguien renombró un universo. Coalescido en el mismo flush que el DMX: una edición que toca diez cosas es una cosa que contar.
 - [ ] Deshacer. QLC+ v5 tiene `Tardis`; sin equivalente, editar desde el
       navegador da miedo y con razón.
 
