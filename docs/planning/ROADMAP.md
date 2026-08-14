@@ -319,10 +319,16 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 > Y validación que el motor no hace: una función que no existe, un canal más allá del último del fixture, una escena donde una cue list necesita un chaser. Todo eso carga en QLC+ sin una palabra y produce un control que se ve bien y no hace nada.
 
+- [x] **Editor en el navegador**: modo *Editar* con paleta para añadir, panel por widget y borrado. El panel ofrece **solo lo que ese widget tiene** — una etiqueta tiene nombre y nada más; un botón, función y acción; un fader, modo y canales — porque ofrecer todo para todo deja al operador ajustar cosas que no hacen nada.
+- [x] **Canales por nombre, no por número.** "Dimmer" es el canal 6 en un modo y el 8 en otro, y nadie debería recordarlo a oscuras. `GET /api/v1/fixtures/{id}` los nombra; la lista sigue sin hacerlo, porque un rig de 30 cabezas son mil nombres que nadie pidió.
+- [x] **Identificadores para proyectos de QLC+ 4.** Aquella versión no escribía `ID` en ningún widget —la consola que QLC+ distribuye hoy no tiene ni uno— y toda edición direcciona por id: esos proyectos no son *parcialmente* editables, no lo son en absoluto. La interfaz lo dice y ofrece asignarlos; sobre el `Sample.qxw` son 140 widgets y **el único cambio en 1.581 nodos son esos 140 atributos**.
+- [x] **`server/test/ui-smoke.sh`**: la interfaz construida, en un Chrome de verdad, contra un motor de verdad. Añade un widget pulsando, lo renombra, lo apunta a una función y lo borra; después comprueba que el fichero volvió exactamente a donde estaba. Un error del daemon tiene que **llegar al operador**, y eso también se comprueba.
+
+> **Trampa de React que el test destapó**: `onBlur` escucha `focusout`, no `blur`. Y el efecto que rellenaba el campo del nombre estaba indexado por el objeto widget, que se reconstruye tras **cada** edición — así que borraba lo que estabas escribiendo, incluso por una edición del propio panel. Indexado por id.
+
 - [ ] Control completo: `xypad`, `audiotriggers`, `animation` (control de RGB
       Matrix), `soloframe` con su semántica de solo, `slider` en modos playback y
       submaster, paginación de `frame`.
-- [ ] Interfaz de edición en el navegador sobre esta API.
 - [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
       (MIDI/OSC) por widget.
 

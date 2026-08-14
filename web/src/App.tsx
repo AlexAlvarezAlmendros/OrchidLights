@@ -1,10 +1,21 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { type FunctionState, api } from './api'
+import { type FixtureState, type FunctionState, type WidgetPatch, api } from './api'
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
+import { WidgetEditor } from './editor'
 import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './layout'
 import { type Connection, Live } from './live'
+import { CREATABLE, placeBelow } from './widgets'
 
 type Theme = 'stage' | 'blackout'
+
+/**
+ * What the console is for right now.
+ *
+ * 'run' fires functions. 'arrange' reorders. 'edit' changes what the widgets
+ * are. They are exclusive on purpose: in arrange mode a tap must never also
+ * press the button it is moving, and the same goes for editing it.
+ */
+type Mode = 'run' | 'arrange' | 'edit'
 
 export function App() {
   const [connection, setConnection] = useState<Connection>('connecting')
@@ -18,12 +29,15 @@ export function App() {
   )
   const [error, setError] = useState<string | null>(null)
   const [levels, setLevels] = useState<Record<number, number>>({})
-  const [editing, setEditing] = useState(false)
+  const [mode, setMode] = useState<Mode>('run')
   const [layout, setLayout] = useState<LayoutRows | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
   const [dirty, setDirty] = useState(false)
+  const [selected, setSelected] = useState<number | null>(null)
+  const [fixtures, setFixtures] = useState<FixtureState[]>([])
 
   const live = useRef<Live | null>(null)
+  const editing = mode === 'arrange'
 
   useEffect(() => {
     const feed = new Live({
@@ -42,8 +56,10 @@ export function App() {
         // interface opens showing the desk as the show left it.
         const seeded: Record<number, number> = {}
         const visit = (w: VcWidget) => {
-          if (w.sliderMode && w.value !== undefined) seeded[w.id] = w.value
-          if (w.speedTargets && w.speedMs !== undefined) seeded[w.id] = w.speedMs
+          if (w.id !== undefined) {
+            if (w.sliderMode && w.value !== undefined) seeded[w.id] = w.value
+            if (w.speedTargets && w.speedMs !== undefined) seeded[w.id] = w.speedMs
+          }
           for (const child of w.children ?? []) visit(child)
         }
         visit(console_)
@@ -54,6 +70,10 @@ export function App() {
       .catch(() => setVc(null))
 
     api.functions().then(setFunctions).catch(setErrorMessage)
+    api
+      .fixtures()
+      .then(setFixtures)
+      .catch(() => setFixtures([]))
     api
       .layout()
       .then((l) => setLayout(l.pages[0]?.rows ?? null))
@@ -113,6 +133,74 @@ export function App() {
     setDirty(false)
   }, [current, layout, rows])
 
+  /* Every edit re-reads the console rather than patching the local copy: the
+     daemon is the one that decides what a change means, and two clients editing
+     the same show must not drift apart over it. */
+  const refresh = useCallback(async () => {
+    const console_ = await api.vc()
+    setVc(console_)
+    setDirty(true)
+  }, [])
+
+  const selectedWidget = useMemo(() => {
+    if (selected === null || !vc) return null
+    const find = (w: VcWidget): VcWidget | null => {
+      if (w.id === selected) return w
+      for (const child of w.children ?? []) {
+        const found = find(child)
+        if (found) return found
+      }
+      return null
+    }
+    return find(vc)
+  }, [selected, vc])
+
+  const editWidget = useCallback(
+    async (patch: WidgetPatch) => {
+      if (selected === null) return
+      await api.editWidget(selected, patch)
+      await refresh()
+    },
+    [selected, refresh],
+  )
+
+  const deleteWidget = useCallback(async () => {
+    if (selected === null) return
+    await api.removeWidget(selected)
+    setSelected(null)
+    await refresh()
+  }, [selected, refresh])
+
+  const unidentified = useMemo(() => {
+    if (!vc) return 0
+    const count = (w: VcWidget): number =>
+      (w.id === undefined && w !== vc ? 1 : 0) +
+      (w.children ?? []).reduce((n, child) => n + count(child), 0)
+    return count(vc)
+  }, [vc])
+
+  const assignIds = useCallback(async () => {
+    await api.assignWidgetIds()
+    await refresh()
+  }, [refresh])
+
+  const addWidget = useCallback(
+    async (type: string) => {
+      const spec = CREATABLE.find((c) => c.type === type)
+
+      const created = await api.addWidget({
+        type,
+        ...(current ? { parent: current.id } : {}),
+        caption: spec?.label ?? type,
+        geometry: placeBelow(current?.children ?? [], type),
+      })
+
+      await refresh()
+      setSelected(Number(created.id))
+    },
+    [current, refresh],
+  )
+
   return (
     <div className="app">
       <header className="topbar">
@@ -133,12 +221,31 @@ export function App() {
         >
           {theme === 'stage' ? '🌙' : '☀'}
         </button>
-        {vc && (
-          <button type="button" onClick={() => setEditing(!editing)} aria-pressed={editing}>
-            {editing ? 'Listo' : 'Ordenar'}
-          </button>
-        )}
-        {editing && dirty && (
+        {vc &&
+          /* One control at a time. Showing "Ordenar" beside "Listo" made it
+             read as two separate states, when there is only ever one. */
+          (mode === 'run' ? (
+            <>
+              <button type="button" onClick={() => setMode('arrange')}>
+                Ordenar
+              </button>
+              <button type="button" onClick={() => setMode('edit')}>
+                Editar
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              aria-pressed={true}
+              onClick={() => {
+                setMode('run')
+                setSelected(null)
+              }}
+            >
+              Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
+            </button>
+          ))}
+        {mode !== 'run' && dirty && (
           <button type="button" onClick={persist}>
             Guardar
           </button>
@@ -158,26 +265,69 @@ export function App() {
         </nav>
       )}
 
-      <main className="console">
-        {error && <p className="empty">{error}</p>}
+      {mode === 'edit' && (
+        <nav className="palette" aria-label="Añadir widget">
+          <span className="hint">Añadir:</span>
+          {CREATABLE.map((c) => (
+            <button key={c.type} type="button" onClick={() => addWidget(c.type)}>
+              + {c.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
-        {current ? (
-          <Surface
-            rows={rows}
-            running={running}
-            onToggle={toggle}
-            levels={levels}
-            onLevel={setLevel}
-            onSpeed={setSpeed}
-            editing={editing}
-            dragging={dragging}
-            onDragStart={setDragging}
-            onDrop={drop}
+      {/* A console written by QLC+ 4 carries no widget ids, and every edit
+          addresses a widget by id -- so it is not partly editable, it is not
+          editable at all until this has run. Saying so beats a screen full of
+          widgets that quietly refuse to be tapped. */}
+      {mode === 'edit' && unidentified > 0 && (
+        <div className="notice">
+          <span>
+            {unidentified} widgets vienen sin identificador, de una versión antigua de QLC+, y no se
+            pueden editar hasta que lo tengan.
+          </span>
+          <button type="button" onClick={assignIds}>
+            Asignar identificadores
+          </button>
+        </div>
+      )}
+
+      <div className="workspace">
+        <main className="console">
+          {error && <p className="empty">{error}</p>}
+
+          {current ? (
+            <Surface
+              rows={rows}
+              running={running}
+              onToggle={toggle}
+              levels={levels}
+              onLevel={setLevel}
+              onSpeed={setSpeed}
+              editing={editing}
+              dragging={dragging}
+              onDragStart={setDragging}
+              onDrop={drop}
+              selecting={mode === 'edit'}
+              selected={selected}
+              onSelect={setSelected}
+            />
+          ) : (
+            <FunctionList functions={functions} onToggle={toggle} />
+          )}
+        </main>
+
+        {mode === 'edit' && selectedWidget && (
+          <WidgetEditor
+            widget={selectedWidget}
+            functions={functions}
+            fixtures={fixtures}
+            onApply={editWidget}
+            onDelete={deleteWidget}
+            onClose={() => setSelected(null)}
           />
-        ) : (
-          <FunctionList functions={functions} onToggle={toggle} />
         )}
-      </main>
+      </div>
     </div>
   )
 }
@@ -193,6 +343,9 @@ function Surface({
   dragging,
   onDragStart,
   onDrop,
+  selecting,
+  selected,
+  onSelect,
 }: {
   rows: Row[]
   running: Set<number>
@@ -204,6 +357,9 @@ function Surface({
   dragging: number | null
   onDragStart: (id: number | null) => void
   onDrop: (rowIndex: number, beforeId: number | null) => void
+  selecting: boolean
+  selected: number | null
+  onSelect: (id: number) => void
 }) {
   if (rows.length === 0) {
     return <p className="empty">Esta página está vacía.</p>
@@ -213,10 +369,12 @@ function Surface({
     <>
       {rows.map((row, rowIndex) => (
         <div className="row" key={`${rowIndex}-${row.widgets[0]?.id}`} data-editing={editing}>
-          {row.widgets.map((child) => (
-            <Fragment key={child.id}>
+          {row.widgets.map((child, childIndex) => (
+            // Position in the key, because an id is not guaranteed: a console
+            // from QLC+ 4 has none until the operator asks for them.
+            <Fragment key={child.id ?? `${rowIndex}-${childIndex}`}>
               {editing && dragging !== null && dragging !== child.id && (
-                <DropSlot onDrop={() => onDrop(rowIndex, child.id)} />
+                <DropSlot onDrop={() => onDrop(rowIndex, child.id ?? null)} />
               )}
               <Widget
                 widget={child}
@@ -229,6 +387,9 @@ function Surface({
                 editing={editing}
                 dragged={dragging === child.id}
                 onDragStart={onDragStart}
+                selecting={selecting}
+                selected={selected === child.id}
+                onSelect={onSelect}
               />
             </Fragment>
           ))}
@@ -285,6 +446,9 @@ function Widget({
   editing,
   dragged,
   onDragStart,
+  selecting,
+  selected,
+  onSelect,
 }: {
   widget: VcWidget
   grow: number
@@ -296,6 +460,9 @@ function Widget({
   editing: boolean
   dragged: boolean
   onDragStart: (id: number | null) => void
+  selecting: boolean
+  selected: boolean
+  onSelect: (id: number) => void
 }) {
   const style = {
     '--grow': grow,
@@ -312,9 +479,34 @@ function Widget({
         className={`widget ${widget.type} arranging`}
         style={style}
         data-dragged={dragged}
-        onPointerDown={() => onDragStart(dragged ? null : widget.id)}
+        onPointerDown={() => onDragStart(dragged ? null : (widget.id ?? null))}
       >
         {widget.caption || widget.type}
+      </button>
+    )
+  }
+
+  // And while editing, a tap picks the widget rather than operating it. Same
+  // rule, same reason: choosing what a button does must not also press it.
+  if (selecting) {
+    return (
+      <button
+        type="button"
+        className={`widget ${widget.type} arranging`}
+        style={style}
+        data-selected={selected}
+        data-unidentified={widget.id === undefined}
+        aria-pressed={selected}
+        disabled={widget.id === undefined}
+        onClick={() => widget.id !== undefined && onSelect(widget.id)}
+      >
+        {/* One child, so the line break works: .widget is a flex container and
+            a bare <br> between two text nodes never breaks anything. */}
+        <span>
+          {widget.caption || widget.type}
+          <br />
+          <small>{widget.id === undefined ? 'sin identificador' : widget.type}</small>
+        </span>
       </button>
     )
   }
@@ -344,7 +536,7 @@ function Widget({
       <SpeedDial
         widget={widget}
         style={style}
-        value={levels[widget.id] ?? widget.speedMs ?? 0}
+        value={levels[widget.id ?? -1] ?? widget.speedMs ?? 0}
         onChange={onSpeed}
       />
     )
@@ -355,7 +547,7 @@ function Widget({
       <Fader
         widget={widget}
         style={style}
-        value={levels[widget.id] ?? widget.value ?? 0}
+        value={levels[widget.id ?? -1] ?? widget.value ?? 0}
         onChange={onLevel}
       />
     )
@@ -374,9 +566,11 @@ function Widget({
   // complete when it is not.
   return (
     <div className="widget unsupported" style={style}>
-      {widget.caption || widget.type}
-      <br />
-      <small>({widget.type})</small>
+      <span>
+        {widget.caption || widget.type}
+        <br />
+        <small>({widget.type})</small>
+      </span>
     </div>
   )
 }
@@ -396,8 +590,11 @@ function SpeedDial({
   const max = widget.speedMax ?? 10000
   const count = widget.speedTargets?.length ?? 0
 
+  // Same as a level fader: the engine addresses a dial by widget id.
+  const usable = widget.id !== undefined
+
   return (
-    <label className="widget fader speeddial" style={style} data-usable="true">
+    <label className="widget fader speeddial" style={style} data-usable={usable}>
       <span className="fader-caption">{widget.caption || 'Velocidad'}</span>
       <input
         type="range"
@@ -405,8 +602,9 @@ function SpeedDial({
         max={max}
         step={10}
         value={value}
+        disabled={!usable}
         aria-label={widget.caption}
-        onChange={(e) => onChange(widget.id, Number(e.target.value))}
+        onChange={(e) => widget.id !== undefined && onChange(widget.id, Number(e.target.value))}
       />
       <span className="fader-value">
         {value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(2)} s`}
@@ -431,14 +629,17 @@ function Fader({
   const high = widget.high ?? 255
   const percent = high > low ? Math.round(((value - low) / (high - low)) * 100) : 0
 
-  // A playback or submaster slider parses fine but has nothing behind it here
-  // yet. Showing it disabled is honest; showing it live would be a lie the
-  // operator only discovers when the light does not move.
-  const usable = widget.controllable === true
+  /* A playback or submaster slider parses fine but has nothing behind it here
+     yet. Nor does one with no id: the engine keys its level sliders by widget
+     id, so a fader without one has nothing to address.
+   *
+   * Disabled is honest either way. Showing it live would be a lie the operator
+   * only discovers when the light does not move. */
+  const usable = widget.controllable === true && widget.id !== undefined
 
   return (
     <label className="widget fader" style={style} data-usable={usable}>
-      <span className="fader-caption">{widget.caption || `#${widget.id}`}</span>
+      <span className="fader-caption">{widget.caption || `#${widget.id ?? '?'}`}</span>
       <input
         type="range"
         min={low}
@@ -446,7 +647,7 @@ function Fader({
         value={value}
         disabled={!usable}
         aria-label={widget.caption}
-        onChange={(e) => onChange(widget.id, Number(e.target.value))}
+        onChange={(e) => widget.id !== undefined && onChange(widget.id, Number(e.target.value))}
       />
       <span className="fader-value">{usable ? `${percent}%` : widget.sliderMode}</span>
     </label>

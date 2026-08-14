@@ -7,6 +7,39 @@ export interface FunctionState {
   running: boolean
 }
 
+export interface FixtureState {
+  id: number
+  name: string
+  universe: number
+  address: number
+  channels: number
+  resolved: boolean
+}
+
+/** One fixture with its channels named. Only the detail route carries these. */
+export interface FixtureDetail extends FixtureState {
+  channelList: { index: number; name: string; group?: string }[]
+}
+
+/**
+ * What can be changed about a widget.
+ *
+ * These are the same keys GET /vc answers with, so a widget can be read,
+ * changed and sent back without translating field names on the way.
+ */
+export interface WidgetPatch {
+  caption?: string
+  page?: number
+  geometry?: Partial<import('./layout').Geometry>
+  functionId?: number | null
+  chaserId?: number | null
+  action?: string
+  sliderMode?: string
+  levelChannels?: { fixture: number; channel: number }[]
+  clockType?: string
+  clockTime?: number
+}
+
 export interface Status {
   name: string
   version: string
@@ -38,6 +71,27 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  fixtures: () => json<FixtureState[]>('/api/v1/fixtures'),
+  fixture: (id: number) => json<FixtureDetail>(`/api/v1/fixtures/${id}`),
+
+  /** Give every widget an id, so a console from QLC+ 4 can be edited at all. */
+  assignWidgetIds: () => json<{ assigned: number }>('/api/v1/vc/widgets/ids', { method: 'POST' }),
+
+  addWidget: (body: WidgetPatch & { type: string; parent?: number }) =>
+    json<{ id: string; type: string }>('/api/v1/vc/widgets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  editWidget: (id: number, patch: WidgetPatch) =>
+    json<import('./layout').VcWidget>(`/api/v1/vc/widgets/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  removeWidget: (id: number) =>
+    json<{ removed: string }>(`/api/v1/vc/widgets/${id}`, { method: 'DELETE' }),
+
   saveProject: () => json<{ path: string }>('/api/v1/project/save', { method: 'POST' }),
   blackout: (on: boolean) =>
     json<{ blackout: boolean }>('/api/v1/blackout', { method: on ? 'POST' : 'DELETE' }),

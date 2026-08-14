@@ -308,3 +308,168 @@ button.danger {
   opacity: 1;
   background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
+
+/* Editing mode.
+   Same rule as arranging -- a tap picks the widget rather than operating it --
+   with the panel that says what the widget actually does. */
+.widget.arranging[data-selected="true"] {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+  opacity: 1;
+}
+
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.palette .hint {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+/* The console and the editor side by side, and stacked on a phone -- where the
+   panel takes the lower half rather than covering the widget being edited. */
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor {
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised);
+  padding: 0.75rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.editor header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.editor-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.field > span {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+}
+
+.field input,
+.field select {
+  /* 44 px targets, in the dark, on a phone. Same floor as everything else. */
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.hint {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.channels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.channels li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.channels li span {
+  flex: 1;
+}
+
+.channels li button {
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0;
+}
+
+.channel-add {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.channel-add select {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (min-width: 700px) {
+  .workspace {
+    flex-direction: row;
+  }
+  .editor {
+    flex: 0 0 22rem;
+    max-height: none;
+    border-top: none;
+    border-left: 1px solid var(--border);
+  }
+}
+
+/* Something the operator has to decide about before editing can work. */
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-raised));
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.notice span {
+  flex: 1;
+  min-width: 14rem;
+}
+
+/* A widget with no id cannot be addressed, so it cannot be picked either. */
+.widget.arranging[data-unidentified="true"] {
+  opacity: 0.45;
+  border-style: dashed;
+  cursor: not-allowed;
+}

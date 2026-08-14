@@ -38,6 +38,7 @@
 #include "rgbalgorithm.h"
 #include "qlcfixturedefcache.h"
 #include "qlcfixturemode.h"
+#include "qlcchannel.h"
 #include "qlcfixturedef.h"
 #include "fixturegroup.h"
 #include "fixture.h"
@@ -249,6 +250,44 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(JsonView::fixtures(doc));
     });
 
+    /* One fixture, with its channels named. The list route deliberately leaves
+       them out -- a rig of 30 movers is a thousand channel names nobody asked
+       for -- but pointing a fader at "Dimmer" instead of at channel 5 is the
+       difference between patching and guessing. */
+    m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const Fixture *fixture = doc->fixture(id);
+        if (fixture == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such fixture"));
+
+        QJsonObject body = JsonView::fixture(fixture);
+
+        QJsonArray channels;
+        for (quint32 i = 0; i < fixture->channels(); i++)
+        {
+            const QLCChannel *channel = fixture->channel(i);
+
+            QJsonObject entry;
+            entry["index"] = qint64(i);
+            entry["name"] = channel != nullptr ? channel->name()
+                                               : QStringLiteral("Canal %1").arg(i + 1);
+            if (channel != nullptr)
+                entry["group"] = QLCChannel::groupToString(channel->group());
+            channels.append(entry);
+        }
+        body["channelList"] = channels;
+
+        return QHttpServerResponse(body);
+    });
+
     m_server->route("/api/v1/functions", QHttpServerRequest::Method::Get, [doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
@@ -334,6 +373,24 @@ void ApiServer::registerRoutes()
        reads, and they patch it -- see VcPatch. Nothing here writes to disk;
        the project is saved by POST /api/v1/project/save, like every other
        edit. */
+    /* Every edit addresses a widget by id, and QLC+ 4 wrote none -- the console
+       that ships with QLC+ to this day has not one. Such a project is not
+       partly editable, it is entirely uneditable until this has run. */
+    m_server->route("/api/v1/vc/widgets/ids", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        int assigned = 0;
+        const VcPatch::Result result = m_engine->assignWidgetIds(assigned);
+        if (result.ok == false)
+            return jsonError(StatusCode::NotFound, result.error);
+
+        QJsonObject body;
+        body["assigned"] = assigned;
+        return QHttpServerResponse(body);
+    });
+
     m_server->route("/api/v1/vc/widgets", QHttpServerRequest::Method::Post,
                     [this, denied](const QHttpServerRequest &request) {
         if (denied(request))

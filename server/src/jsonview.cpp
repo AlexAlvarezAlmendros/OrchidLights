@@ -160,6 +160,8 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
 
     if (widget.hasFunction)
         json["functionId"] = qint64(widget.functionId);
+    if (widget.action.isEmpty() == false)
+        json["action"] = widget.action;
 
     if (widget.hasChaser)
     {

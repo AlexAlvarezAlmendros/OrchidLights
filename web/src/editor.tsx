@@ -1,0 +1,408 @@
+/**
+ * Editing a widget from the browser.
+ *
+ * The panel only offers what the widget in front of you actually has. A label
+ * has a caption and nothing else; a button has a function and an action; a
+ * fader has a mode and, in level mode, the channels it drives. Offering every
+ * field for every type would let an operator set things that quietly do
+ * nothing, which is the failure this whole layer is built to avoid.
+ *
+ * Geometry is deliberately absent. QLC+ places widgets at absolute pixels;
+ * OrchidLights reflows them into rows, and the order is edited by dragging in
+ * "Ordenar". Exposing x and y here would be editing a coordinate system the
+ * operator never sees.
+ */
+
+import { useEffect, useState } from 'react'
+import {
+  type FixtureDetail,
+  type FixtureState,
+  type FunctionState,
+  type WidgetPatch,
+  api,
+} from './api'
+import type { VcWidget } from './layout'
+
+const ACTIONS = [
+  { value: 'Toggle', label: 'Alternar' },
+  { value: 'Flash', label: 'Flash' },
+  { value: 'Blackout', label: 'Blackout' },
+  { value: 'StopAll', label: 'Parar todo' },
+]
+
+const SLIDER_MODES = [
+  { value: 'Level', label: 'Nivel (canales)' },
+  { value: 'Playback', label: 'Playback (función)' },
+  { value: 'Submaster', label: 'Submaster' },
+]
+
+const CLOCK_TYPES = [
+  { value: 'Clock', label: 'Hora' },
+  { value: 'Stopwatch', label: 'Cronómetro' },
+  { value: 'Countdown', label: 'Cuenta atrás' },
+]
+
+export function WidgetEditor({
+  widget,
+  functions,
+  fixtures,
+  onApply,
+  onDelete,
+  onClose,
+}: {
+  widget: VcWidget
+  functions: FunctionState[]
+  fixtures: FixtureState[]
+  onApply: (patch: WidgetPatch) => Promise<void>
+  onDelete: () => Promise<void>
+  onClose: () => void
+}) {
+  const [caption, setCaption] = useState(widget.caption ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  /* Reset when the panel is pointed at a *different* widget, keyed on the id
+     rather than the object.
+   *
+   * Every edit re-reads the console, so the widget object is new each time even
+   * when nothing about it changed. Keying on the object would therefore reset
+   * the box mid-sentence, every time any edit landed -- including one this
+   * panel made itself. */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the id on purpose
+  useEffect(() => {
+    setCaption(widget.caption ?? '')
+    setError(null)
+  }, [widget.id])
+
+  const apply = async (patch: WidgetPatch) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await onApply(patch)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const isSlider = widget.type === 'slider'
+  const isButton = widget.type === 'button'
+  const isCueList = widget.type === 'cuelist'
+  const isClock = widget.type === 'clock'
+  const chasers = functions.filter((f) => f.type === 'Chaser')
+
+  return (
+    <aside className="editor" aria-label={`Editar ${widget.caption || widget.type}`}>
+      <header>
+        <strong>{widget.caption || widget.type}</strong>
+        <span className="chip">
+          {widget.type} · #{widget.id}
+        </span>
+        <span className="spacer" />
+        <button type="button" onClick={onClose} aria-label="Cerrar">
+          ✕
+        </button>
+      </header>
+
+      {error && <p className="editor-error">{error}</p>}
+
+      <label className="field">
+        <span>Nombre</span>
+        {/* On Enter as well as on leaving the field: on a phone the keyboard's
+            "done" is the natural end of typing, and losing a name to a tap
+            somewhere else is the kind of small betrayal that stops people
+            trusting an editor. */}
+        <input
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          onBlur={() => caption !== (widget.caption ?? '') && apply({ caption })}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && caption !== (widget.caption ?? '')) apply({ caption })
+          }}
+          disabled={busy}
+        />
+      </label>
+
+      {isButton && (
+        <>
+          <FunctionPicker
+            label="Función"
+            options={functions}
+            value={widget.functionId}
+            onChange={(functionId) => apply({ functionId })}
+            disabled={busy}
+          />
+          <label className="field">
+            <span>Al pulsar</span>
+            <select
+              value={widget.action ?? 'Toggle'}
+              onChange={(e) => apply({ action: e.target.value })}
+              disabled={busy}
+            >
+              {ACTIONS.map((a) => (
+                <option key={a.value} value={a.value}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
+
+      {isCueList && (
+        <FunctionPicker
+          label="Chaser"
+          options={chasers}
+          value={widget.chaserId}
+          onChange={(chaserId) => apply({ chaserId })}
+          disabled={busy}
+          {...(chasers.length === 0 ? { empty: 'El proyecto no tiene ningún chaser' } : {})}
+        />
+      )}
+
+      {isSlider && (
+        <>
+          <label className="field">
+            <span>Modo</span>
+            <select
+              value={capitalise(widget.sliderMode ?? 'Level')}
+              onChange={(e) => apply({ sliderMode: e.target.value })}
+              disabled={busy}
+            >
+              {SLIDER_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {widget.sliderMode === 'playback' && (
+            <FunctionPicker
+              label="Función"
+              options={functions}
+              value={widget.functionId}
+              onChange={(functionId) => apply({ functionId })}
+              disabled={busy}
+            />
+          )}
+
+          {widget.sliderMode === 'level' && (
+            <LevelChannels
+              channels={widget.levelChannels ?? []}
+              fixtures={fixtures}
+              onChange={(levelChannels) => apply({ levelChannels })}
+              disabled={busy}
+            />
+          )}
+        </>
+      )}
+
+      {isClock && (
+        <>
+          <label className="field">
+            <span>Tipo</span>
+            <select
+              value={capitalise(widget.clockType ?? 'Clock')}
+              onChange={(e) => apply({ clockType: e.target.value })}
+              disabled={busy}
+            >
+              {CLOCK_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {widget.clockType !== 'clock' && (
+            <label className="field">
+              <span>Tiempo</span>
+              <input
+                type="time"
+                step={1}
+                value={secondsToTime(widget.clockTime ?? 0)}
+                onChange={(e) => apply({ clockTime: timeToSeconds(e.target.value) })}
+                disabled={busy}
+              />
+            </label>
+          )}
+        </>
+      )}
+
+      <button
+        type="button"
+        className="danger"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true)
+          onDelete().finally(() => setBusy(false))
+        }}
+      >
+        Eliminar widget
+      </button>
+    </aside>
+  )
+}
+
+function FunctionPicker({
+  label,
+  options,
+  value,
+  onChange,
+  disabled,
+  empty,
+}: {
+  label: string
+  options: FunctionState[]
+  value: number | undefined
+  onChange: (id: number | null) => void
+  disabled: boolean
+  empty?: string
+}) {
+  // The no-function sentinel is UINT_MAX in the file, and a widget that carries
+  // it is unbound rather than pointing at function 4294967295.
+  const bound = value !== undefined && value < 0xffffffff ? String(value) : ''
+
+  if (empty) {
+    return (
+      <div className="field">
+        <span>{label}</span>
+        <em className="hint">{empty}</em>
+      </div>
+    )
+  }
+
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select
+        value={bound}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        disabled={disabled}
+      >
+        <option value="">(ninguna)</option>
+        {options.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/**
+ * The channels a level fader drives.
+ *
+ * Channels are picked by name, not by number: "Dimmer" on a Hero Wash is
+ * channel 6 in one mode and channel 8 in another, and an operator patching in
+ * the dark should not have to remember which.
+ */
+function LevelChannels({
+  channels,
+  fixtures,
+  onChange,
+  disabled,
+}: {
+  channels: { fixture: number; channel: number }[]
+  fixtures: FixtureState[]
+  onChange: (channels: { fixture: number; channel: number }[]) => void
+  disabled: boolean
+}) {
+  const [fixtureId, setFixtureId] = useState<number | null>(fixtures[0]?.id ?? null)
+  const [detail, setDetail] = useState<FixtureDetail | null>(null)
+
+  useEffect(() => {
+    if (fixtureId === null) return
+    let live = true
+    api
+      .fixture(fixtureId)
+      .then((d) => live && setDetail(d))
+      .catch(() => live && setDetail(null))
+    return () => {
+      live = false
+    }
+  }, [fixtureId])
+
+  const nameOf = (id: number) => fixtures.find((f) => f.id === id)?.name ?? `#${id}`
+
+  return (
+    <div className="field">
+      <span>Canales</span>
+
+      {channels.length === 0 && <em className="hint">Ninguno: este fader no mueve nada.</em>}
+
+      <ul className="channels">
+        {channels.map((c) => (
+          <li key={`${c.fixture}-${c.channel}`}>
+            <span>
+              {nameOf(c.fixture)} · canal {c.channel + 1}
+            </span>
+            <button
+              type="button"
+              aria-label="Quitar canal"
+              disabled={disabled}
+              onClick={() =>
+                onChange(
+                  channels.filter((x) => !(x.fixture === c.fixture && x.channel === c.channel)),
+                )
+              }
+            >
+              ✕
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <div className="channel-add">
+        <select
+          value={fixtureId ?? ''}
+          onChange={(e) => setFixtureId(e.target.value === '' ? null : Number(e.target.value))}
+          disabled={disabled}
+          aria-label="Fixture"
+        >
+          {fixtures.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          disabled={disabled || detail === null}
+          value=""
+          aria-label="Añadir canal"
+          onChange={(e) => {
+            if (e.target.value === '' || fixtureId === null) return
+            const channel = Number(e.target.value)
+            if (channels.some((c) => c.fixture === fixtureId && c.channel === channel)) return
+            onChange([...channels, { fixture: fixtureId, channel }])
+          }}
+        >
+          <option value="">Añadir canal…</option>
+          {(detail?.channelList ?? []).map((c) => (
+            <option key={c.index} value={c.index}>
+              {c.index + 1}. {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+function capitalise(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function secondsToTime(total: number) {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor(total / 60) % 60)}:${pad(total % 60)}`
+}
+
+function timeToSeconds(value: string) {
+  const [h = '0', m = '0', s = '0'] = value.split(':')
+  return Number(h) * 3600 + Number(m) * 60 + Number(s)
+}
