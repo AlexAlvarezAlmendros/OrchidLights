@@ -473,3 +473,82 @@ button.danger {
   border-style: dashed;
   cursor: not-allowed;
 }
+
+/* Cue lists.
+   A cue list is a chaser plus transport, and the list is the point: an
+   operator needs to see the cue that is up and the one coming next, not just
+   a play button. */
+.widget.cuelist {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  text-align: left;
+  --basis: 18rem;
+  max-height: 22rem;
+}
+
+.widget.cuelist[data-running="true"] {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+
+.cuelist-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.cuelist-transport {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 0.5rem;
+  font-size: 1rem;
+}
+
+.cuelist-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.cuelist-steps button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+}
+
+.cuelist-steps li[data-current="true"] button {
+  background: color-mix(in srgb, var(--live) 22%, transparent);
+  border-color: var(--live);
+}
+
+.cue-number {
+  flex: 0 0 1.6rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.cue-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cue-time {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}

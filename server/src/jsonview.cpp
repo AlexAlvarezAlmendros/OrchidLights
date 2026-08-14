@@ -26,7 +26,13 @@
 #include "outputpatch.h"
 #include "universe.h"
 #include "fixture.h"
+#include "qlcchannel.h"
+#include "collection.h"
+#include "chaserstep.h"
+#include "scenevalue.h"
 #include "function.h"
+#include "chaser.h"
+#include "scene.h"
 #include "doc.h"
 
 QJsonObject JsonView::fixture(const Fixture *fixture)
@@ -76,6 +82,16 @@ QJsonObject JsonView::function(const Function *function)
     json["fadeOut"] = qint64(function->fadeOutSpeed());
     json["duration"] = qint64(function->duration());
 
+    /* Where a chaser has got to. This rides on the function list, which the
+       live feed already broadcasts, so a cue list can show the cue that is
+       actually up without asking for it. */
+    if (function->type() == Function::ChaserType)
+    {
+        const Chaser *chaser = qobject_cast<const Chaser *>(function);
+        json["step"] = chaser->currentStepIndex();
+        json["steps"] = chaser->stepsCount();
+    }
+
     return json;
 }
 
@@ -121,6 +137,99 @@ QJsonArray JsonView::functions(const Doc *doc)
     for (const Function *f : doc->functions())
         array.append(function(f));
     return array;
+}
+
+QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
+{
+    QJsonObject json;
+    json["id"] = qint64(function->id());
+    json["type"] = Function::typeToString(function->type());
+
+    /* A name for whatever this step or member points at. A cue list showing
+       "función 7" is a cue list nobody can run. */
+    const auto named = [doc](quint32 id) {
+        const Function *target = doc->function(id);
+        return target != nullptr ? target->name() : QStringLiteral("(borrada)");
+    };
+
+    if (function->type() == Function::ChaserType)
+    {
+        const Chaser *chaser = qobject_cast<const Chaser *>(function);
+
+        QJsonArray steps;
+        const QList<ChaserStep> list = chaser->steps();
+        for (int i = 0; i < list.count(); i++)
+        {
+            const ChaserStep &step = list.at(i);
+
+            QJsonObject entry;
+            entry["index"] = i;
+            entry["function"] = qint64(step.fid);
+            entry["name"] = step.note.isEmpty() ? named(step.fid) : step.note;
+            entry["fadeIn"] = qint64(step.fadeIn);
+            entry["hold"] = qint64(step.hold);
+            entry["fadeOut"] = qint64(step.fadeOut);
+            entry["duration"] = qint64(step.duration);
+            steps.append(entry);
+        }
+
+        json["steps"] = steps;
+        json["step"] = chaser->currentStepIndex();
+        return json;
+    }
+
+    if (function->type() == Function::SceneType)
+    {
+        const Scene *scene = qobject_cast<const Scene *>(function);
+
+        QJsonArray values;
+        for (const SceneValue &value : scene->values())
+        {
+            QJsonObject entry;
+            entry["fixture"] = qint64(value.fxi);
+            entry["channel"] = qint64(value.channel);
+            entry["value"] = value.value;
+
+            const Fixture *fixture = doc->fixture(value.fxi);
+            if (fixture != nullptr)
+            {
+                entry["fixtureName"] = fixture->name();
+
+                const QLCChannel *channel = fixture->channel(value.channel);
+                if (channel != nullptr)
+                    entry["channelName"] = channel->name();
+            }
+
+            values.append(entry);
+        }
+
+        json["values"] = values;
+        return json;
+    }
+
+    if (function->type() == Function::CollectionType)
+    {
+        const Collection *collection = qobject_cast<const Collection *>(function);
+
+        QJsonArray members;
+        for (quint32 id : collection->functions())
+        {
+            QJsonObject entry;
+            entry["function"] = qint64(id);
+            entry["name"] = named(id);
+            members.append(entry);
+        }
+
+        json["members"] = members;
+        return json;
+    }
+
+    /* Everything else can be created, renamed, timed and deleted, but its body
+       is not readable here yet. Saying so beats an empty list that reads as
+       "this function is empty". */
+    json["note"] = QStringLiteral("The body of a %1 is not readable yet")
+                       .arg(Function::typeToString(function->type()).toLower());
+    return json;
 }
 
 QJsonArray JsonView::universes(const Doc *doc)

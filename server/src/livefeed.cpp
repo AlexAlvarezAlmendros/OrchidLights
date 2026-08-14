@@ -447,7 +447,24 @@ void LiveFeed::flush()
     {
         m_pending.clear();
         m_functionsDirty = false;
+        m_chaserSteps.clear();
         return;
+    }
+
+    /* A chaser that has moved on is news, and nothing else reports it. */
+    for (Function *function : m_engine->doc()->functions())
+    {
+        if (function->type() != Function::ChaserType)
+            continue;
+
+        const Chaser *chaser = qobject_cast<const Chaser *>(function);
+        const int step = chaser->isRunning() ? chaser->currentStepIndex() : -1;
+
+        if (m_chaserSteps.value(function->id(), -2) != step)
+        {
+            m_chaserSteps.insert(function->id(), step);
+            m_functionsDirty = true;
+        }
     }
 
     if (m_functionsDirty)

@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FixtureState, type FunctionState, type WidgetPatch, api } from './api'
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
+import { CueList } from './cuelist'
 import { WidgetEditor } from './editor'
 import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './layout'
 import { type Connection, Live } from './live'
@@ -16,6 +17,9 @@ type Theme = 'stage' | 'blackout'
  * press the button it is moving, and the same goes for editing it.
  */
 type Mode = 'run' | 'arrange' | 'edit'
+
+/** Transport for a cue list: a chaser plus next and previous. */
+type CueAction = 'play' | 'stop' | 'next' | 'previous' | 'step'
 
 export function App() {
   const [connection, setConnection] = useState<Connection>('connecting')
@@ -101,6 +105,10 @@ export function App() {
   const setSpeed = useCallback((id: number, milliseconds: number) => {
     setLevels((current) => ({ ...current, [id]: milliseconds }))
     live.current?.setSpeedDial(id, milliseconds)
+  }, [])
+
+  const cueList = useCallback((chaser: number, action: CueAction, index = -1) => {
+    live.current?.cuelist(chaser, action, index)
   }, [])
 
   const setLevel = useCallback((id: number, value: number) => {
@@ -300,7 +308,9 @@ export function App() {
             <Surface
               rows={rows}
               running={running}
+              allFunctions={functions}
               onToggle={toggle}
+              onCueList={cueList}
               levels={levels}
               onLevel={setLevel}
               onSpeed={setSpeed}
@@ -335,7 +345,9 @@ export function App() {
 function Surface({
   rows,
   running,
+  allFunctions,
   onToggle,
+  onCueList,
   levels,
   onLevel,
   onSpeed,
@@ -349,7 +361,9 @@ function Surface({
 }: {
   rows: Row[]
   running: Set<number>
+  allFunctions: FunctionState[]
   onToggle: (id: number) => void
+  onCueList: (chaser: number, action: CueAction, index?: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -380,7 +394,9 @@ function Surface({
                 widget={child}
                 grow={growFactor(child, row)}
                 running={running}
+                allFunctions={allFunctions}
                 onToggle={onToggle}
+                onCueList={onCueList}
                 levels={levels}
                 onLevel={onLevel}
                 onSpeed={onSpeed}
@@ -439,7 +455,9 @@ function Widget({
   widget,
   grow,
   running,
+  allFunctions,
   onToggle,
+  onCueList,
   levels,
   onLevel,
   onSpeed,
@@ -453,7 +471,9 @@ function Widget({
   widget: VcWidget
   grow: number
   running: Set<number>
+  allFunctions: FunctionState[]
   onToggle: (id: number) => void
+  onCueList: (chaser: number, action: CueAction, index?: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -529,6 +549,10 @@ function Widget({
         {widget.caption || `#${id}`}
       </button>
     )
+  }
+
+  if (widget.type === 'cuelist') {
+    return <CueList widget={widget} style={style} functions={allFunctions} onCommand={onCueList} />
   }
 
   if (widget.speedTargets) {

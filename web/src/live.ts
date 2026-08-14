@@ -101,6 +101,21 @@ export class Live {
     this.send({ type: 'slider', id, value })
   }
 
+  /**
+   * Transport for a cue list, which is a chaser plus next/previous.
+   *
+   * Addressed by chaser, not by widget: the same chaser can be driven from a
+   * cue list, a button and another client at once, and they all have to agree
+   * about which cue is up.
+   */
+  cuelist(
+    chaser: number,
+    action: 'play' | 'stop' | 'next' | 'previous' | 'step',
+    index = -1,
+  ): void {
+    this.send({ type: 'cuelist', chaser, action, index })
+  }
+
   subscribe(universes: number[]): void {
     this.send({ type: 'subscribe', universes })
   }

@@ -212,6 +212,42 @@ try {
   check('the widget is gone', (await count()) === before)
   await screenshot('04-deleted')
 
+  /* Running a show, which is what a cue list is for. Back in run mode, because
+     in edit mode a tap picks the widget rather than operating it. */
+  const cues = await evaluate("document.querySelectorAll('.widget.cuelist').length")
+  if (cues > 0) {
+    check('leaving edit mode', (await click('Listo')) === 'ok')
+    await sleep(600)
+
+    const played = await evaluate(`(async () => {
+      const list = document.querySelector('.widget.cuelist')
+      const steps = list.querySelectorAll('.cuelist-steps li')
+      if (steps.length < 2) return 'the cue list has ' + steps.length + ' cues'
+
+      list.querySelector('[aria-label="Reproducir"]').click()
+      await new Promise(r => setTimeout(r, 800))
+
+      const at = () => [...list.querySelectorAll('.cuelist-steps li')]
+        .findIndex(li => li.dataset.current === 'true')
+
+      const first = at()
+      if (first < 0) return 'no cue came up'
+
+      list.querySelector('[aria-label="Siguiente"]').click()
+      await new Promise(r => setTimeout(r, 800))
+      const second = at()
+
+      list.querySelector('[aria-label="Parar"]')?.click()
+      await new Promise(r => setTimeout(r, 500))
+
+      return second === first ? 'next did not advance from cue ' + first
+           : at() >= 0 ? 'the list still shows a cue after stopping'
+           : 'ok'
+    })()`)
+    check('the cue list runs and follows the show', played === 'ok', played)
+    await screenshot('05-cuelist')
+  }
+
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {
   check('the run completed', false, error.message)

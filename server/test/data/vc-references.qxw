@@ -61,8 +61,28 @@
    <Address>9</Address>
    <Channels>3</Channels>
   </Fixture>
-  <Function ID="0" Type="Scene" Name="Escena"/>
-  <Function ID="1" Type="Chaser" Name="Secuencia"/>
+  <Function ID="0" Type="Scene" Name="Escena">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,255,1,0,2,0</FixtureVal>
+  </Function>
+  <Function ID="2" Type="Scene" Name="Escena 2">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,0,1,255,2,0</FixtureVal>
+  </Function>
+  <Function ID="3" Type="Scene" Name="Escena 3">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,0,1,0,2,255</FixtureVal>
+  </Function>
+  <!-- Three real cues, so a cue list has something to step through. -->
+  <Function ID="1" Type="Chaser" Name="Secuencia">
+   <Speed FadeIn="0" FadeOut="0" Duration="1000"/>
+   <Direction>Forward</Direction>
+   <RunOrder>Loop</RunOrder>
+   <SpeedModes FadeIn="Common" FadeOut="Common" Duration="Common"/>
+   <Step Number="0" FadeIn="0" Hold="1000" FadeOut="0">0</Step>
+   <Step Number="1" FadeIn="0" Hold="1000" FadeOut="0">2</Step>
+   <Step Number="2" FadeIn="0" Hold="1000" FadeOut="0">3</Step>
+  </Function>
  </Engine>
  <VirtualConsole>
   <Frame Caption="Consola" ID="0">
