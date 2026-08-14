@@ -552,3 +552,190 @@ button.danger {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
+
+/* The patch: universes, their output, and the fixtures in them. */
+.setup {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.tabs button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* A universe with no output reaches nothing, and a fixture with no definition
+   is a generic dimmer standing in for one. Both look fine until they don't. */
+.card[data-warn="true"],
+.table-row[data-warn="true"] {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+}
+
+.card > header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.card > summary {
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.fields .field {
+  flex: 1;
+  min-width: 6rem;
+}
+
+.row-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.row-field > span {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.85rem;
+}
+
+.row-field input[type="checkbox"] {
+  min-height: 24px;
+  width: 24px;
+  flex: 0 0 auto;
+}
+
+input.grow {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+input.narrow {
+  width: 5.5rem;
+  min-height: 44px;
+  padding: 0.4rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.table-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.table-row select,
+.table-row input {
+  min-height: 44px;
+}
+
+.table-row .hint {
+  flex: 1;
+  min-width: 8rem;
+}
+
+button.linkish {
+  border: none;
+  background: none;
+  color: var(--accent);
+  padding: 0;
+  min-height: 0;
+  text-decoration: underline;
+}
+
+/* 512 channels at a glance: a clash is visible before it becomes a light that
+   will not respond. */
+.channelmap {
+  display: grid;
+  /* Capped rather than stretched: 32 columns across a desktop would give
+     31 px cells and 500 px of grid, which buries the rest of the card. */
+  grid-template-columns: repeat(32, minmax(0, 14px));
+  gap: 1px;
+}
+
+.channelmap span {
+  aspect-ratio: 1;
+  background: var(--surface);
+  border-radius: 1px;
+}
+
+.channelmap span[data-held="true"] {
+  background: var(--accent);
+}
+
+.channelmap span[data-tone="1"] {
+  background: #5aa9e6;
+}
+.channelmap span[data-tone="2"] {
+  background: #7fc29b;
+}
+.channelmap span[data-tone="3"] {
+  background: #e8c547;
+}
+.channelmap span[data-tone="4"] {
+  background: #d98880;
+}
+.channelmap span[data-tone="5"] {
+  background: #b39ddb;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}

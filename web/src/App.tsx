@@ -5,6 +5,7 @@ import { CueList } from './cuelist'
 import { WidgetEditor } from './editor'
 import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './layout'
 import { type Connection, Live } from './live'
+import { Setup } from './setup'
 import { CREATABLE, placeBelow } from './widgets'
 
 type Theme = 'stage' | 'blackout'
@@ -17,6 +18,15 @@ type Theme = 'stage' | 'blackout'
  * press the button it is moving, and the same goes for editing it.
  */
 type Mode = 'run' | 'arrange' | 'edit'
+
+/**
+ * Which half of the application is on screen.
+ *
+ * 'console' is the desk. 'setup' is the patch -- universes, their output, and
+ * the fixtures in them -- which is what makes light come out and which, until
+ * now, was reachable only with curl.
+ */
+type View = 'console' | 'setup'
 
 /** Transport for a cue list: a chaser plus next and previous. */
 type CueAction = 'play' | 'stop' | 'next' | 'previous' | 'step'
@@ -39,6 +49,7 @@ export function App() {
   const [dirty, setDirty] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
   const [fixtures, setFixtures] = useState<FixtureState[]>([])
+  const [view, setView] = useState<View>('console')
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
@@ -187,6 +198,20 @@ export function App() {
     return count(vc)
   }, [vc])
 
+  /* The patch decides what the console can point at, so a fixture added or
+     removed there has to reach the widget editor's channel picker. Deleting one
+     also edits the console itself, which is why the tree is re-read too. */
+  const reloadFixtures = useCallback(() => {
+    api
+      .fixtures()
+      .then(setFixtures)
+      .catch(() => undefined)
+    api
+      .vc()
+      .then(setVc)
+      .catch(() => undefined)
+  }, [])
+
   const assignIds = useCallback(async () => {
     await api.assignWidgetIds()
     await refresh()
@@ -229,7 +254,19 @@ export function App() {
         >
           {theme === 'stage' ? '🌙' : '☀'}
         </button>
-        {vc &&
+        <button
+          type="button"
+          aria-pressed={view === 'setup'}
+          onClick={() => {
+            setView(view === 'setup' ? 'console' : 'setup')
+            setMode('run')
+            setSelected(null)
+          }}
+        >
+          {view === 'setup' ? 'Consola' : 'Patch'}
+        </button>
+        {view === 'console' &&
+          vc &&
           /* One control at a time. Showing "Ordenar" beside "Listo" made it
              read as two separate states, when there is only ever one. */
           (mode === 'run' ? (
@@ -263,7 +300,7 @@ export function App() {
         </button>
       </header>
 
-      {pages.length > 1 && (
+      {view === 'console' && pages.length > 1 && (
         <nav className="pages">
           {pages.map((p, i) => (
             <button key={p.id} type="button" onClick={() => setPage(i)} aria-pressed={i === page}>
@@ -273,7 +310,7 @@ export function App() {
         </nav>
       )}
 
-      {mode === 'edit' && (
+      {view === 'console' && mode === 'edit' && (
         <nav className="palette" aria-label="Añadir widget">
           <span className="hint">Añadir:</span>
           {CREATABLE.map((c) => (
@@ -288,7 +325,7 @@ export function App() {
           addresses a widget by id -- so it is not partly editable, it is not
           editable at all until this has run. Saying so beats a screen full of
           widgets that quietly refuse to be tapped. */}
-      {mode === 'edit' && unidentified > 0 && (
+      {view === 'console' && mode === 'edit' && unidentified > 0 && (
         <div className="notice">
           <span>
             {unidentified} widgets vienen sin identificador, de una versión antigua de QLC+, y no se
@@ -300,44 +337,52 @@ export function App() {
         </div>
       )}
 
-      <div className="workspace">
+      {view === 'setup' ? (
         <main className="console">
-          {error && <p className="empty">{error}</p>}
-
-          {current ? (
-            <Surface
-              rows={rows}
-              running={running}
-              allFunctions={functions}
-              onToggle={toggle}
-              onCueList={cueList}
-              levels={levels}
-              onLevel={setLevel}
-              onSpeed={setSpeed}
-              editing={editing}
-              dragging={dragging}
-              onDragStart={setDragging}
-              onDrop={drop}
-              selecting={mode === 'edit'}
-              selected={selected}
-              onSelect={setSelected}
-            />
-          ) : (
-            <FunctionList functions={functions} onToggle={toggle} />
-          )}
+          {/* The patch changes what the console is pointing at, so a fixture
+              added or removed here has to reach the widget editor too. */}
+          <Setup onChanged={reloadFixtures} />
         </main>
+      ) : (
+        <div className="workspace">
+          <main className="console">
+            {error && <p className="empty">{error}</p>}
 
-        {mode === 'edit' && selectedWidget && (
-          <WidgetEditor
-            widget={selectedWidget}
-            functions={functions}
-            fixtures={fixtures}
-            onApply={editWidget}
-            onDelete={deleteWidget}
-            onClose={() => setSelected(null)}
-          />
-        )}
-      </div>
+            {current ? (
+              <Surface
+                rows={rows}
+                running={running}
+                allFunctions={functions}
+                onToggle={toggle}
+                onCueList={cueList}
+                levels={levels}
+                onLevel={setLevel}
+                onSpeed={setSpeed}
+                editing={editing}
+                dragging={dragging}
+                onDragStart={setDragging}
+                onDrop={drop}
+                selecting={mode === 'edit'}
+                selected={selected}
+                onSelect={setSelected}
+              />
+            ) : (
+              <FunctionList functions={functions} onToggle={toggle} />
+            )}
+          </main>
+
+          {mode === 'edit' && selectedWidget && (
+            <WidgetEditor
+              widget={selectedWidget}
+              functions={functions}
+              fixtures={fixtures}
+              onApply={editWidget}
+              onDelete={deleteWidget}
+              onClose={() => setSelected(null)}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }
