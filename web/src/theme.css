@@ -739,3 +739,36 @@ button.linkish {
   overflow: hidden;
   clip-path: inset(50%);
 }
+
+.group-title {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.table-row[data-selected="true"] {
+  border-color: var(--accent);
+}
+
+.table-row button[data-running="true"] {
+  border-color: var(--live);
+  color: var(--live);
+}
+
+button.linkish.left {
+  text-align: left;
+  min-height: 44px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.field.grow-field {
+  flex: 2;
+}
+
+.channels li input[type="range"] {
+  flex: 1;
+  min-width: 5rem;
+}

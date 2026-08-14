@@ -10,13 +10,25 @@ export interface FunctionState {
    *  list follows the show rather than describing it. */
   step?: number
   steps?: number
+
+  /** Timings, in milliseconds. Exposed so a speed dial's effect is observable
+   *  rather than merely acknowledged. */
+  fadeIn?: number
+  fadeOut?: number
+  duration?: number
 }
 
 export interface FunctionBody {
   id: number
   type: string
   steps?: import('./cuelist').Step[]
-  values?: { fixture: number; channel: number; value: number; channelName?: string }[]
+  values?: {
+    fixture: number
+    channel: number
+    value: number
+    fixtureName?: string
+    channelName?: string
+  }[]
   members?: { function: number; name: string }[]
   note?: string
 }
@@ -116,6 +128,52 @@ export const api = {
   functionBody: (id: number) => json<FunctionBody>(`/api/v1/functions/${id}/body`),
   fixtures: () => json<FixtureState[]>('/api/v1/fixtures'),
   fixture: (id: number) => json<FixtureDetail>(`/api/v1/fixtures/${id}`),
+
+  /* Functions: the ten types, their timings, and their bodies. */
+  createFunction: (type: string, name: string) =>
+    json<FunctionState>('/api/v1/functions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, name }),
+    }),
+  patchFunction: (
+    id: number,
+    patch: { name?: string; fadeIn?: number; fadeOut?: number; duration?: number },
+  ) =>
+    json<FunctionState>(`/api/v1/functions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  /** `force` skips the check for who still references this function. */
+  removeFunction: (id: number, force = false) =>
+    json<{ removed: number }>(`/api/v1/functions/${id}${force ? '?force=true' : ''}`, {
+      method: 'DELETE',
+    }),
+
+  setSceneValue: (id: number, fixture: number, channel: number, value: number) =>
+    json<unknown>(`/api/v1/functions/${id}/values`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fixture, channel, value }),
+    }),
+  addChaserStep: (
+    id: number,
+    step: { function: number; fadeIn?: number; hold?: number; fadeOut?: number; index?: number },
+  ) =>
+    json<unknown>(`/api/v1/functions/${id}/steps`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(step),
+    }),
+  removeChaserStep: (id: number, index: number) =>
+    json<unknown>(`/api/v1/functions/${id}/steps/${index}`, { method: 'DELETE' }),
+  setMembers: (id: number, members: number[]) =>
+    json<unknown>(`/api/v1/functions/${id}/members`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ functions: members }),
+    }),
 
   /* Patching: universes, their output, and the fixtures in them. This is what
      makes light come out, and until now none of it was reachable from a

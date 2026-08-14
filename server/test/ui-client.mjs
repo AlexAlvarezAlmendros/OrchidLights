@@ -248,6 +248,58 @@ try {
     await screenshot('05-cuelist')
   }
 
+  /* Functions: a console fires them, and this is where they come from. */
+  check('the function list opens', (await click('Funciones')) === 'ok')
+  await sleep(900)
+
+  const built = await evaluate(`(async () => {
+    const rows = () => document.querySelectorAll('.table-row').length
+    const before = rows()
+
+    const input = document.querySelector('.setup .card input')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    setter.call(input, 'Escena de prueba')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 150))
+
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Crear').click()
+    await new Promise(r => setTimeout(r, 1200))
+    if (rows() !== before + 1) return 'the list did not grow: ' + before + ' -> ' + rows()
+
+    // Created and selected, so its editor is open.
+    const panel = document.querySelector('.setup article.card')
+    if (!panel) return 'no editor opened for the new function'
+    if (!panel.textContent.includes('Escena de prueba')) return 'the editor opened on ' + panel.textContent.slice(0, 40)
+
+    // A brand new scene holds nothing, and says so rather than showing an
+    // empty list that reads as an editor that failed to load.
+    const empty = panel.textContent.includes('no mueve ningún canal')
+
+    const add = [...panel.querySelectorAll('select')].find(s => s.options[0]?.textContent.startsWith('Añadir canal'))
+    if (!add) return 'no channel picker'
+    if (add.options.length < 2) return 'the channel picker is empty'
+
+    // A select needs its own setter; the input one throws on one.
+    const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    selectSetter.call(add, add.options[1].value)
+    add.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 1400))
+
+    const held = document.querySelectorAll('.setup article.card .channels li').length
+    return empty && held === 1 ? 'ok' : 'empty=' + empty + ' held=' + held
+  })()`)
+  check('a scene is created and given a channel', built === 'ok', built)
+  await screenshot('06-functions')
+
+  const removed = await evaluate(`(async () => {
+    const before = document.querySelectorAll('.table-row').length
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Eliminar función').click()
+    await new Promise(r => setTimeout(r, 1400))
+    const after = document.querySelectorAll('.table-row').length
+    return after === before - 1 ? 'ok' : before + ' -> ' + after
+  })()`)
+  check('and deleted again', removed === 'ok', removed)
+
   /* The patch: universes, their output, and the fixtures in them. This is what
      makes light come out, and until now none of it was reachable from a
      browser at all. */
