@@ -74,6 +74,28 @@ try {
   socket.send(JSON.stringify({ type: 'function', id: SMOKE, action: 'stop' }))
   await sleep(400)
   check('and both stop when asked', running().size === 0, [...running()].join(','))
+
+  /* A playback slider rides a function rather than writing channels: at zero
+     it stops it, above zero it starts it and holds its intensity there. The
+     start and the stop are what can be observed from here; the intensity is an
+     attribute override the engine applies to the running function. */
+  const PLAYBACK = 10
+
+  socket.send(JSON.stringify({ type: 'slider', id: PLAYBACK, value: 200 }))
+  let started = false
+  for (let i = 0; i < 30 && !started; i++) {
+    await sleep(100)
+    started = running().has(SMOKE)
+  }
+  check('a playback slider starts its function', started, [...running()].join(','))
+
+  socket.send(JSON.stringify({ type: 'slider', id: PLAYBACK, value: 0 }))
+  let stopped = false
+  for (let i = 0; i < 30 && !stopped; i++) {
+    await sleep(100)
+    stopped = !running().has(SMOKE)
+  }
+  check('and stops it at zero', stopped, [...running()].join(','))
 } finally {
   socket.close()
 }

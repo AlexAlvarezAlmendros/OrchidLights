@@ -200,14 +200,15 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - [x] **Faders funcionando.** `server/src/levelsource.cpp` se registra como `DMXSource` en el `MasterTimer`, que es la única vía sancionada para escribir en un universo fuera de una Function: `writeDMX()` corre en el hilo del timer con los universos ya reclamados. Mover un fader desde HTTP o WebSocket **no toca un universo**: aparca el valor bajo mutex y el siguiente tick (≤20 ms) lo aplica.
 - [x] Verificado contra el rig real: el fader *Washes* del P62 escribe 200 en los canales DMX **158, 184, 210, 236** — el canal 6 (dimmer) de los cuatro Hero Wash 300FC en 153/179/205/231, y en ningún otro sitio.
 - [x] Faders horizontales en móvil (más fáciles con una mano) y verticales en escritorio, como en una mesa. Valores sembrados desde el proyecto, y sincronizados entre clientes por WebSocket.
-- [x] Los sliders de tipo *playback* y *submaster* se parsean pero salen **deshabilitados y etiquetados**: mostrarlos operativos sería una mentira que el operador descubre cuando la luz no se mueve.
+- [x] Los sliders de tipo *submaster* se parsean pero salen **deshabilitados y etiquetados**: mostrarlos operativos sería una mentira que el operador descubre cuando la luz no se mueve. Los de *playback* ya funcionan (ver F6).
 
 **Pendiente:**
 
 - [x] **Speed dial funcionando.** Verificado sobre el rig: mover el dial de 430 ms a 3000 y a 500 cambia la duración de los tres chases y los dos EFX de movimiento del P62. Las velocidades (`fadeIn`/`fadeOut`/`duration`) se exponen ahora en `/api/v1/functions`, para que el efecto sea **observable** y no solo confirmado por un acuse.
   Los flags del XML son índices en la tabla de multiplicadores de QLC+, donde `0 = None` significa "no toques esa velocidad" — por eso un dial que parece controlar un fade a menudo solo controla la duración.
 - [x] Cue lists y XY pads (ver F6).
-- [ ] Sliders de playback y submaster.
+- [x] Sliders de playback (ver F6).
+- [ ] Sliders de submaster.
 
 > **Con esto, la consola del P62 no tiene ningún widget muerto**: 20 botones, 5 faders, el speed dial y las etiquetas, todos operativos desde el navegador.
 - [x] **Editor de orden sobre rejilla**, guardado en `<OrchidLightsLayout>`, una sección propia del `.qxw`. Verificado contra **QLC+ 5.2.1**: avisa `Unknown Workspace tag` y carga el proyecto con normalidad. Asimetría documentada: QLC+ no conserva secciones desconocidas, así que guardar desde QLC+ pierde el orden (y solo el orden).
@@ -336,8 +337,12 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 - [x] **Marcos anidados, paginados y solo.** Un marco se dibujaba como una caja gris vacía, que en una consola construida a base de marcos significa que casi todo el show es invisible: el `Sample.qxw` de QLC+ tiene 125 widgets y **cuatro** salían en pantalla. Ahora se dibujan con lo que llevan dentro, refluido por la misma regla que la página.
 - [x] **Paginación por marco**, que es como lo guarda QLC+ — por marco, no por consola, y cada hijo nombra su página en `@Page`. Ignorarlo dibuja todas las páginas superpuestas, que parece una página con el doble de botones.
 - [x] **Semántica de solo**, en el daemon y no en la interfaz: un marco solo que solo lo fuera en un navegador es peor que uno que no lo sea. Arrancar rojo tira azul; una función fuera del marco no es hermana de nadie y sobrevive.
-- [ ] Control completo: `audiotriggers`, `animation` (control de RGB Matrix),
-      `slider` en modos playback y submaster.
+- [x] **Sliders de playback.** No escriben canales: a cero paran su función, por encima la arrancan y le mantienen la intensidad en la fracción del fader. Corre en el hilo del timer como el resto, porque arrancar una función y sobrescribirle un atributo son dos cosas que el motor espera en su propio reloj. El override se devuelve al parar — mantenerlo es como un fader acaba ajustando el atributo de una función que ya no corre.
+- [ ] `slider` en modo **submaster**: escala los widgets que tiene alrededor, y eso atraviesa
+      todos los tipos (faders de nivel, playbacks y los botones del marco). Sale
+      deshabilitado y etiquetado hasta que esté entero, porque un submaster que solo
+      escalara la mitad es peor que uno que no escala.
+- [ ] Control completo: `audiotriggers`, `animation` (control de RGB Matrix).
 - [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
       (MIDI/OSC) por widget.
 

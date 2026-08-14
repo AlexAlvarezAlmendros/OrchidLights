@@ -59,6 +59,18 @@ public:
      *  definition for that slider, and forgets everything when the project
      *  changes. */
     void defineSlider(quint32 sliderId, const QList<Channel> &channels);
+
+    /**
+     * Tell the source that a slider rides a function's intensity.
+     *
+     * A playback slider does not write channels. At zero it stops the function;
+     * above zero it starts it and holds its intensity at the slider's fraction
+     * -- which is why it has to run here, on the timer thread, rather than from
+     * an HTTP handler: starting a function and overriding an attribute are both
+     * things the engine expects on its own clock.
+     */
+    void definePlayback(quint32 sliderId, quint32 functionId);
+
     void forgetSliders();
 
     /** Park a new value for a slider. Applied on the next engine tick. */
@@ -107,12 +119,21 @@ private:
     /** Aim the heads every dirty pad steers. Call with the mutex held. */
     void writePads(const QList<Universe *> &universes);
 
+    /** Ride the functions the dirty playback sliders drive. Call with the
+     *  mutex held. */
+    void writePlaybacks(MasterTimer *timer);
+
     Doc *m_doc = nullptr;
 
     mutable QMutex m_mutex;
     QHash<quint32, QList<Channel>> m_sliders;
     QHash<quint32, uchar> m_values;
     QHash<quint32, bool> m_dirty;
+
+    /** Sliders that ride a function instead of writing channels, and the
+     *  attribute override each one holds on it. */
+    QHash<quint32, quint32> m_playbacks;
+    QHash<quint32, int> m_overrides;
 
     QHash<quint32, QList<PadHead>> m_pads;
     QHash<quint32, QPair<double, double>> m_positions;

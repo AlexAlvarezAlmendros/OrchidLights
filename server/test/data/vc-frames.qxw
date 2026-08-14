@@ -89,6 +89,14 @@
      <Action>Toggle</Action>
     </Button>
    </Frame>
+   <!-- A playback slider: it rides a function's intensity rather than writing
+        channels, and names that function as element text inside <Playback>,
+        not as an attribute. -->
+   <Slider Caption="Humo nivel" ID="10" WidgetStyle="Slider" InvertedAppearance="false">
+    <WindowState Visible="True" X="420" Y="150" Width="60" Height="200"/>
+    <SliderMode ValueDisplayStyle="Exact">Playback</SliderMode>
+    <Playback><Function>3</Function></Playback>
+   </Slider>
    <Frame Caption="Paginado" ID="7">
     <WindowState Visible="True" X="10" Y="290" Width="400" Height="120"/>
     <Multipage PagesNum="2" CurrentPage="0"/>

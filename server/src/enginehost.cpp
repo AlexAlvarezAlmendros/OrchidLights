@@ -185,6 +185,15 @@ void EngineHost::teachSliders()
             m_levels->defineSlider(widget->id, channels);
         }
 
+        /* A playback slider rides a function instead of writing channels, and
+           names it as element text inside <Playback> rather than as an
+           attribute -- which is why it reported none for so long. */
+        if (widget->sliderMode == QStringLiteral("playback") && widget->hasFunction
+            && widget->functionId != UINT_MAX)
+        {
+            m_levels->definePlayback(widget->id, widget->functionId);
+        }
+
         if (widget->padHeads.isEmpty() == false)
         {
             QList<LevelSource::PadHead> heads;
