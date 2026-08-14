@@ -37,6 +37,13 @@ export interface VcWidget {
   background?: string
   foreground?: string
   page?: number
+
+  /* Frames. A frame holds other widgets, and may page through them. */
+  pages?: number
+  currentPage?: number
+  showHeader?: boolean
+  collapsed?: boolean
+
   action?: string
   functionId?: number
   chaserId?: number
@@ -145,4 +152,18 @@ export function isContainer(widget: VcWidget): boolean {
 export function pagesOf(root: VcWidget): VcWidget[] {
   const frames = (root.children ?? []).filter(isContainer)
   return frames.length > 0 ? frames : [root]
+}
+
+/**
+ * The children of a frame that belong on the page it is showing.
+ *
+ * A frame that is not multipage shows everything: its children may still carry
+ * a @Page from a design that once had pages, and hiding them would make widgets
+ * vanish for a reason nobody can see. Only a frame that says it has pages
+ * filters by them.
+ */
+export function childrenOnPage(frame: VcWidget, page: number): VcWidget[] {
+  const children = frame.children ?? []
+  if (!frame.pages || frame.pages <= 1) return children
+  return children.filter((child) => (child.page ?? 0) === page)
 }

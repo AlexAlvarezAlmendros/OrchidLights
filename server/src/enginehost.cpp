@@ -17,6 +17,8 @@
   limitations under the License.
 */
 
+#include <functional>
+
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QFileInfo>
@@ -351,6 +353,53 @@ bool EngineHost::setSpeedDial(quint32 widgetId, int milliseconds)
     }
 
     return false;
+}
+
+QList<quint32> EngineHost::soloSiblings(quint32 functionId) const
+{
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root) == false)
+        return QList<quint32>();
+
+    /* Every function reachable from a widget in this subtree. Nested frames
+       count: a solo frame's contents are everything inside it, however deep,
+       which is how a bank built out of sub-frames still behaves as one. */
+    const std::function<void(const VcWidget &, QList<quint32> &)> collect =
+        [&collect](const VcWidget &widget, QList<quint32> &into) {
+            if (widget.hasFunction && widget.functionId != UINT_MAX
+                && into.contains(widget.functionId) == false)
+            {
+                into.append(widget.functionId);
+            }
+
+            for (const VcWidget &child : widget.children)
+                collect(child, into);
+        };
+
+    QVector<const VcWidget *> pending;
+    pending.append(&root);
+
+    while (pending.isEmpty() == false)
+    {
+        const VcWidget *widget = pending.takeLast();
+
+        if (widget->type == QStringLiteral("soloframe"))
+        {
+            QList<quint32> inside;
+            collect(*widget, inside);
+
+            if (inside.contains(functionId))
+            {
+                inside.removeAll(functionId);
+                return inside;
+            }
+        }
+
+        for (const VcWidget &child : widget->children)
+            pending.append(&child);
+    }
+
+    return QList<quint32>();
 }
 
 QVector<ConsoleLayout::Page> EngineHost::layout() const

@@ -294,6 +294,16 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc)
         json["controllable"] = true;
     }
 
+    if (widget.pages > 0)
+    {
+        json["pages"] = widget.pages;
+        json["currentPage"] = widget.currentPage;
+    }
+    if (widget.showHeader == false)
+        json["showHeader"] = false;
+    if (widget.collapsed)
+        json["collapsed"] = true;
+
     if (widget.padHeads.isEmpty() == false)
     {
         /* The heads themselves are not sent: an interface steers the pad, not

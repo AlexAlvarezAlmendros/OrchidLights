@@ -125,6 +125,20 @@ public:
      *  Returns false when the project has no such dial. */
     bool setSpeedDial(quint32 widgetId, int milliseconds);
 
+    /**
+     * The functions a solo frame says must stop when this one starts.
+     *
+     * A solo frame is a frame whose contents are mutually exclusive -- the
+     * colour bank where picking red should drop blue. The rule lives here
+     * rather than in the interface because two clients must agree about it:
+     * if one browser enforced it and another did not, the frame would only be
+     * solo for whoever pressed last.
+     *
+     * Empty when the function is not inside a solo frame, which is the usual
+     * case.
+     */
+    QList<quint32> soloSiblings(quint32 functionId) const;
+
     /** How the operator arranged the console, empty when never arranged. */
     QVector<ConsoleLayout::Page> layout() const;
 

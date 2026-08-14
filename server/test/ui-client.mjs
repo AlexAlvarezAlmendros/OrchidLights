@@ -383,6 +383,72 @@ try {
   })()`)
   check('an edit made elsewhere arrives without a reload', followed === 'ok', followed)
 
+  /* Frames, if this console has any. Drawn as an empty box until now, which on
+     a console built out of frames meant most of the show was invisible. */
+  const framed = await evaluate(`(async () => {
+    const vc = await (await fetch('/api/v1/vc')).json()
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+
+    // Frames inside a page, not the page itself.
+    const nested = walk(vc)
+      .filter(w => ['frame', 'soloframe'].includes(w.type))
+      .filter(f => (f.children ?? []).length > 0)
+      .slice(1)
+
+    if (nested.length === 0) return 'none'
+
+    const drawn = document.querySelectorAll('.widget.frame').length
+    if (drawn === 0) return 'this console has ' + nested.length + ' frames and drew none'
+
+    /* Whatever is inside them has to be on screen, not summarised as a box --
+       except the pages a paged frame is not showing, which is the whole point
+       of it having pages. */
+    const inside = nested
+      .flatMap(f => (f.children ?? []).filter(c => (f.pages ?? 0) < 2 || (c.page ?? 0) === (f.currentPage ?? 0)))
+      .filter(c => c.caption)
+    const showing = [...document.querySelectorAll('.widget')].map(w => w.textContent).join(' ')
+    const missing = inside.filter(c => !showing.includes(c.caption))
+
+    return missing.length === 0
+      ? 'ok ' + drawn + ' frames, ' + inside.length + ' widgets inside'
+      : missing.length + ' widgets are inside a frame and not on screen'
+  })()`)
+  check(
+    'frames show what is in them',
+    framed === 'none' || framed.startsWith('ok'),
+    framed,
+  )
+
+  const paged = await evaluate(`(async () => {
+    const vc = await (await fetch('/api/v1/vc')).json()
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+    const frame = walk(vc).find(w => (w.pages ?? 0) > 1)
+    if (!frame) return 'none'
+
+    const onPage = n => (frame.children ?? []).filter(c => (c.page ?? 0) === n)
+    const showing = () => [...document.querySelectorAll('.widget')].map(w => w.textContent).join(' ')
+
+    const first = onPage(0).find(c => c.caption)
+    const second = onPage(1).find(c => c.caption)
+    if (!first || !second) return 'the paged frame has nothing to compare'
+
+    // A reader that ignores Page draws both pages at once, which looks like one
+    // page with twice the buttons.
+    if (showing().includes(second.caption)) return 'page 2 is showing while page 1 is selected'
+
+    const tab = [...document.querySelectorAll('.frame-pages button, .pages button')]
+      .find(b => b.textContent.trim() === '2')
+    if (!tab) return 'no page selector'
+    tab.click()
+    await new Promise(r => setTimeout(r, 500))
+
+    return showing().includes(second.caption) && !showing().includes(first.caption)
+      ? 'ok'
+      : 'the page did not change'
+  })()`)
+  check('a paged frame shows one page at a time', paged === 'none' || paged === 'ok', paged)
+  await screenshot('08-frames')
+
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {
   check('the run completed', false, error.message)

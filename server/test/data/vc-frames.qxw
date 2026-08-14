@@ -1,0 +1,108 @@
+<!DOCTYPE Workspace>
+<!--
+  Frames: nested, paged, and solo.
+
+  A frame drawn as an empty box is how most of a real console disappears. The
+  QLC+ sample is built out of frames, and until they were rendered four of its
+  125 widgets were on screen.
+
+  The solo frame here is the shape every show has: a colour bank where picking
+  red should drop blue. Nothing about the file says the two are exclusive
+  except that they share a SoloFrame.
+
+  The paged frame carries two pages of one button each. A reader that ignores
+  Page draws both at once, which looks like one page with twice the buttons.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>0</ID>
+   <Name>Par</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <!-- Each scene holds a channel: an empty one has nothing to keep running,
+       so it would never report itself as running and the solo rule would have
+       nothing to observe. -->
+  <Function ID="0" Type="Scene" Name="Rojo">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,255,1,0,2,0</FixtureVal>
+  </Function>
+  <Function ID="1" Type="Scene" Name="Azul">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,0,1,0,2,255</FixtureVal>
+  </Function>
+  <Function ID="2" Type="Scene" Name="Verde">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,0,1,255,2,0</FixtureVal>
+  </Function>
+  <Function ID="3" Type="Scene" Name="Humo">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,80,1,80,2,80</FixtureVal>
+  </Function>
+  <Function ID="4" Type="Scene" Name="Pagina uno">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,10,1,0,2,0</FixtureVal>
+  </Function>
+  <Function ID="5" Type="Scene" Name="Pagina dos">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,20,1,0,2,0</FixtureVal>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <SoloFrame Caption="Colores" ID="1">
+    <WindowState Visible="True" X="10" Y="10" Width="400" Height="120"/>
+    <Button Caption="Rojo" ID="2">
+     <WindowState Visible="True" X="10" Y="40" Width="100" Height="50"/>
+     <Function ID="0"/>
+     <Action>Toggle</Action>
+    </Button>
+    <Button Caption="Azul" ID="3">
+     <WindowState Visible="True" X="120" Y="40" Width="100" Height="50"/>
+     <Function ID="1"/>
+     <Action>Toggle</Action>
+    </Button>
+    <Button Caption="Verde" ID="4">
+     <WindowState Visible="True" X="230" Y="40" Width="100" Height="50"/>
+     <Function ID="2"/>
+     <Action>Toggle</Action>
+    </Button>
+   </SoloFrame>
+   <Frame Caption="Efectos" ID="5">
+    <WindowState Visible="True" X="10" Y="150" Width="400" Height="120"/>
+    <Button Caption="Humo" ID="6">
+     <WindowState Visible="True" X="10" Y="180" Width="100" Height="50"/>
+     <Function ID="3"/>
+     <Action>Toggle</Action>
+    </Button>
+   </Frame>
+   <Frame Caption="Paginado" ID="7">
+    <WindowState Visible="True" X="10" Y="290" Width="400" Height="120"/>
+    <Multipage PagesNum="2" CurrentPage="0"/>
+    <Button Caption="Uno" ID="8">
+     <WindowState Visible="True" X="10" Y="320" Width="100" Height="50"/>
+     <Function ID="4"/>
+     <Action>Toggle</Action>
+    </Button>
+    <Button Caption="Dos" ID="9" Page="1">
+     <WindowState Visible="True" X="10" Y="320" Width="100" Height="50"/>
+     <Function ID="5"/>
+     <Action>Toggle</Action>
+    </Button>
+   </Frame>
+  </Frame>
+ </VirtualConsole>
+</Workspace>

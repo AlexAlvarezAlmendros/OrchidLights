@@ -4,7 +4,15 @@ import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrang
 import { CueList } from './cuelist'
 import { WidgetEditor } from './editor'
 import { Functions } from './functions'
-import { type Row, type VcWidget, growFactor, isContainer, pagesOf } from './layout'
+import {
+  type Row,
+  type VcWidget,
+  childrenOnPage,
+  groupIntoRows,
+  growFactor,
+  isContainer,
+  pagesOf,
+} from './layout'
 import { type Connection, Live } from './live'
 import { Setup } from './setup'
 import { CREATABLE, placeBelow } from './widgets'
@@ -56,6 +64,8 @@ export function App() {
   /** Bumped whenever the project changed under us, so the screens that keep
    *  their own state know to re-read it. */
   const [revision, setRevision] = useState(0)
+  /** Which page of the frame on screen, for a frame that has pages. */
+  const [framePage, setFramePage] = useState(0)
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
@@ -182,7 +192,12 @@ export function App() {
 
   const pages = vc ? pagesOf(vc) : []
   const current = pages[page] ?? pages[0]
-  const rows = current ? resolveRows(current.children ?? [], layout) : []
+
+  /* Paging is the frame's own: QLC+ stores pages per frame, not per console,
+     and each child names its page in @Page. Ignoring that draws every page on
+     top of the others. */
+  const framePages = current?.pages ?? 0
+  const rows = current ? resolveRows(childrenOnPage(current, framePage), layout) : []
 
   const drop = useCallback(
     (rowIndex: number, beforeId: number | null) => {
@@ -364,13 +379,33 @@ export function App() {
         </button>
       </header>
 
-      {view === 'console' && pages.length > 1 && (
+      {view === 'console' && (pages.length > 1 || framePages > 1) && (
         <nav className="pages">
-          {pages.map((p, i) => (
-            <button key={p.id} type="button" onClick={() => setPage(i)} aria-pressed={i === page}>
-              {p.caption || `Página ${i + 1}`}
-            </button>
-          ))}
+          {pages.length > 1 &&
+            pages.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  setPage(i)
+                  setFramePage(0)
+                }}
+                aria-pressed={i === page}
+              >
+                {p.caption || `Página ${i + 1}`}
+              </button>
+            ))}
+          {framePages > 1 &&
+            Array.from({ length: framePages }, (_, i) => (
+              <button
+                key={`p${i}`}
+                type="button"
+                onClick={() => setFramePage(i)}
+                aria-pressed={i === framePage}
+              >
+                {i + 1}
+              </button>
+            ))}
         </nav>
       )}
 
@@ -722,9 +757,19 @@ function Widget({
 
   if (isContainer(widget)) {
     return (
-      <div className="widget" style={style}>
-        {widget.caption || 'Grupo'}
-      </div>
+      <NestedFrame
+        widget={widget}
+        style={style}
+        running={running}
+        allFunctions={allFunctions}
+        onToggle={onToggle}
+        onCueList={onCueList}
+        pads={pads}
+        onPad={onPad}
+        levels={levels}
+        onLevel={onLevel}
+        onSpeed={onSpeed}
+      />
     )
   }
 
@@ -739,6 +784,109 @@ function Widget({
         <small>({widget.type})</small>
       </span>
     </div>
+  )
+}
+
+/**
+ * A frame inside a page, with what is in it.
+ *
+ * Drawn as a grey box until now, which on a console built out of frames meant
+ * most of the show was invisible: the QLC+ sample has 125 widgets and four of
+ * them were on screen.
+ *
+ * Its children reflow by the same rule as the page, so a frame on a phone
+ * wraps rather than shrinking. Paging is the frame's own -- QLC+ stores pages
+ * per frame, not per console.
+ */
+function NestedFrame({
+  widget,
+  style,
+  running,
+  allFunctions,
+  onToggle,
+  onCueList,
+  pads,
+  onPad,
+  levels,
+  onLevel,
+  onSpeed,
+}: {
+  widget: VcWidget
+  style: React.CSSProperties
+  running: Set<number>
+  allFunctions: FunctionState[]
+  onToggle: (id: number) => void
+  onCueList: (chaser: number, action: CueAction, index?: number) => void
+  pads: Record<number, { x: number; y: number }>
+  onPad: (id: number, x: number, y: number) => void
+  levels: Record<number, number>
+  onLevel: (id: number, value: number) => void
+  onSpeed: (id: number, milliseconds: number) => void
+}) {
+  const [page, setPage] = useState(widget.currentPage ?? 0)
+
+  const children = childrenOnPage(widget, page)
+  const rows = groupIntoRows(children)
+  const pages = widget.pages ?? 0
+
+  return (
+    <section
+      className="widget frame"
+      style={{ ...style, '--basis': '100%' } as React.CSSProperties}
+      data-solo={widget.type === 'soloframe'}
+    >
+      {/* A header-less frame is a grouping the designer wanted invisible, so
+          giving it a title would be adding furniture nobody asked for. */}
+      {widget.showHeader !== false && (widget.caption || pages > 1) && (
+        <header className="frame-head">
+          <span>{widget.caption}</span>
+          {pages > 1 && (
+            <nav className="frame-pages">
+              {Array.from({ length: pages }, (_, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  aria-pressed={index === page}
+                  onClick={() => setPage(index)}
+                >
+                  {index + 1}
+                </button>
+              ))}
+            </nav>
+          )}
+        </header>
+      )}
+
+      <div className="frame-body">
+        {rows.map((row, rowIndex) => (
+          <div className="row" key={`${rowIndex}-${row.widgets[0]?.id}`}>
+            {row.widgets.map((child, childIndex) => (
+              <Widget
+                key={child.id ?? `${rowIndex}-${childIndex}`}
+                widget={child}
+                grow={growFactor(child, row)}
+                running={running}
+                allFunctions={allFunctions}
+                onToggle={onToggle}
+                onCueList={onCueList}
+                pads={pads}
+                onPad={onPad}
+                levels={levels}
+                onLevel={onLevel}
+                onSpeed={onSpeed}
+                editing={false}
+                dragged={false}
+                onDragStart={() => undefined}
+                selecting={false}
+                selected={false}
+                onSelect={() => undefined}
+              />
+            ))}
+          </div>
+        ))}
+        {rows.length === 0 && <p className="hint">Vacío.</p>}
+      </div>
+    </section>
   )
 }
 

@@ -56,6 +56,13 @@ struct VcWidget
      *  when non-zero; ignoring it draws every page superimposed. */
     int page = 0;
 
+    /* Frames. A frame holds other widgets, and may page through them: its
+       children each name their page in @Page. */
+    int pages = 0;          //!< 0 when the frame is not multipage
+    int currentPage = 0;
+    bool showHeader = true; //!< a header-less frame is an invisible grouping
+    bool collapsed = false;
+
     QString background;  //!< "#rrggbb", empty when the widget has no colour set
     QString foreground;
 
