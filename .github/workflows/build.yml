@@ -208,6 +208,22 @@ jobs:
       - name: Smoke test - editing the Virtual Console changes only what it should
         run: ./server/test/vc-edit-smoke.sh orchidlightsd server/test/data/vc-references.qxw
 
+      # The API tests prove the daemon does the right thing when asked; this one
+      # drives the built interface in a real browser and proves it asks. Runs on
+      # the sample too, which carries no widget ids at all -- QLC+ 4 wrote none
+      # -- so the "assign ids" path is exercised on the file QLC+ itself ships.
+      - name: Smoke test - the interface edits a console in a real browser
+        run: |
+          set -euo pipefail
+          # The script skips itself when there is no browser, which is right on
+          # a laptop and useless here: a silent skip in CI is a test that stops
+          # running and nobody notices.
+          command -v google-chrome > /dev/null \
+            || { echo "::error::no Chrome on the runner; the UI test would skip"; exit 1; }
+
+          ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-references.qxw
+          ./server/test/ui-smoke.sh orchidlightsd resources/samples/Sample.qxw
+
       - name: Smoke test - an unresolvable fixture is reported, not swallowed
         run: |
           set -euo pipefail

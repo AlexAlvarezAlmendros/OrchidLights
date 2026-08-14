@@ -63,6 +63,10 @@ struct VcWidget
     bool hasFunction = false;
     quint32 functionId = 0;
 
+    /** What a button does when pressed: Toggle, Flash, Blackout or StopAll.
+     *  Empty for everything else. */
+    QString action;
+
     /* Sliders. QLC+ has three kinds and they do entirely different things:
        Level drives fixture channels directly, Playback rides a function's
        intensity, and Submaster scales other widgets. */

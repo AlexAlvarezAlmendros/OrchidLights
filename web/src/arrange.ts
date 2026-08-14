@@ -19,7 +19,9 @@ export type LayoutRows = number[][]
  * anything it does not mention appended in its geometric place.
  */
 export function resolveRows(children: readonly VcWidget[], stored: LayoutRows | null): Row[] {
-  const byId = new Map(children.map((w) => [w.id, w]))
+  // A widget with no id cannot be named by a layout at all -- QLC+ 4 wrote none
+  // -- so it is never "placed" and always falls through to the geometry below.
+  const byId = new Map(children.filter((w) => w.id !== undefined).map((w) => [w.id as number, w]))
 
   if (!stored || stored.length === 0) {
     return groupIntoRows(children)
@@ -33,12 +35,12 @@ export function resolveRows(children: readonly VcWidget[], stored: LayoutRows | 
       .map((id) => byId.get(id))
       .filter((w): w is VcWidget => w !== undefined)
 
-    for (const widget of widgets) placed.add(widget.id)
+    for (const widget of widgets) placed.add(widget.id as number)
     if (widgets.length > 0) rows.push({ top: rows.length, widgets })
   }
 
   // Whatever the layout never mentioned, in the order the designer left it.
-  const missing = children.filter((w) => !placed.has(w.id))
+  const missing = children.filter((w) => w.id === undefined || !placed.has(w.id))
   if (missing.length > 0) {
     for (const row of groupIntoRows(missing)) {
       rows.push({ top: rows.length, widgets: row.widgets })
@@ -49,7 +51,9 @@ export function resolveRows(children: readonly VcWidget[], stored: LayoutRows | 
 }
 
 export function rowsToLayout(rows: readonly Row[]): LayoutRows {
-  return rows.map((row) => row.widgets.map((w) => w.id))
+  return rows.map((row) =>
+    row.widgets.map((w) => w.id).filter((id): id is number => id !== undefined),
+  )
 }
 
 /**

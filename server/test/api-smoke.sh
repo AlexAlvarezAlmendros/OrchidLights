@@ -63,6 +63,21 @@ assert not unresolved, f"unresolved fixtures: {unresolved}"
 assert all(f["universe"] >= 1 and f["address"] >= 1 for f in fixtures), "addresses must be 1-based"
 ' || fail "GET /fixtures"
 
+# One fixture, with its channels named. Pointing a fader at "Dimmer" rather
+# than at channel 5 is the difference between patching and guessing, and the
+# list route deliberately leaves the names out.
+curl -sf --max-time 5 "$BASE/fixtures/0" | python3 -c '
+import json, sys
+f = json.load(sys.stdin)
+assert f["id"] == 0, f
+assert len(f["channelList"]) == f["channels"], f
+assert [c["index"] for c in f["channelList"]] == list(range(f["channels"])), f
+assert all(c["name"] for c in f["channelList"]), f
+' || fail "GET /fixtures/0"
+
+[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BASE/fixtures/9999")" = "404" ] \
+    || fail "a fixture that does not exist did not answer 404"
+
 # Pick a scene and drive it.
 FUNC=$(curl -sf --max-time 5 "$BASE/functions" | python3 -c '
 import json, sys

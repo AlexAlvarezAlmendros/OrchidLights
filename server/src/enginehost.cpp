@@ -614,6 +614,21 @@ VcPatch::Result EngineHost::removeWidget(const QString &widgetId)
     return result;
 }
 
+VcPatch::Result EngineHost::assignWidgetIds(int &assigned)
+{
+    const VcPatch::Result result = VcPatch::assignIds(m_preserved.sections, assigned);
+
+    if (result.ok && assigned > 0)
+    {
+        /* Level sliders are keyed by widget id, so the ones that just got one
+           become drivable at this point and not before. */
+        teachSliders();
+        m_doc->setModified();
+    }
+
+    return result;
+}
+
 int EngineHost::forgetFixture(quint32 fixtureId)
 {
     const int removed = VcPatch::forgetFixture(m_preserved.sections, fixtureId);

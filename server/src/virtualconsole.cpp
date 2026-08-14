@@ -208,6 +208,14 @@ namespace
             {
                 widget.sliderMode = reader.readElementText().trimmed().toLower();
             }
+            else if (name == QStringLiteral("Action"))
+            {
+                /* What a button does when pressed. Without this an editor can
+                   only ever show it as a toggle -- and a button captioned
+                   BLACKOUT that has been quietly turned into a toggle is a
+                   discovery nobody wants to make from the desk. */
+                widget.action = reader.readElementText().trimmed();
+            }
             else if (name == QStringLiteral("Level"))
             {
                 const QXmlStreamAttributes attributes = reader.attributes();

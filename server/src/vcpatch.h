@@ -101,6 +101,19 @@ namespace VcPatch
      */
     int forgetFixture(QStringList &sections, quint32 fixtureId);
 
+    /**
+     * Give an id to every widget that has none.
+     *
+     * QLC+ 4 wrote no ID attribute at all -- the console shipped with QLC+ to
+     * this day has not one -- and assigned ids in memory on load instead. Every
+     * edit here addresses a widget by id, so those projects are not partly
+     * editable, they are entirely uneditable until this has run.
+     *
+     * Nothing else about the widgets changes, and ids already present are left
+     * exactly as they are.
+     */
+    Result assignIds(QStringList &sections, int &assigned);
+
     /** The lowest widget id the console is not already using. */
     QString nextFreeId(const XmlNode &console);
 }

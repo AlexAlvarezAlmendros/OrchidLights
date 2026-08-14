@@ -610,6 +610,65 @@ QString VcPatch::nextFreeId(const XmlNode &console)
     return QString::number(candidate);
 }
 
+VcPatch::Result VcPatch::assignIds(QStringList &sections, int &assigned)
+{
+    assigned = 0;
+
+    int index = -1;
+    XmlNode console;
+
+    const Result opened = openConsole(sections, index, console);
+    if (opened.ok == false)
+        return opened;
+
+    QStringList existing;
+    collectWidgetIds(console, existing);
+
+    QSet<quint32> used;
+    for (const QString &id : existing)
+    {
+        bool ok = false;
+        const quint32 value = id.toUInt(&ok);
+        if (ok)
+            used.insert(value);
+    }
+
+    /* In document order, so the ids read the way the console is laid out
+       rather than in whatever order a traversal happens to reach them. */
+    quint32 candidate = 0;
+    QVector<XmlNode *> pending;
+    pending.append(&console);
+
+    while (pending.isEmpty() == false)
+    {
+        XmlNode *node = pending.takeFirst();
+
+        for (int i = 0; i < node->children.count(); i++)
+        {
+            XmlNode &child = node->children[i];
+            if (isWidget(child) == false)
+                continue;
+
+            if (child.hasAttribute(AttrId) == false)
+            {
+                while (used.contains(candidate) && candidate < UINT_MAX - 1)
+                    candidate++;
+
+                used.insert(candidate);
+                child.setAttribute(AttrId, QString::number(candidate));
+                assigned++;
+            }
+
+            pending.append(&child);
+        }
+    }
+
+    if (assigned > 0)
+        sections[index] = XmlTree::toXml(console);
+
+    return Result::success();
+}
+
 VcPatch::Result VcPatch::editWidget(QStringList &sections, const QString &widgetId,
                                     const QJsonObject &patch)
 {

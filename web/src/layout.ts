@@ -21,13 +21,29 @@ export interface Geometry {
 
 export interface VcWidget {
   type: string
-  id: number
+
+  /**
+   * Absent on a console written by QLC+ 4, which wrote no ID attribute at all
+   * and assigned them in memory on load -- the console that ships with QLC+ to
+   * this day has not one.
+   *
+   * Every edit addresses a widget by id, so such a project is not partly
+   * editable, it is entirely uneditable until POST /vc/widgets/ids has run.
+   */
+  id?: number
+
   caption?: string
   geometry: Geometry
   background?: string
   foreground?: string
+  page?: number
+  action?: string
   functionId?: number
+  chaserId?: number
+  clockType?: string
+  clockTime?: number
   sliderMode?: string
+  levelChannels?: { fixture: number; channel: number }[]
   low?: number
   high?: number
   value?: number

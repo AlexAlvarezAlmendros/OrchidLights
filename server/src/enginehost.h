@@ -166,6 +166,10 @@ public:
                               const QJsonObject &properties, QString &newId);
     VcPatch::Result removeWidget(const QString &widgetId);
 
+    /** Give an id to every widget that has none, so a project written by QLC+ 4
+     *  can be edited at all. See VcPatch::assignIds. */
+    VcPatch::Result assignWidgetIds(int &assigned);
+
     /** Drop a deleted fixture's references out of the console, so a later
      *  fixture cannot inherit its id and its sliders with it. */
     int forgetFixture(quint32 fixtureId);

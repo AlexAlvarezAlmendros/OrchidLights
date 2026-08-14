@@ -52,6 +52,14 @@ code() {
     curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X "$method" "$BASE$path" "$@"
 }
 
+# This project already has ids on everything, so asking for them is a no-op.
+# Saying "0" rather than silently renumbering is the point: assigning ids is
+# the one edit here that touches widgets nobody selected.
+api POST /vc/widgets/ids | python3 -c "
+import json, sys
+assert json.load(sys.stdin)['assigned'] == 0, 'ids were handed out to widgets that had them'
+" || fail "POST /vc/widgets/ids"
+
 # ---------------------------------------------------------------------------
 # The trap this test exists for: widget 3 is a Label, and the XY pad points at
 # fixture 3. A patch addressed to widget 3 must reach the Label.
@@ -127,7 +135,11 @@ python3 -c "
 import json
 w = json.load(open('$WORK/bound.json'))
 assert w['functionId'] == 0, w
-" || fail "the button did not come back bound to function 0"
+# The action too. Without it in the read model, an editor can only ever show a
+# button as a toggle -- and a button captioned BLACKOUT that has quietly become
+# one is a discovery nobody wants to make from the desk.
+assert w['action'] == 'Flash', w
+" || fail "the button did not come back bound to function 0, flashing"
 
 # The console is only text: it will hold an id nothing answers to, and QLC+
 # loads that without a word.
