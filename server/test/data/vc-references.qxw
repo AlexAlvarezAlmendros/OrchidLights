@@ -1,0 +1,96 @@
+<!DOCTYPE Workspace>
+<!--
+  A project where a widget id and a fixture id collide on purpose.
+
+  Inside the Virtual Console, ID is not a widget's private attribute: an XY pad
+  writes <Fixture ID="3" Head="0"> and a button writes <Function ID="1">. Here
+  the Label is widget 3 and the XY pad points at fixture 3, so any search that
+  matches "the element carrying ID=3" finds the wrong one, and a delete then
+  takes a fixture out of an XY pad instead of removing the widget asked for.
+
+  The level slider drives fixture 1, which is the other half of it: deleting a
+  fixture has to take its references out of the console too, or the next
+  fixture patched inherits the freed id and the sliders aimed at it.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>0</ID>
+   <Name>Par 1</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>1</ID>
+   <Name>Par 2</Name>
+   <Universe>0</Universe>
+   <Address>3</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>2</ID>
+   <Name>Par 3</Name>
+   <Universe>0</Universe>
+   <Address>6</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>3</ID>
+   <Name>Par 4</Name>
+   <Universe>0</Universe>
+   <Address>9</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Function ID="0" Type="Scene" Name="Escena"/>
+  <Function ID="1" Type="Chaser" Name="Secuencia"/>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <Slider Caption="Rojos" ID="1" WidgetStyle="Slider" InvertedAppearance="false">
+    <WindowState Visible="True" X="10" Y="10" Width="55" Height="200"/>
+    <SliderMode ValueDisplayStyle="Exact">Level</SliderMode>
+    <Level LowLimit="0" HighLimit="255" Value="0">
+     <Channel Fixture="1">0</Channel>
+     <Channel Fixture="1">1</Channel>
+    </Level>
+   </Slider>
+   <XYPad Caption="Cabezas" ID="2">
+    <WindowState Visible="True" X="100" Y="10" Width="300" Height="300"/>
+    <Fixture ID="3" Head="0">
+     <Axis ID="X" LowLimit="0" HighLimit="1" Reverse="False"/>
+     <Axis ID="Y" LowLimit="0" HighLimit="1" Reverse="False"/>
+    </Fixture>
+    <Position X="0" Y="0"/>
+   </XYPad>
+   <Label Caption="Escenario" ID="3">
+    <WindowState Visible="True" X="450" Y="10" Width="200" Height="40"/>
+   </Label>
+   <!-- Deliberately id 5, leaving 4 free: a new widget must take the gap. -->
+   <CueList Caption="Cues" ID="5">
+    <WindowState Visible="True" X="700" Y="100" Width="300" Height="200"/>
+    <Chaser>1</Chaser>
+   </CueList>
+  </Frame>
+ </VirtualConsole>
+</Workspace>

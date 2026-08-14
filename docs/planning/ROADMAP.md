@@ -308,18 +308,23 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
   - `@Page` se ignoraba, así que un frame multipágina se dibujaba con **todas las páginas superpuestas**.
   - El `ID` ausente se tomaba como 0, que es un id real de otro widget.
 - [x] `server/test/data/vc-widgets.qxw`, un proyecto que contiene justo las formas que los shows reales aquí no tienen, para que estos cinco no vuelvan.
+- [x] **`server/src/xmltree.*`**: el árbol verbatim, y `WorkspaceLoader` guardando **a través de él** para que cada guardado lo ejercite. Los seis proyectos de la máquina devuelven su Virtual Console carácter a carácter.
+- [x] **`server/src/vcpatch.*`**: alta, baja y edición de widgets como parches dirigidos. Caption, geometría y página; y lo que el widget *hace*: función de un botón con su acción, modo y canales de un fader, chaser de una cue list, tipo y cuenta atrás de un reloj.
+- [x] `POST` / `PATCH` / `DELETE /api/v1/vc/widgets`. Crear y editar recorren **el mismo camino**, así que no se puede crear un widget en un estado que una edición habría rechazado.
+- [x] Verificado sobre el show real (203 nodos, 33 widgets, con su mapeo MIDI y sus fuentes): pedir dos cambios cambia **exactamente esos dos atributos**, y un alta seguida de una baja deja el fichero idéntico.
 
-Crear, editar, eliminar y configurar. Hoy se renderizan cinco, en solo lectura.
+> **La trampa que costó el diseño de la búsqueda.** Dentro del Virtual Console, `ID` no es un atributo privado del widget: un XY pad escribe `<Fixture ID="3" Head="0">` y un botón `<Function ID="1">`. Buscar "el elemento que lleva ID=3" encuentra el equivocado, y **borrar quitaría un fixture de un XY pad en vez del widget pedido**. La búsqueda desciende solo por etiquetas de widget. `server/test/data/vc-references.qxw` hace colisionar a propósito el widget 3 con el fixture 3 para que no vuelva.
 
-- [ ] Control completo: `cuelist`, `xypad`, `clock`, `audiotriggers`,
-      `animation` (control de RGB Matrix), `soloframe` con su semántica de solo,
-      `slider` en modos playback y submaster, paginación de `frame`.
-- [ ] Edición: añadir y borrar widgets, asignarles funciones y canales,
-      apariencia, y las propiedades específicas de cada tipo.
-- [ ] Controles externos: mapeo de entrada (MIDI/OSC) por widget.
-- [ ] La disposición sigue en `<OrchidLightsLayout>`; **crear widgets sí exige
-      escribir `<VirtualConsole>`**, y entonces hay que modelarlo por completo o
-      se pierde lo que no se modele. Es el punto de mayor riesgo del proyecto.
+> **Referencias colgantes cerradas.** Borrar un fixture ahora lo borra también del console (`<Channel Fixture>` de los faders, `<Fixture ID>` de los XY pads). QLC+ tolera la referencia muerta, pero `Doc` reparte el id libre más bajo: el siguiente fixture heredaba el id **y los faders que apuntaban al anterior**.
+
+> Y validación que el motor no hace: una función que no existe, un canal más allá del último del fixture, una escena donde una cue list necesita un chaser. Todo eso carga en QLC+ sin una palabra y produce un control que se ve bien y no hace nada.
+
+- [ ] Control completo: `xypad`, `audiotriggers`, `animation` (control de RGB
+      Matrix), `soloframe` con su semántica de solo, `slider` en modos playback y
+      submaster, paginación de `frame`.
+- [ ] Interfaz de edición en el navegador sobre esta API.
+- [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
+      (MIDI/OSC) por widget.
 
 ### F7 — Show manager y previsualización 2D
 

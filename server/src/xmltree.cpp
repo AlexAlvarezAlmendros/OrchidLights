@@ -99,40 +99,6 @@ XmlNode &XmlNode::childOrCreate(const QString &childName)
     return children.last();
 }
 
-XmlNode *XmlNode::findById(const QString &id)
-{
-    if (attribute(QStringLiteral("ID")) == id)
-        return this;
-
-    for (XmlNode &node : children)
-    {
-        if (XmlNode *found = node.findById(id))
-            return found;
-    }
-
-    return nullptr;
-}
-
-bool XmlNode::removeById(const QString &id)
-{
-    for (int i = 0; i < children.count(); i++)
-    {
-        if (children.at(i).attribute(QStringLiteral("ID")) == id)
-        {
-            children.remove(i);
-            return true;
-        }
-    }
-
-    for (XmlNode &node : children)
-    {
-        if (node.removeById(id))
-            return true;
-    }
-
-    return false;
-}
-
 namespace
 {
     void readNode(QXmlStreamReader &reader, XmlNode &node)
@@ -209,17 +175,4 @@ QString XmlTree::toXml(const XmlNode &root)
     writeNode(writer, root);
 
     return xml;
-}
-
-QStringList XmlTree::collectIds(const XmlNode &root)
-{
-    QStringList ids;
-
-    if (root.hasAttribute(QStringLiteral("ID")))
-        ids << root.attribute(QStringLiteral("ID"));
-
-    for (const XmlNode &child : root.children)
-        ids << collectIds(child);
-
-    return ids;
 }

@@ -202,6 +202,12 @@ jobs:
       - name: Smoke test - the XML tree round-trips every project
         run: ./server/test/xmltree-roundtrip.sh orchidlightsd
 
+      # And what editing does to it: only the attributes asked for change, and
+      # a widget id is never confused with the fixture id an XY pad shares it
+      # with.
+      - name: Smoke test - editing the Virtual Console changes only what it should
+        run: ./server/test/vc-edit-smoke.sh orchidlightsd server/test/data/vc-references.qxw
+
       - name: Smoke test - an unresolvable fixture is reported, not swallowed
         run: |
           set -euo pipefail

@@ -203,6 +203,18 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget)
            that would do nothing. */
         json["controllable"] = (widget.sliderMode == QStringLiteral("level")
                                 && widget.levelChannels.isEmpty() == false);
+
+        /* The channels themselves, so an editor can show what a fader is
+           actually holding and send the list back changed. */
+        QJsonArray channels;
+        for (const auto &channel : widget.levelChannels)
+        {
+            QJsonObject entry;
+            entry["fixture"] = qint64(channel.first);
+            entry["channel"] = qint64(channel.second);
+            channels.append(entry);
+        }
+        json["levelChannels"] = channels;
     }
 
     if (widget.children.isEmpty() == false)

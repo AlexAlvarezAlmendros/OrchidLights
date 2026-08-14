@@ -26,6 +26,7 @@
 #include "workspaceloader.h"
 #include "consolelayout.h"
 #include "levelsource.h"
+#include "vcpatch.h"
 
 class Doc;
 
@@ -146,8 +147,28 @@ public:
     QString pluginPath() const { return m_pluginPath; }
 
     /** Raw XML of the project sections this daemon does not model. The
-     *  Virtual Console is parsed out of here for display, read only. */
+     *  Virtual Console is parsed out of here for display. */
     QStringList preservedSections() const { return m_preserved.sections; }
+
+    /**
+     * Editing the Virtual Console.
+     *
+     * These patch the preserved XML rather than regenerating it -- see VcPatch
+     * for why that is the only safe direction -- and then put the engine back
+     * in step with what changed: a slider that appeared starts driving DMX, one
+     * that went stops, and the console layout forgets the ids that are gone.
+     *
+     * Nothing here touches disk. The change lives in memory until the project
+     * is saved, exactly like every other edit the API makes.
+     */
+    VcPatch::Result editWidget(const QString &widgetId, const QJsonObject &patch);
+    VcPatch::Result addWidget(const QString &type, const QString &parentId,
+                              const QJsonObject &properties, QString &newId);
+    VcPatch::Result removeWidget(const QString &widgetId);
+
+    /** Drop a deleted fixture's references out of the console, so a later
+     *  fixture cannot inherit its id and its sliders with it. */
+    int forgetFixture(quint32 fixtureId);
 
     /** Anything the engine could not resolve while loading the project. */
     QString projectErrors() const;
@@ -155,6 +176,15 @@ public:
 private:
     /** Read the project's level sliders and hand them to the level source. */
     void teachSliders();
+
+    /** Zero the DMX channels a set of level sliders was holding, and take their
+     *  ids out of the saved layout. Both are cleanup after a widget goes. */
+    void releaseLevels(const QList<LevelSource::Channel> &channels);
+    void forgetLayoutIds(const QStringList &widgetIds);
+
+    /** Check that the functions and fixtures a widget patch names actually
+     *  exist. The console itself is only text and will hold anything. */
+    VcPatch::Result checkReferences(const QString &widgetId, const QJsonObject &patch) const;
 
     Doc *m_doc = nullptr;
     LevelSource *m_levels = nullptr;
