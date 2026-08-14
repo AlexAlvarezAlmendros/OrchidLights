@@ -398,7 +398,8 @@ export function App() {
           {framePages > 1 &&
             Array.from({ length: framePages }, (_, i) => (
               <button
-                key={`p${i}`}
+                // biome-ignore lint/suspicious/noArrayIndexKey: the index is the page
+                key={`page-${i}`}
                 type="button"
                 onClick={() => setFramePage(i)}
                 aria-pressed={i === framePage}
@@ -844,6 +845,8 @@ function NestedFrame({
             <nav className="frame-pages">
               {Array.from({ length: pages }, (_, index) => (
                 <button
+                  // The page number is the identity: a fixed list, in order.
+                  // biome-ignore lint/suspicious/noArrayIndexKey: the index is the page
                   key={index}
                   type="button"
                   aria-pressed={index === page}
