@@ -355,7 +355,7 @@ void ApiServer::registerRoutes()
 
     /* Read only, and parsed out of the very XML we preserve, so serving it
        cannot disturb what goes back into the file. */
-    m_server->route("/api/v1/vc", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {
+    m_server->route("/api/v1/vc", QHttpServerRequest::Method::Get, [this, doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
 
@@ -366,7 +366,7 @@ void ApiServer::registerRoutes()
                              QStringLiteral("This project has no Virtual Console"));
         }
 
-        return QHttpServerResponse(JsonView::vcWidget(root));
+        return QHttpServerResponse(JsonView::vcWidget(root, doc));
     });
 
     /* Editing the console. These reach the same preserved XML the route above
@@ -412,7 +412,7 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/vc/widgets/<arg>", QHttpServerRequest::Method::Patch,
-                    [this, denied](const QString &widgetId, const QHttpServerRequest &request) {
+                    [this, doc, denied](const QString &widgetId, const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
 
@@ -442,7 +442,7 @@ void ApiServer::registerRoutes()
             return QHttpServerResponse(QJsonObject());
 
         const VcWidget *patched = findWidget(root, widgetId.toUInt());
-        return QHttpServerResponse(patched ? JsonView::vcWidget(*patched) : QJsonObject());
+        return QHttpServerResponse(patched ? JsonView::vcWidget(*patched, doc) : QJsonObject());
     });
 
     m_server->route("/api/v1/vc/widgets/<arg>", QHttpServerRequest::Method::Delete,

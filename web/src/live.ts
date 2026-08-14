@@ -16,6 +16,7 @@ export interface LiveHandlers {
   onConnection: (state: Connection) => void
   /** Another client moved a fader; ours needs to follow. */
   onSlider?: (id: number, value: number) => void
+  onPad?: (id: number, x: number, y: number) => void
   onUniverse?: (universe: number, channels: Uint8Array) => void
 }
 
@@ -69,6 +70,9 @@ export class Live {
         case 'speeddial':
           this.handlers.onSlider?.(message.id, message.value)
           break
+        case 'xypad':
+          this.handlers.onPad?.(message.id, message.x, message.y)
+          break
       }
     })
 
@@ -99,6 +103,12 @@ export class Live {
 
   setSlider(id: number, value: number): void {
     this.send({ type: 'slider', id, value })
+  }
+
+  /** Aim an XY pad, 0..1 on each axis. What that means for each head is the
+   *  project's business, not the interface's. */
+  setPad(id: number, x: number, y: number): void {
+    this.send({ type: 'xypad', id, x, y })
   }
 
   /**

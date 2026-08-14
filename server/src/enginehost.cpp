@@ -183,6 +183,26 @@ void EngineHost::teachSliders()
             m_levels->defineSlider(widget->id, channels);
         }
 
+        if (widget->padHeads.isEmpty() == false)
+        {
+            QList<LevelSource::PadHead> heads;
+            for (const VcWidget::PadHead &head : widget->padHeads)
+            {
+                LevelSource::PadHead entry;
+                entry.fixtureId = head.fixtureId;
+                entry.head = head.head;
+                entry.xMin = head.xMin;
+                entry.xMax = head.xMax;
+                entry.yMin = head.yMin;
+                entry.yMax = head.yMax;
+                entry.xReverse = head.xReverse;
+                entry.yReverse = head.yReverse;
+                heads.append(entry);
+            }
+
+            m_levels->definePad(widget->id, heads);
+        }
+
         for (const VcWidget &child : widget->children)
             pending.append(&child);
     }

@@ -1,0 +1,77 @@
+<!DOCTYPE Workspace>
+<!--
+  Three moving heads and an XY pad that steers all of them.
+
+  Two are MAC500s in DMX1, which has coarse pan and tilt and no fine channels:
+  the position is computed in 16 bits and only the top byte reaches the wire.
+  The third is a DMX2, which has both, so the 16-bit arithmetic is not a detail
+  nobody can see: it is the difference between 512 positions and 65536.
+
+  Head 1 has its X axis reversed and its tilt limited to the top half, which is
+  how a lamp hung upside down over the audience is kept out of their eyes. If
+  the limits were decoration, both heads would answer the same and the test
+  would not notice.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Martin</Manufacturer>
+   <Model>MAC500</Model>
+   <Mode>DMX1</Mode>
+   <ID>0</ID>
+   <Name>Spot izquierda</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Martin</Manufacturer>
+   <Model>MAC500</Model>
+   <Mode>DMX1</Mode>
+   <ID>1</ID>
+   <Name>Spot derecha</Name>
+   <Universe>0</Universe>
+   <Address>12</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Martin</Manufacturer>
+   <Model>MAC500</Model>
+   <Mode>DMX2</Mode>
+   <ID>2</ID>
+   <Name>Spot centro</Name>
+   <Universe>0</Universe>
+   <Address>24</Address>
+   <Channels>14</Channels>
+  </Fixture>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <XYPad Caption="Spots" ID="1">
+    <WindowState Visible="True" X="10" Y="10" Width="300" Height="300"/>
+    <Fixture ID="0" Head="0">
+     <Axis ID="X" LowLimit="0" HighLimit="1" Reverse="False"/>
+     <Axis ID="Y" LowLimit="0" HighLimit="1" Reverse="False"/>
+    </Fixture>
+    <Fixture ID="1" Head="0">
+     <Axis ID="X" LowLimit="0" HighLimit="1" Reverse="True"/>
+     <Axis ID="Y" LowLimit="0.5" HighLimit="1" Reverse="False"/>
+    </Fixture>
+    <Fixture ID="2" Head="0">
+     <Axis ID="X" LowLimit="0" HighLimit="1" Reverse="False"/>
+     <Axis ID="Y" LowLimit="0" HighLimit="1" Reverse="False"/>
+    </Fixture>
+    <Pan Position="0"/>
+    <Tilt Position="0"/>
+   </XYPad>
+  </Frame>
+ </VirtualConsole>
+</Workspace>

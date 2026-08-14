@@ -69,15 +69,54 @@ public:
 
     bool knows(quint32 sliderId) const;
 
+    /**
+     * One head an XY pad steers, with the slice of travel it may use.
+     *
+     * Limits are fractions of the head's full range. The reverse flags are the
+     * project's, not a rendering choice: a lamp rigged upside down is aimed by
+     * inverting an axis, and ignoring that points it at the ceiling.
+     */
+    struct PadHead
+    {
+        quint32 fixtureId = 0;
+        int head = 0;
+        double xMin = 0.0, xMax = 1.0;
+        double yMin = 0.0, yMax = 1.0;
+        bool xReverse = false;
+        bool yReverse = false;
+    };
+
+    /** Tell the source which heads a pad steers. */
+    void definePad(quint32 padId, const QList<PadHead> &heads);
+
+    /** Park a new position for a pad, 0..1 on each axis. */
+    void setPosition(quint32 padId, double x, double y);
+
+    /** Last position set for a pad, for clients joining late. */
+    QPair<double, double> position(quint32 padId) const;
+
+    bool knowsPad(quint32 padId) const;
+
     void writeDMX(MasterTimer *timer, QList<Universe *> universes) override;
 
 private:
+    /** Get or make the fader for a universe, replacing one held from before
+     *  the universes were rebuilt. Call with the mutex held. */
+    QSharedPointer<GenericFader> faderFor(quint32 universeId, Universe *universe);
+
+    /** Aim the heads every dirty pad steers. Call with the mutex held. */
+    void writePads(const QList<Universe *> &universes);
+
     Doc *m_doc = nullptr;
 
     mutable QMutex m_mutex;
     QHash<quint32, QList<Channel>> m_sliders;
     QHash<quint32, uchar> m_values;
     QHash<quint32, bool> m_dirty;
+
+    QHash<quint32, QList<PadHead>> m_pads;
+    QHash<quint32, QPair<double, double>> m_positions;
+    QHash<quint32, bool> m_padsDirty;
 
     /** One fader per universe, kept alive so values hold between ticks rather
      *  than being re-requested and losing their place. */

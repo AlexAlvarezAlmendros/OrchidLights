@@ -296,6 +296,42 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         return;
     }
 
+    if (type == QStringLiteral("xypad"))
+    {
+        const quint32 id = quint32(message.value("id").toInt(-1));
+        const double x = message.value("x").toDouble(-1);
+        const double y = message.value("y").toDouble(-1);
+
+        if (x < 0 || x > 1 || y < 0 || y > 1 || m_engine->levels()->knowsPad(id) == false)
+        {
+            QJsonObject error;
+            error["type"] = "error";
+            error["error"] = QStringLiteral("No such XY pad, or a position outside 0..1");
+            sendJson(socket, error);
+            return;
+        }
+
+        m_engine->levels()->setPosition(id, x, y);
+
+        /* Echoed to the other clients only, for the same reason a fader is:
+           the one that moved it is already showing the new position, and
+           bouncing it back makes a drag stutter. */
+        QJsonObject update;
+        update["type"] = "xypad";
+        update["id"] = qint64(id);
+        update["x"] = x;
+        update["y"] = y;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(update).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated && it.key() != socket)
+                it.key()->sendTextMessage(payload);
+        }
+        return;
+    }
+
     if (type == QStringLiteral("cuelist"))
     {
         /* A cue list is a chaser plus transport. The action goes to the chaser
