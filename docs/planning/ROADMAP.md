@@ -346,6 +346,8 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 - [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
       (MIDI/OSC) por widget.
 
+> **Dos bugs que el mapeo del submaster destapó, arreglados antes de tocarlo.** Un `Universe` guarda su propia referencia a cada fader que reparte, así que soltar la nuestra **no lo desregistra**: cada edición de la consola dejaba uno huérfano asegurando su último valor, y como los faders mezclan HTP, el slider ya no podía bajar el canal nunca más. Editar un caption a mitad de show dejaba un foco arriba hasta recargar el proyecto. Y `forgetSliders` borraba los valores, así que arreglar lo primero habría hecho que cada edición apagara el rig. Ahora los faders se devuelven en el hilo del timer y los valores sobreviven, reafirmándose en el siguiente tick.
+
 ### F7 — Show manager y previsualización 2D
 
 - [ ] Timeline multipista.

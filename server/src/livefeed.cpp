@@ -281,6 +281,26 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             list.append(int(id) + 1);
         ack["universes"] = list;
         sendJson(socket, ack);
+
+        /* And what the universe is holding right now.
+         *
+         * Frames are only sent when a universe is written, so a client that
+         * joins during a static look -- which is most of a show -- would sit
+         * looking at nothing until somebody moved something. */
+        if (add)
+        {
+            const QList<Universe *> universes = m_engine->doc()->inputOutputMap()->universes();
+
+            for (quint32 id : client.universes)
+            {
+                if (int(id) >= universes.count())
+                    continue;
+
+                const QByteArray *values = universes.at(int(id))->postGMValues();
+                if (values != nullptr)
+                    socket->sendBinaryMessage(framePayload(id, *values));
+            }
+        }
         return;
     }
 
@@ -502,6 +522,22 @@ void LiveFeed::onDisconnected()
     socket->deleteLater();
 }
 
+QByteArray LiveFeed::framePayload(quint32 universeId, const QByteArray &values)
+{
+    /* Two bytes of 1-based universe id, little endian, then the channel
+       values. Binary because 512 bytes per universe as a JSON array of numbers
+       is roughly ten times the payload for the same information. */
+    QByteArray packet;
+    packet.reserve(2 + values.size());
+
+    const quint16 wireId = quint16(universeId + 1);
+    packet.append(char(wireId & 0xFF));
+    packet.append(char((wireId >> 8) & 0xFF));
+    packet.append(values);
+
+    return packet;
+}
+
 void LiveFeed::onUniverseWritten(quint32 index, const QByteArray &data)
 {
     /* Overwriting is the coalescing: nobody needs the frame before last. */
@@ -641,16 +677,7 @@ void LiveFeed::flush()
 
     for (auto frame = m_pending.constBegin(); frame != m_pending.constEnd(); ++frame)
     {
-        /* Two bytes of 1-based universe id, little endian, then the channel
-           values. Binary because 512 bytes per universe as a JSON array of
-           numbers is roughly ten times the payload for the same information. */
-        QByteArray packet;
-        packet.reserve(2 + frame.value().size());
-
-        const quint16 wireId = quint16(frame.key() + 1);
-        packet.append(char(wireId & 0xFF));
-        packet.append(char((wireId >> 8) & 0xFF));
-        packet.append(frame.value());
+        const QByteArray packet = framePayload(frame.key(), frame.value());
 
         for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
         {

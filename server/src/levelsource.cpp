@@ -47,6 +47,12 @@ void LevelSource::defineSlider(quint32 sliderId, const QList<Channel> &channels)
     m_sliders.insert(sliderId, channels);
     if (m_values.contains(sliderId) == false)
         m_values.insert(sliderId, 0);
+
+    /* Re-assert on the next tick. The console was just re-read, so the fader
+       this slider had is gone: without this the value is remembered but
+       nothing puts it back on the wire, and every edit would drop the rig to
+       black until each fader was touched again. */
+    m_dirty.insert(sliderId, true);
 }
 
 void LevelSource::definePlayback(quint32 sliderId, quint32 functionId)
@@ -56,6 +62,8 @@ void LevelSource::definePlayback(quint32 sliderId, quint32 functionId)
     m_playbacks.insert(sliderId, functionId);
     if (m_values.contains(sliderId) == false)
         m_values.insert(sliderId, 0);
+
+    m_dirty.insert(sliderId, true);
 }
 
 void LevelSource::definePad(quint32 padId, const QList<PadHead> &heads)
@@ -65,6 +73,8 @@ void LevelSource::definePad(quint32 padId, const QList<PadHead> &heads)
     m_pads.insert(padId, heads);
     if (m_positions.contains(padId) == false)
         m_positions.insert(padId, qMakePair(0.0, 0.0));
+
+    m_padsDirty.insert(padId, true);
 }
 
 void LevelSource::setPosition(quint32 padId, double x, double y)
@@ -90,13 +100,26 @@ bool LevelSource::knowsPad(quint32 padId) const
     return m_pads.contains(padId);
 }
 
+void LevelSource::forgetEverything()
+{
+    forgetSliders();
+
+    QMutexLocker locker(&m_mutex);
+    m_values.clear();
+    m_positions.clear();
+}
+
 void LevelSource::forgetSliders()
 {
     QMutexLocker locker(&m_mutex);
 
     m_sliders.clear();
-    m_values.clear();
     m_dirty.clear();
+
+    /* The values stay. This runs after every edit to the console, and a
+       rename should not black out a fader that is holding a look -- which is
+       what re-seeding them to zero did. A value whose slider does not come
+       back is harmless: nothing reads it. */
 
     /* The overrides belong to functions in a document that is about to be
        replaced. Dropping the ids here means the next slider asks for its own
@@ -105,12 +128,27 @@ void LevelSource::forgetSliders()
     m_overrides.clear();
 
     m_pads.clear();
-    m_positions.clear();
     m_padsDirty.clear();
 
-    /* The faders belong to universes that are about to be rebuilt. Dropping the
-       references here lets them go with the old document instead of writing
-       into a universe that no longer means what it did. */
+    /* Handed back rather than merely dropped.
+     *
+     * A Universe keeps its own reference to every fader it hands out
+     * (universe.cpp:237), so letting go of ours does not unregister it: it
+     * carries on asserting the channels it was last told to hold, for the life
+     * of the document. Since this runs after every edit to the console, each
+     * edit stranded one -- and because faders merge highest-takes-precedence, a
+     * slider could never come back down below its pre-edit value. Editing a
+     * caption mid-show left a lamp up until the project was reloaded.
+     *
+     * Dismissing is the universe's business and belongs on the timer thread,
+     * so the pairs are parked and returned in writeDMX. */
+    for (auto it = m_faders.constBegin(); it != m_faders.constEnd(); ++it)
+    {
+        Universe *universe = m_faderUniverses.value(it.key());
+        if (universe != nullptr && it.value().isNull() == false)
+            m_dismissed.append(qMakePair(universe, it.value()));
+    }
+
     m_faders.clear();
     m_faderUniverses.clear();
 }
@@ -294,6 +332,19 @@ QSharedPointer<GenericFader> LevelSource::faderFor(quint32 universeId, Universe 
 void LevelSource::writeDMX(MasterTimer *timer, QList<Universe *> universes)
 {
     QMutexLocker locker(&m_mutex);
+
+    /* Faders let go of since the last tick. Only those belonging to a universe
+       that still exists: one that has been destroyed took its faders with it,
+       and dismissing through a dangling pointer is worse than leaking. */
+    if (m_dismissed.isEmpty() == false)
+    {
+        for (const auto &entry : m_dismissed)
+        {
+            if (universes.contains(entry.first))
+                entry.first->dismissFader(entry.second);
+        }
+        m_dismissed.clear();
+    }
 
     writePads(universes);
     writePlaybacks(timer);

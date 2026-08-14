@@ -71,7 +71,17 @@ public:
      */
     void definePlayback(quint32 sliderId, quint32 functionId);
 
+    /**
+     * Forget what the console said, keeping where the operator left it.
+     *
+     * Called after every edit to the Virtual Console, which is why the values
+     * survive: a rename should not black out a fader that is holding a look.
+     */
     void forgetSliders();
+
+    /** Forget everything, values included. For a different project, where the
+     *  ids mean something else entirely. */
+    void forgetEverything();
 
     /** Park a new value for a slider. Applied on the next engine tick. */
     void setValue(quint32 sliderId, uchar value);
@@ -147,6 +157,17 @@ private:
      *  reused when one is added or removed, so the id alone does not say
      *  whether a cached fader is still connected to anything. */
     QHash<quint32, Universe *> m_faderUniverses;
+
+    /**
+     * Faders let go of but not yet handed back.
+     *
+     * A Universe keeps its own reference to every fader it hands out, so
+     * dropping ours does not unregister it: it keeps asserting its channels
+     * for the life of the document. Dismissing is the universe's business and
+     * belongs on the timer thread, so the pairs are parked here and returned
+     * in writeDMX.
+     */
+    QVector<QPair<Universe *, QSharedPointer<GenericFader>>> m_dismissed;
 };
 
 #endif // LEVELSOURCE_H
