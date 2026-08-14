@@ -277,3 +277,17 @@ bool VirtualConsole::parse(const QStringList &preservedSections, VcWidget &root)
 
     return false;
 }
+
+const VcWidget *VirtualConsole::find(const VcWidget &root, quint32 id)
+{
+    if (root.hasId && root.id == id)
+        return &root;
+
+    for (const VcWidget &child : root.children)
+    {
+        if (const VcWidget *found = find(child, id))
+            return found;
+    }
+
+    return nullptr;
+}

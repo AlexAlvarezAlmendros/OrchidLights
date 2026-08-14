@@ -69,6 +69,21 @@ namespace
                                         "user data directory."));
     }
 
+    /** The widget carrying this id, anywhere in the console. */
+    const VcWidget *findWidget(const VcWidget &node, quint32 id)
+    {
+        if (node.hasId && node.id == id)
+            return &node;
+
+        for (const VcWidget &child : node.children)
+        {
+            if (const VcWidget *found = findWidget(child, id))
+                return found;
+        }
+
+        return nullptr;
+    }
+
     /** A command was queued on the engine. Deliberately carries no state: see
         the note on the function routes. */
     QJsonObject acknowledge(const Function *function, const QString &requested)
@@ -315,6 +330,83 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(JsonView::vcWidget(root));
     });
 
+    /* Editing the console. These reach the same preserved XML the route above
+       reads, and they patch it -- see VcPatch. Nothing here writes to disk;
+       the project is saved by POST /api/v1/project/save, like every other
+       edit. */
+    m_server->route("/api/v1/vc/widgets", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        QString newId;
+        const VcPatch::Result result = m_engine->addWidget(body.value("type").toString(),
+                                                           body.value("parent").toString(),
+                                                           body, newId);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = newId;
+        response["type"] = body.value("type").toString().toLower();
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/vc/widgets/<arg>", QHttpServerRequest::Method::Patch,
+                    [this, denied](const QString &widgetId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        widgetId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Widget id must be a number"));
+
+        const QJsonObject patch = QJsonDocument::fromJson(request.body()).object();
+
+        const VcPatch::Result result = m_engine->editWidget(widgetId, patch);
+        if (result.ok == false)
+        {
+            /* "No widget with id" is the only one of these that is about the
+               thing not existing; the rest are about the request. */
+            return jsonError(result.error.startsWith(QStringLiteral("No widget"))
+                                 ? StatusCode::NotFound
+                                 : StatusCode::BadRequest,
+                             result.error);
+        }
+
+        /* Answer with the widget as it now stands, read back out of the XML
+           rather than echoed from the request -- so the response says what was
+           actually stored, not what was asked for. */
+        VcWidget root;
+        if (VirtualConsole::parse(m_engine->preservedSections(), root) == false)
+            return QHttpServerResponse(QJsonObject());
+
+        const VcWidget *patched = findWidget(root, widgetId.toUInt());
+        return QHttpServerResponse(patched ? JsonView::vcWidget(*patched) : QJsonObject());
+    });
+
+    m_server->route("/api/v1/vc/widgets/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, denied](const QString &widgetId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        widgetId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Widget id must be a number"));
+
+        const VcPatch::Result result = m_engine->removeWidget(widgetId);
+        if (result.ok == false)
+            return jsonError(StatusCode::NotFound, result.error);
+
+        QJsonObject body;
+        body["removed"] = widgetId;
+        return QHttpServerResponse(body);
+    });
+
     /* What a universe can be patched to. Without this the operator would be
        guessing at plugin and line names, which the writer then refuses. */
     /* The fixture library. 1735 definitions is far too many to hand over in one
@@ -481,8 +573,14 @@ void ApiServer::registerRoutes()
         if (result.ok == false)
             return jsonError(StatusCode::NotFound, result.error);
 
+        /* And take the fixture out of the Virtual Console with it. Doc hands
+           out the lowest free id, so leaving the references behind means the
+           next fixture patched inherits this one's sliders and XY pad heads. */
+        const int forgotten = m_engine->forgetFixture(id);
+
         QJsonObject body;
         body["removed"] = qint64(id);
+        body["consoleReferencesRemoved"] = forgotten;
         return QHttpServerResponse(body);
     });
 

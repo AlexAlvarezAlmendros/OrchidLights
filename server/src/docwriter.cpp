@@ -435,16 +435,15 @@ DocWriter::Result DocWriter::removeFixture(Doc *doc, quint32 fixtureId)
     if (doc->deleteFixture(fixtureId) == false)
         return Result::failure(QStringLiteral("The engine refused to delete \"%1\"").arg(name));
 
-    /* Note what is deliberately NOT cleaned up here: the preserved
-       <VirtualConsole> XML may still name this fixture, in a slider's channel
-       list or an XY pad's fixture list. We do not model that section, so we
-       cannot edit it without risking the rest of it -- and QLC+ tolerates the
-       dangling reference, dropping the channel on load.
+    /* The console may still name this fixture, in a slider's channel list or an
+       XY pad's heads. That is not cleaned up here, because this writer only
+       knows about Doc -- the caller does it, with VcPatch::forgetFixture, over
+       the preserved XML.
      *
-     * The danger is id reuse: Doc hands out the lowest free id, so a later
-       fixture can inherit this one's id and silently acquire whatever the
-       console still had pointed at it. Modelling the Virtual Console, in F6,
-       is what finally closes this. */
+     * It does have to happen, though. QLC+ tolerates the dangling reference and
+       drops the channel on load, but Doc hands out the lowest free id: a later
+       fixture inherits this one's id, and with it whatever the console still
+       had pointed at it. */
 
     doc->setModified();
     return Result::success();

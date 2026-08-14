@@ -10,6 +10,7 @@ add_executable(${module_name}
     fixturelibrary.cpp fixturelibrary.h
     installpaths.cpp installpaths.h
     virtualconsole.cpp virtualconsole.h
+    vcpatch.cpp vcpatch.h
     jsonview.cpp jsonview.h
     levelsource.cpp levelsource.h
     livefeed.cpp livefeed.h

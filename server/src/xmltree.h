@@ -69,12 +69,6 @@ struct XmlNode
 
     /** Child with this name, created at the end if missing. */
     XmlNode &childOrCreate(const QString &name);
-
-    /** Depth-first search for the element carrying ID="id". */
-    XmlNode *findById(const QString &id);
-
-    /** Remove the first descendant carrying ID="id". True when one went. */
-    bool removeById(const QString &id);
 };
 
 namespace XmlTree
@@ -84,10 +78,6 @@ namespace XmlTree
 
     /** Serialise back to a fragment, in the same shape the reader accepts. */
     QString toXml(const XmlNode &root);
-
-    /** Every ID attribute in the tree, so a new widget can be given one that
-     *  is free. QLC+ hands out the lowest unused id. */
-    QStringList collectIds(const XmlNode &root);
 }
 
 #endif // XMLTREE_H

@@ -111,6 +111,9 @@ namespace VirtualConsole
      * perfectly normal -- plenty of shows are driven from the function list.
      */
     bool parse(const QStringList &preservedSections, VcWidget &root);
+
+    /** The widget carrying this id, anywhere in the tree, or nullptr. */
+    const VcWidget *find(const VcWidget &root, quint32 id);
 }
 
 #endif // VIRTUALCONSOLE_H

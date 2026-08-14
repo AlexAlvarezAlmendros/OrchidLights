@@ -17,8 +17,11 @@
   limitations under the License.
 */
 
+#include <QJsonObject>
+#include <QJsonArray>
 #include <QFileInfo>
 #include <QDir>
+#include <QSet>
 
 #include "enginehost.h"
 #include "installpaths.h"
@@ -36,6 +39,8 @@
 #include "inputoutputmap.h"
 #include "mastertimer.h"
 #include "function.h"
+#include "universe.h"
+#include "fixture.h"
 #include "doc.h"
 
 EngineHost::EngineHost(QObject *parent)
@@ -368,6 +373,258 @@ void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
         m_preserved.sections.append(ConsoleLayout::toXml(merged));
 
     m_doc->setModified();
+}
+
+void EngineHost::releaseLevels(const QList<LevelSource::Channel> &channels)
+{
+    if (channels.isEmpty())
+        return;
+
+    /* Same reasoning as deleting a fixture: whatever the slider was holding
+       stays latched in the universe buffer once the slider is gone, and with
+       nothing left to move it the lamp simply stays where it was. The one
+       control that could have turned it off is the thing being deleted. */
+    QList<Universe *> universes = m_doc->inputOutputMap()->claimUniverses();
+
+    for (const LevelSource::Channel &channel : channels)
+    {
+        const Fixture *fixture = m_doc->fixture(channel.first);
+        if (fixture == nullptr)
+            continue;
+
+        const quint32 universeId = fixture->universe();
+        if (int(universeId) >= universes.count())
+            continue;
+
+        universes.at(int(universeId))->write(int(fixture->address() + channel.second), 0, true);
+    }
+
+    m_doc->inputOutputMap()->releaseUniverses(true);
+}
+
+void EngineHost::forgetLayoutIds(const QStringList &widgetIds)
+{
+    if (widgetIds.isEmpty())
+        return;
+
+    QSet<quint32> gone;
+    for (const QString &id : widgetIds)
+    {
+        bool ok = false;
+        const quint32 value = id.toUInt(&ok);
+        if (ok)
+            gone.insert(value);
+    }
+
+    QVector<ConsoleLayout::Page> pages;
+    if (ConsoleLayout::parse(m_preserved.sections, pages) == false)
+        return;
+
+    bool changed = false;
+
+    for (ConsoleLayout::Page &page : pages)
+    {
+        for (int row = page.rows.count() - 1; row >= 0; row--)
+        {
+            QVector<quint32> &widgets = page.rows[row];
+
+            for (int i = widgets.count() - 1; i >= 0; i--)
+            {
+                if (gone.contains(widgets.at(i)))
+                {
+                    widgets.remove(i);
+                    changed = true;
+                }
+            }
+
+            if (widgets.isEmpty())
+                page.rows.remove(row);
+        }
+    }
+
+    if (changed)
+        setLayout(pages);
+}
+
+VcPatch::Result EngineHost::checkReferences(const QString &widgetId, const QJsonObject &patch) const
+{
+    /* The console is a text file: it will happily hold a function id that was
+       deleted last month, and QLC+ loads it without a word, leaving a button
+       that does nothing at all. Checking here is the difference between an
+       error at the moment of the edit and a control that fails during a show. */
+    QJsonValue function = patch.value(QStringLiteral("functionId"));
+    if (function.isUndefined())
+        function = patch.value(QStringLiteral("chaserId"));
+
+    if (function.isUndefined() == false && function.isNull() == false)
+    {
+        if (function.isDouble() == false)
+            return VcPatch::Result::failure(QStringLiteral("\"functionId\" must be an id or null"));
+
+        const quint32 id = quint32(function.toDouble());
+        const Function *target = m_doc->function(id);
+        if (target == nullptr)
+            return VcPatch::Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+        /* A cue list steps through a chaser. Anything else loads, shows the
+           function's name, and then does nothing when the operator hits Next. */
+        VcWidget root;
+        if (VirtualConsole::parse(m_preserved.sections, root))
+        {
+            bool ok = false;
+            const quint32 numeric = widgetId.toUInt(&ok);
+            const VcWidget *widget = ok ? VirtualConsole::find(root, numeric) : nullptr;
+
+            if (widget != nullptr && widget->type == QStringLiteral("cuelist")
+                && target->type() != Function::ChaserType)
+            {
+                return VcPatch::Result::failure(
+                    QStringLiteral("A cue list needs a chaser, and \"%1\" is a %2")
+                        .arg(target->name(), target->typeToString(target->type()).toLower()));
+            }
+        }
+    }
+
+    const QJsonValue channels = patch.value(QStringLiteral("levelChannels"));
+    if (channels.isUndefined() == false)
+    {
+        if (channels.isArray() == false)
+            return VcPatch::Result::failure(QStringLiteral("\"levelChannels\" must be an array"));
+
+        for (const QJsonValue &entry : channels.toArray())
+        {
+            const QJsonObject channel = entry.toObject();
+            const quint32 fixtureId =
+                quint32(channel.value(QStringLiteral("fixture")).toDouble(-1));
+            const int index = channel.value(QStringLiteral("channel")).toInt(-1);
+
+            const Fixture *fixture = m_doc->fixture(fixtureId);
+            if (fixture == nullptr)
+            {
+                return VcPatch::Result::failure(
+                    QStringLiteral("No fixture with id %1")
+                        .arg(channel.value(QStringLiteral("fixture")).toInt(-1)));
+            }
+
+            if (index < 0 || quint32(index) >= fixture->channels())
+            {
+                return VcPatch::Result::failure(
+                    QStringLiteral("\"%1\" has %2 channels, so %3 is not one of them")
+                        .arg(fixture->name()).arg(fixture->channels()).arg(index));
+            }
+        }
+    }
+
+    return VcPatch::Result::success();
+}
+
+VcPatch::Result EngineHost::editWidget(const QString &widgetId, const QJsonObject &patch)
+{
+    const VcPatch::Result checked = checkReferences(widgetId, patch);
+    if (checked.ok == false)
+        return checked;
+
+    const VcPatch::Result result = VcPatch::editWidget(m_preserved.sections, widgetId, patch);
+    if (result.ok == false)
+        return result;
+
+    /* Re-read rather than reason about what the patch touched: a caption is
+       harmless, but the same call is the one that will carry level channels
+       later, and a stale LevelSource writes DMX nobody asked for. */
+    teachSliders();
+    m_doc->setModified();
+
+    return result;
+}
+
+VcPatch::Result EngineHost::addWidget(const QString &type, const QString &parentId,
+                                      const QJsonObject &properties, QString &newId)
+{
+    const VcPatch::Result checked = checkReferences(QString(), properties);
+    if (checked.ok == false)
+        return checked;
+
+    const VcPatch::Result result =
+        VcPatch::addWidget(m_preserved.sections, type, parentId, properties, newId);
+    if (result.ok == false)
+        return result;
+
+    teachSliders();
+    m_doc->setModified();
+
+    return result;
+}
+
+VcPatch::Result EngineHost::removeWidget(const QString &widgetId)
+{
+    /* Read the level channels out before the widget goes, while there is still
+       something to read them from. A frame takes its sliders with it, so this
+       walks the subtree, not just the widget named. */
+    QList<LevelSource::Channel> held;
+
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root))
+    {
+        bool ok = false;
+        const quint32 target = widgetId.toUInt(&ok);
+
+        QVector<const VcWidget *> pending;
+        pending.append(&root);
+
+        while (ok && pending.isEmpty() == false)
+        {
+            const VcWidget *widget = pending.takeLast();
+
+            if (widget->hasId && widget->id == target)
+            {
+                QVector<const VcWidget *> subtree;
+                subtree.append(widget);
+
+                while (subtree.isEmpty() == false)
+                {
+                    const VcWidget *node = subtree.takeLast();
+                    held.append(node->levelChannels);
+
+                    for (const VcWidget &child : node->children)
+                        subtree.append(&child);
+                }
+
+                break;
+            }
+
+            for (const VcWidget &child : widget->children)
+                pending.append(&child);
+        }
+    }
+
+    QStringList removedIds;
+    const VcPatch::Result result =
+        VcPatch::removeWidget(m_preserved.sections, widgetId, removedIds);
+    if (result.ok == false)
+        return result;
+
+    /* Order matters: stop the sliders driving those channels before zeroing
+       them, or the next tick writes the old level straight back. */
+    teachSliders();
+    releaseLevels(held);
+    forgetLayoutIds(removedIds);
+
+    m_doc->setModified();
+
+    return result;
+}
+
+int EngineHost::forgetFixture(quint32 fixtureId)
+{
+    const int removed = VcPatch::forgetFixture(m_preserved.sections, fixtureId);
+
+    if (removed > 0)
+    {
+        teachSliders();
+        m_doc->setModified();
+    }
+
+    return removed;
 }
 
 QString EngineHost::projectErrors() const
