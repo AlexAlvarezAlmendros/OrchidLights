@@ -50,6 +50,16 @@ namespace JsonView
     QJsonArray functions(const Doc *doc);
     QJsonArray universes(const Doc *doc);
 
+    /**
+     * What a function is made of: a chaser's steps, a scene's values, a
+     * collection's members.
+     *
+     * The write side of these already exists; without the read side a client
+     * can change a body it cannot see, which is not editing, it is guessing.
+     * Returns an empty object for the types not modelled here yet.
+     */
+    QJsonObject functionBody(const Doc *doc, const Function *function);
+
     /** The Virtual Console tree, geometry included: the interface needs the
         original coordinates to group widgets into rows and reflow them. */
     QJsonObject vcWidget(const VcWidget &widget);

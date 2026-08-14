@@ -326,6 +326,8 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 > **Trampa de React que el test destapó**: `onBlur` escucha `focusout`, no `blur`. Y el efecto que rellenaba el campo del nombre estaba indexado por el objeto widget, que se reconstruye tras **cada** edición — así que borraba lo que estabas escribiendo, incluso por una edición del propio panel. Indexado por id.
 
+- [x] **Cue lists en el navegador.** Los pasos, el que está en marcha resaltado, transporte de play/stop/anterior/siguiente, y salto directo a un cue — que es lo que hace un operador cuando el show se salta un número. El cue actual viene por el feed en vivo, así que dos móviles corriendo el mismo show ven el mismo cue.
+- [x] **`GET /api/v1/functions/{id}/body`**: pasos de un chaser, valores de una escena, miembros de una collection, con nombres. La escritura ya existía; sin la lectura un cliente cambia un cuerpo que no puede ver, y eso no es editar, es adivinar.
 - [ ] Control completo: `xypad`, `audiotriggers`, `animation` (control de RGB
       Matrix), `soloframe` con su semántica de solo, `slider` en modos playback y
       submaster, paginación de `frame`.

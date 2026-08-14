@@ -5,6 +5,20 @@ export interface FunctionState {
   name: string
   type: string
   running: boolean
+
+  /** Chasers only: the cue that is up, and how many there are. Live, so a cue
+   *  list follows the show rather than describing it. */
+  step?: number
+  steps?: number
+}
+
+export interface FunctionBody {
+  id: number
+  type: string
+  steps?: import('./cuelist').Step[]
+  values?: { fixture: number; channel: number; value: number; channelName?: string }[]
+  members?: { function: number; name: string }[]
+  note?: string
 }
 
 export interface FixtureState {
@@ -71,6 +85,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  functionBody: (id: number) => json<FunctionBody>(`/api/v1/functions/${id}/body`),
   fixtures: () => json<FixtureState[]>('/api/v1/fixtures'),
   fixture: (id: number) => json<FixtureDetail>(`/api/v1/fixtures/${id}`),
 

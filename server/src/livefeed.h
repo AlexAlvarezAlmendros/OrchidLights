@@ -94,6 +94,14 @@ private:
     QHash<quint32, QByteArray> m_pending;
     bool m_functionsDirty = false;
 
+    /** Where each running chaser had got to at the last flush.
+     *
+     *  Stepping does not change the list of running functions, so
+     *  functionListChanged never fires for it and a cue list would sit showing
+     *  cue 1 all night. Polled here rather than connected per chaser, because
+     *  chasers come and go and a stale connection is worse than a comparison. */
+    QHash<quint32, int> m_chaserSteps;
+
     QTimer m_flushTimer;
 };
 

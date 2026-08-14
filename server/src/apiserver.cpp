@@ -840,6 +840,25 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
+    /* What a function is made of. Without this a client can change a body it
+       cannot see, which is not editing, it is guessing. */
+    m_server->route("/api/v1/functions/<arg>/body", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const Function *function = doc->function(id);
+        if (function == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such function"));
+
+        return QHttpServerResponse(JsonView::functionBody(doc, function));
+    });
+
     /* Bodies of the remaining editable types. One route, dispatching on the
        function's own type, because a caller should not have to know which URL
        shape a type happens to use. */

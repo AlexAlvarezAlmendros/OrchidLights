@@ -86,6 +86,37 @@ assert scenes, "no scenes in the project"
 print(scenes[0]["id"])
 ') || fail "GET /functions"
 
+# What a function is made of. Without the read side a client can change a body
+# it cannot see, which is not editing, it is guessing.
+curl -sf --max-time 5 "$BASE/functions/$FUNC/body" | python3 -c "
+import json, sys
+body = json.load(sys.stdin)
+assert body['type'] == 'Scene', body
+assert body['values'], 'the scene came back with no values'
+first = body['values'][0]
+assert {'fixture', 'channel', 'value'} <= set(first), first
+# Named, because a scene listing 'canal 5' is one nobody can read.
+assert 'channelName' in first, first
+" || fail "GET /functions/\$FUNC/body"
+
+CHASER=$(curl -sf --max-time 5 "$BASE/functions" | python3 -c '
+import json, sys
+chasers = [f for f in json.load(sys.stdin) if f["type"] == "Chaser" and f.get("steps", 0) > 0]
+print(chasers[0]["id"] if chasers else "")
+')
+
+if [ -n "$CHASER" ]; then
+    curl -sf --max-time 5 "$BASE/functions/$CHASER/body" | python3 -c "
+import json, sys
+body = json.load(sys.stdin)
+assert body['steps'], 'the chaser came back with no steps'
+assert [s['index'] for s in body['steps']] == list(range(len(body['steps']))), body['steps']
+assert all(s['name'] for s in body['steps']), 'a step with no name is a cue nobody can call'
+# Not running, so there is no cue up.
+assert body['step'] == -1, body['step']
+" || fail "GET /functions/\$CHASER/body"
+fi
+
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST --max-time 5 "$BASE/functions/$FUNC/start")
 [ "$CODE" = "202" ] || fail "POST start answered $CODE, expected 202 Accepted"
 
