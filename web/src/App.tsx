@@ -75,6 +75,8 @@ export function App() {
   >({})
   /** Which page of the frame on screen, for a frame that has pages. */
   const [framePage, setFramePage] = useState(0)
+  /** How much of this console's editing history is behind and ahead. */
+  const [history, setHistory] = useState({ undo: 0, redo: 0 })
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
@@ -244,7 +246,21 @@ export function App() {
     const console_ = await api.vc()
     setVc(console_)
     setDirty(true)
+    api
+      .vcHistory()
+      .then(setHistory)
+      .catch(() => undefined)
   }, [])
+
+  const undo = useCallback(async () => {
+    await api.undoConsole()
+    await refresh()
+  }, [refresh])
+
+  const redo = useCallback(async () => {
+    await api.redoConsole()
+    await refresh()
+  }, [refresh])
 
   const selectedWidget = useMemo(() => {
     if (selected === null || !vc) return null
@@ -388,6 +404,16 @@ export function App() {
               Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
             </button>
           ))}
+        {view === 'console' && mode === 'edit' && (
+          <>
+            <button type="button" disabled={history.undo === 0} onClick={undo} title="Deshacer">
+              ↶ {history.undo || ''}
+            </button>
+            <button type="button" disabled={history.redo === 0} onClick={redo} title="Rehacer">
+              ↷ {history.redo || ''}
+            </button>
+          </>
+        )}
         {mode !== 'run' && dirty && (
           <button type="button" onClick={persist}>
             Guardar

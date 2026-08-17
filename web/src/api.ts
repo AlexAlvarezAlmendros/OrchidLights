@@ -295,6 +295,13 @@ export const api = {
       method: 'DELETE',
     }),
 
+  /* Undo and redo, scoped to the console. A deleted widget comes back; a
+     deleted fixture is re-patched by hand, because undoing a change to the
+     document would drop every running function. */
+  vcHistory: () => json<{ undo: number; redo: number }>('/api/v1/vc/history'),
+  undoConsole: () => json<{ undo: number; redo: number }>('/api/v1/vc/undo', { method: 'POST' }),
+  redoConsole: () => json<{ undo: number; redo: number }>('/api/v1/vc/redo', { method: 'POST' }),
+
   /** Give every widget an id, so a console from QLC+ 4 can be edited at all. */
   assignWidgetIds: () => json<{ assigned: number }>('/api/v1/vc/widgets/ids', { method: 'POST' }),
 

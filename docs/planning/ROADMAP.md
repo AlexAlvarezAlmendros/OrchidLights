@@ -257,8 +257,7 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
       no existe, un canal más allá del último del fixture, una escena donde una cue list
       necesita un chaser.
 - [x] **Difusión por WebSocket de cada cambio.** `Doc::modified` se dispara en toda mutación sin excepción, así que es la garantía: pase lo que pase, al cliente se le dice que vuelva a mirar. Las señales concretas de `Doc` y `EngineHost::consoleChanged` solo lo afinan, para que un navegador con la consola abierta no relea la librería de fixtures porque alguien renombró un universo. Coalescido en el mismo flush que el DMX: una edición que toca diez cosas es una cosa que contar.
-- [ ] Deshacer. QLC+ v5 tiene `Tardis`; sin equivalente, editar desde el
-      navegador da miedo y con razón.
+- [x] **Deshacer y rehacer, acotado a la consola** — y el nombre lo dice. La consola es XML preservado: deshacer una edición es devolver una cadena a su sitio, lo que no cuesta nada ni molesta a nadie. Deshacer un cambio sobre `Doc` sería reconstruir el documento — parar el timer, tirar toda función en marcha y todo nivel retenido — y un control capaz de dejar el rig a oscuras no es un botón de deshacer, se llame como se llame. Así que un widget borrado vuelve, y un fixture borrado se vuelve a parchear a mano. La asimetría es deliberada y conviene saberla. Pila de 50, ramas nuevas descartan lo que había delante, y `409` con el motivo cuando no queda nada.
 
 ### F4 — Fixtures y universos 🔨
 

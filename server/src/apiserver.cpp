@@ -377,6 +377,57 @@ void ApiServer::registerRoutes()
     /* Every edit addresses a widget by id, and QLC+ 4 wrote none -- the console
        that ships with QLC+ to this day has not one. Such a project is not
        partly editable, it is entirely uneditable until this has run. */
+    /* Undo and redo, scoped to the console -- which is what the path says.
+     *
+     * The console is preserved XML, so undoing is swapping a string back and
+     * costs nothing. Undoing a change to Doc would rebuild the document and
+     * drop every running function, and a control that can black out a rig is
+     * not an undo button whatever it is labelled. */
+    m_server->route("/api/v1/vc/undo", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        if (m_engine->undoConsole() == false)
+        {
+            return jsonError(StatusCode::Conflict,
+                             QStringLiteral("There is nothing to undo in this console"));
+        }
+
+        QJsonObject body;
+        body["undo"] = m_engine->undoDepth();
+        body["redo"] = m_engine->redoDepth();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/vc/redo", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        if (m_engine->redoConsole() == false)
+        {
+            return jsonError(StatusCode::Conflict,
+                             QStringLiteral("There is nothing to redo in this console"));
+        }
+
+        QJsonObject body;
+        body["undo"] = m_engine->undoDepth();
+        body["redo"] = m_engine->redoDepth();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/vc/history", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonObject body;
+        body["undo"] = m_engine->undoDepth();
+        body["redo"] = m_engine->redoDepth();
+        return QHttpServerResponse(body);
+    });
+
     m_server->route("/api/v1/vc/widgets/ids", QHttpServerRequest::Method::Post,
                     [this, denied](const QHttpServerRequest &request) {
         if (denied(request))

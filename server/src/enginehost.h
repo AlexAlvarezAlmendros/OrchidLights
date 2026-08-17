@@ -188,6 +188,25 @@ public:
      *  can be edited at all. See VcPatch::assignIds. */
     VcPatch::Result assignWidgetIds(int &assigned);
 
+    /**
+     * Undo and redo, for edits to the Virtual Console.
+     *
+     * Scoped to the console on purpose, and the name says so. The console is
+     * preserved XML: undoing an edit is swapping one string back, which costs
+     * nothing and disturbs nothing. Undoing a change to Doc would mean
+     * rebuilding the document -- stopping the timer, dropping every running
+     * function and every held level -- and a control that can black out a rig
+     * is not an undo button, whatever it is labelled.
+     *
+     * So a deleted widget comes back, and a deleted fixture is re-patched by
+     * hand. That asymmetry is deliberate and worth knowing about.
+     */
+    bool undoConsole();
+    bool redoConsole();
+
+    int undoDepth() const { return m_undo.count(); }
+    int redoDepth() const { return m_redo.count(); }
+
     /** Drop a deleted fixture's references out of the console, so a later
      *  fixture cannot inherit its id and its sliders with it. */
     int forgetFixture(quint32 fixtureId);
@@ -246,6 +265,19 @@ private:
     QString m_projectPath;
     QString m_projectsDirectory;
     WorkspaceLoader::Preserved m_preserved;
+
+    /**
+     * Snapshots of the preserved sections, before and after the current state.
+     *
+     * Whole copies rather than a description of each change: the sections are a
+     * few kilobytes of XML, and a snapshot cannot be wrong about what it
+     * restores the way a hand-written inverse of every operation can.
+     */
+    QList<WorkspaceLoader::Preserved> m_undo;
+    QList<WorkspaceLoader::Preserved> m_redo;
+
+    /** Remember the console as it stands, before changing it. */
+    void rememberConsole();
 };
 
 #endif // ENGINEHOST_H
