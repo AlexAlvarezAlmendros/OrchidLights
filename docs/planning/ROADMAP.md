@@ -183,7 +183,7 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 - [x] **Entrada del menú.** El `.desktop` ya no abre una terminal: `orchidlightsd --open` levanta el motor y abre la interfaz en el navegador. Encolado tras el bucle de eventos, porque abrirlo antes de que `listen()` acepte enseña un error de conexión en un daemon que arrancó perfectamente.
 - [x] **Criterio de éxito cumplido: el show del P62 se dispara desde `curl`/`wscat` con luz real, sin GUI.** Verificado por Art-Net: 512 bytes, 76 canales activos con el espaciado de 8 canales de los Theatre Spots.
 
-### F2 — Shell web + Virtual Console en directo *(dolor #1)* 🔨
+### F2 — Shell web + Virtual Console en directo *(dolor #1)* ✅
 
 **Hecho:**
 
@@ -247,7 +247,7 @@ superficies.
 
 ---
 
-### F3 — La capa de escritura
+### F3 — La capa de escritura ✅
 
 Sin esto no hay CRUD de nada, así que va primero y va completa.
 
@@ -272,7 +272,7 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 - [x] **Grupos de canales**, con su fader donde se construyen. No es un grupo de fixtures: junta canales sueltos (el dímer de una, el estrobo de otra, el ventilador de la máquina de humo) bajo un único fader, y vive en el documento, no en la consola — así que ningún submáster lo escala y su id no tiene nada que ver con el de un widget. El motor acepta cualquier número de canal y lo escribe en la dirección del fixture más el desplazamiento, así que un canal más allá del último aterriza sobre el fixture de al lado: se rechaza en el borde. Y lo que un grupo suelta —un canal quitado, el grupo entero borrado— se baja a cero, porque un canal que no es de intensidad se queda exactamente donde estaba y el único mando que podía bajarlo es el que acaba de desaparecer.
 - [x] **Modificadores de canal**, con la curva dibujada. Es la tabla de 256 valores por la que pasa un canal al salir: «Invert» da la vuelta a un fader, «Always Full» clava un canal abierto, «Exponential Deep» dobla un dímer para una lámpara que no funde en línea recta. Se dibuja además de nombrarse, porque «Exponential Medium» y «Exponential Deep» son igual de plausibles y solo la forma dice cuál es la que necesita la lámpara. No se aplica con `Doc::updateFixtureChannelCapabilities` —que es lo que llama el escritorio— porque de camino reaplica el valor por defecto de **todos** los canales: poner una curva en uno tiraría el resto de la fixture a sus defaults, que en un rig sosteniendo un look es una lámpara que se apaga sin motivo visible.
 
-### F5 — Funciones: los diez tipos 🔨
+### F5 — Funciones: los diez tipos ✅
 
 - [x] **Capa genérica**: crear los **diez tipos**, renombrar, velocidades, orden de ejecución y dirección, y borrar. Verificado creando uno de cada, guardando y recargando.
 - [x] **Orden de construcción corregido** por el mapeo: se registra primero y se nombra después (como la UI v4). Nombrar antes emite `nameChanged` con un id todavía inválido, a un `Doc` que aún no está conectado, y sin marcar el documento como modificado.
@@ -297,7 +297,7 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 
 > **Nota de compatibilidad**: nuestro motor viene de `master`, más nuevo que QLC+ 5.2.1. Un proyecto guardado aquí puede llevar campos que esa versión no conoce (p. ej. `DimmerControl` en un EFX); los avisa y los ignora, igual que ignora nuestra sección de layout.
 
-### F6 — Virtual Console: los doce widgets 🔨
+### F6 — Virtual Console: los doce widgets ✅
 
 **Decisión de diseño, tomada tras mapear los 11 widgets campo a campo.**
 
@@ -377,7 +377,9 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 ### F8 — Extras
 
-- [ ] 3D opcional, PWA instalable, multiusuario con roles.
+- [x] PWA instalable — hecha en F2 junto al modo operador.
+- [ ] 3D opcional.
+- [ ] Multiusuario con roles.
 
 ---
 
