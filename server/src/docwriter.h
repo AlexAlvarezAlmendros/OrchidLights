@@ -120,6 +120,26 @@ namespace DocWriter
     Result setChannelModifiers(Doc *doc, quint32 fixtureId,
                                const QMap<quint32, QString> &byChannel);
 
+    /**
+     * Where a fixture stands on the plan, and the gel in front of it.
+     *
+     * Position is in millimetres against the monitor's grid, which is what QLC+
+     * stores and what its own 2D view draws. Anything else would mean a plan
+     * built here does not open there.
+     *
+     * X and Y only. The engine writes a third coordinate to the file solely in
+     * QMLUI builds (monitorproperties.cpp:959), so on this build a height would
+     * be accepted, held in memory, and gone after a save -- and a lamp that
+     * moves when the project is reopened is worse than one that could never be
+     * raised. A plan is a top view; height belongs to a 3D view that does not
+     * exist here yet.
+     */
+    Result setPlanPosition(Doc *doc, quint32 fixtureId, const double *x, const double *y,
+                           const double *rotation, const QString *gel);
+
+    /** Take a fixture off the plan without unpatching it. */
+    Result clearPlanPosition(Doc *doc, quint32 fixtureId);
+
     /* ---- Fixture groups ------------------------------------------------ */
 
     /* ---- Functions ----------------------------------------------------- */

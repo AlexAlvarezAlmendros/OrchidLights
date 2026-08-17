@@ -93,6 +93,42 @@ export interface FixtureGroup {
   fixtures: number[]
 }
 
+export interface PlanState {
+  grid: { width: number; height: number; depth: number; units: 'meters' | 'feet' }
+  /** The project names a background image and the daemon can serve it. */
+  background: boolean
+  fixtures: PlanFixture[]
+}
+
+export interface PlanFixture {
+  id: number
+  name: string
+  universe: number
+  address: number
+  channels: number
+  resolved: boolean
+  /** Absent when nobody has placed this fixture yet. A plan that quietly stacks
+   *  every unplaced lamp at the origin looks like a plan, and is not. */
+  x?: number
+  y?: number
+  rotation?: number
+  gel?: string
+  /** Offsets from the fixture's address, so the interface can read them against
+   *  the DMX frames it already receives. */
+  roles: {
+    intensity?: number
+    red?: number
+    green?: number
+    blue?: number
+    cyan?: number
+    magenta?: number
+    yellow?: number
+    white?: number
+    amber?: number
+    uv?: number
+  }
+}
+
 /**
  * A channels group: one fader over a handful of channels picked by hand.
  *
@@ -330,6 +366,21 @@ export const api = {
     }),
   removeShowItem: (showId: number, itemId: number) =>
     json<unknown>(`/api/v1/functions/${showId}/items/${itemId}`, { method: 'DELETE' }),
+
+  plan: () => json<PlanState>('/api/v1/plan'),
+  /** Millimetres against the monitor grid. X and Y only: a plan is a top view,
+   *  and a height would not survive being saved. */
+  setPlanPosition: (
+    id: number,
+    position: { x?: number; y?: number; rotation?: number; gel?: string },
+  ) =>
+    json<{ id: number }>(`/api/v1/plan/fixtures/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(position),
+    }),
+  clearPlanPosition: (id: number) =>
+    json<unknown>(`/api/v1/plan/fixtures/${id}`, { method: 'DELETE' }),
 
   /** The channel modifier templates the daemon loaded, by name. */
   modifiers: () => json<{ modifiers: string[] }>('/api/v1/modifiers'),

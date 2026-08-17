@@ -187,6 +187,12 @@ export class Live {
     this.send({ type: 'subscribe', universes })
   }
 
+  /** Stop the frames. Its own message rather than subscribing to an empty
+   *  list, which the daemon reads as "add none" and leaves everything on. */
+  unsubscribe(universes: number[]): void {
+    this.send({ type: 'unsubscribe', universes })
+  }
+
   close(): void {
     this.closedByUs = true
     this.socket?.close()

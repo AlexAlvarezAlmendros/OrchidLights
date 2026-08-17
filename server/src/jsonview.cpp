@@ -38,6 +38,8 @@
 #include "sequence.h"
 #include "showfunction.h"
 #include "show.h"
+#include "monitorproperties.h"
+#include "qlcfixturehead.h"
 #include "track.h"
 #include "script.h"
 #include "audio.h"
@@ -543,6 +545,105 @@ QJsonArray JsonView::channelGroups(const Doc *doc, const LevelSource *levels)
     }
 
     return array;
+}
+
+QJsonObject JsonView::plan(const Doc *doc)
+{
+    QJsonObject json;
+
+    /* Doc::monitorProperties has no const overload upstream; it returns a
+       member and changes nothing. */
+    MonitorProperties *monitor = const_cast<Doc *>(doc)->monitorProperties();
+
+    /* The stage, in metres or feet as the project says. Positions are stored in
+       millimetres against this, so the interface needs both to place anything. */
+    QJsonObject grid;
+    grid["width"] = monitor->gridSize().x();
+    grid["height"] = monitor->gridSize().y();
+    grid["depth"] = monitor->gridSize().z();
+    grid["units"] = monitor->gridUnits() == MonitorProperties::Feet ? QStringLiteral("feet")
+                                                                    : QStringLiteral("meters");
+    json["grid"] = grid;
+
+    json["background"] = monitor->commonBackgroundImage().isEmpty() == false;
+
+    QJsonArray fixtures;
+
+    for (const Fixture *fixture : doc->fixtures())
+    {
+        QJsonObject entry;
+        entry["id"] = qint64(fixture->id());
+        entry["name"] = fixture->name();
+        entry["universe"] = qint64(fixture->universe()) + 1;
+        entry["address"] = qint64(fixture->address());
+        entry["channels"] = qint64(fixture->channels());
+
+        /* Placed or not, said plainly. QLC+ stores a position only for fixtures
+           somebody has put somewhere. */
+        if (monitor->containsFixture(fixture->id()))
+        {
+            const QVector3D position = monitor->fixturePosition(fixture->id(), 0, 0);
+            const QVector3D rotation = monitor->fixtureRotation(fixture->id(), 0, 0);
+
+            /* X and Y only: a plan is a top view, and this build of the engine
+               saves nothing else (monitorproperties.cpp:959). */
+            entry["x"] = position.x();
+            entry["y"] = position.y();
+            entry["rotation"] = rotation.y();
+
+            const QColor gel = monitor->fixtureGelColor(fixture->id(), 0, 0);
+            if (gel.isValid())
+                entry["gel"] = gel.name();
+        }
+
+        /* Which channels decide what this lamp looks like.
+         *
+         * Offsets from the fixture's address, not absolute addresses: the
+         * interface reads them against the frame it already has, and a fixture
+         * that gets re-patched keeps the same roles. */
+        QJsonObject roles;
+
+        const quint32 dimmer = fixture->masterIntensityChannel();
+        if (dimmer != QLCChannel::invalid())
+            roles["intensity"] = qint64(dimmer);
+
+        const QVector<quint32> rgb = fixture->rgbChannels();
+        if (rgb.size() == 3)
+        {
+            roles["red"] = qint64(rgb.at(0));
+            roles["green"] = qint64(rgb.at(1));
+            roles["blue"] = qint64(rgb.at(2));
+        }
+
+        const QVector<quint32> cmy = fixture->cmyChannels();
+        if (cmy.size() == 3)
+        {
+            roles["cyan"] = qint64(cmy.at(0));
+            roles["magenta"] = qint64(cmy.at(1));
+            roles["yellow"] = qint64(cmy.at(2));
+        }
+
+        const auto role = [&](int preset, const char *name) {
+            const quint32 channel = fixture->channelNumber(preset, QLCChannel::MSB);
+            if (channel != QLCChannel::invalid())
+                roles[QLatin1String(name)] = qint64(channel);
+        };
+
+        role(QLCChannel::IntensityWhite, "white");
+        role(QLCChannel::IntensityAmber, "amber");
+        role(QLCChannel::IntensityUV, "uv");
+
+        entry["roles"] = roles;
+
+        /* A fixture that resolved to a generic dimmer has no colour channels at
+           all, and drawing it grey with no explanation reads as "off". */
+        entry["resolved"] = fixture->fixtureMode() != nullptr;
+
+        fixtures.append(entry);
+    }
+
+    json["fixtures"] = fixtures;
+    return json;
 }
 
 QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,

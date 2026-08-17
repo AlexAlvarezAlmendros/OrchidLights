@@ -638,6 +638,76 @@ try {
   })()`)
   check('a show timeline can be dragged in the browser', timeline === 'none' || timeline === 'ok', timeline)
 
+  /* The plan. The one assertion worth the whole screen: light a lamp and see
+     the marker turn that colour, then put it out and see it go dark. Everything
+     else about a plan can be checked over HTTP; this cannot, because the colour
+     is computed in the browser from the DMX frames. */
+  await click('Planta')
+  await sleep(1200)
+
+  const litUp = await evaluate(`(async () => {
+    const stage = document.querySelector('.plan-stage')
+    if (!stage) return 'the plan never opened'
+
+    /* Nothing is placed in these projects, so the tray is where the fixtures
+       are. Putting one on the stage is also the quickest way to check that
+       path works. */
+    const tray = [...document.querySelectorAll('.tray-item')]
+    const barra = tray.find(b => b.textContent.trim() === 'Barra')
+    if (!barra) return 'none'          // this project has no RGBW bar
+    barra.click()
+    await new Promise(r => setTimeout(r, 1200))
+
+    const lamp = document.querySelector('.lamp[data-fixture="2"]')
+    if (!lamp) return 'the fixture did not land on the stage'
+
+    /* A channel with a modifier on it is not at 0 when nothing drives it: an
+       inverted red at rest puts 255 on the wire, and the plan drawing that lamp
+       red is the plan being right. So the rest of this only means anything on a
+       fixture with no curves in the way. */
+    const detail = await (await fetch('/api/v1/fixtures/2')).json()
+    if (detail.channelList.some(c => c.modifier)) return 'none'
+
+    if (lamp.getAttribute('data-dark') !== 'true') {
+      return 'a lamp that is off should be drawn dark, not ' + lamp.style.background
+    }
+
+    /* Light it. "Rojo" is a scene holding the bar's red channel at full. */
+    const functions = await (await fetch('/api/v1/functions')).json()
+    const red = functions.find(f => f.name === 'Rojo')
+    if (!red) return 'none'
+    await fetch('/api/v1/functions/' + red.id + '/start', { method: 'POST' })
+    await new Promise(r => setTimeout(r, 1400))
+
+    const after = document.querySelector('.lamp[data-fixture="2"]')
+    const shown = after.style.background
+    if (after.getAttribute('data-dark') === 'true') {
+      return 'the lamp stayed dark while the scene was up'
+    }
+    /* Exactly red: the bar's red channel is at full and nothing else is, so
+       anything with green or blue in it means the roles are wrong. */
+    if (shown.split(' ').join('') !== 'rgb(255,0,0)') {
+      return 'expected red, drew ' + shown
+    }
+
+    await fetch('/api/v1/functions/' + red.id + '/stop', { method: 'POST' })
+    await new Promise(r => setTimeout(r, 1400))
+
+    const out = document.querySelector('.lamp[data-fixture="2"]')
+    if (out.getAttribute('data-dark') !== 'true') {
+      return 'the lamp stayed lit after the scene stopped: ' + out.style.background
+    }
+
+    // And the position it was given is the daemon's, not just the browser's.
+    const plan = await (await fetch('/api/v1/plan')).json()
+    const placed = plan.fixtures.find(f => f.id === 2)
+    if (placed?.x === undefined) return 'the daemon does not have it placed'
+
+    await fetch('/api/v1/plan/fixtures/2', { method: 'DELETE' })
+    return 'ok'
+  })()`)
+  check('the plan shows what each lamp is doing', litUp === 'none' || litUp === 'ok', litUp)
+
   /* Two people on the same show. An edit made anywhere else has to arrive
      here, or the second phone is quietly showing a console that no longer
      exists -- and the first anyone finds out is mid-cue. */
