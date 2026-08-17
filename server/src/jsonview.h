@@ -87,6 +87,22 @@ namespace JsonView
     QJsonObject channelGroup(const Doc *doc, quint32 groupId,
                              const LevelSource *levels = nullptr);
     QJsonArray channelGroups(const Doc *doc, const LevelSource *levels = nullptr);
+
+    /**
+     * The rig, as a plan: where each fixture stands, and which of its channels
+     * decide what colour it is.
+     *
+     * The roles are the point. The interface already receives every DMX frame,
+     * so once it knows that fixture 4's red is channel 0 and its dimmer is
+     * channel 6, it can colour the plan on every frame without asking anything.
+     * Sending colours from here instead would mean a round trip per frame, at
+     * which point the plan is a slideshow.
+     *
+     * A fixture with no position is reported without one rather than at the
+     * origin: a plan that quietly stacks every unplaced lamp in one corner
+     * looks like a plan, and is not.
+     */
+    QJsonObject plan(const Doc *doc);
 }
 
 #endif // JSONVIEW_H

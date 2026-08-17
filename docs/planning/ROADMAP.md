@@ -356,14 +356,19 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 > **Dos bugs que el mapeo del submaster destapó, arreglados antes de tocarlo.** Un `Universe` guarda su propia referencia a cada fader que reparte, así que soltar la nuestra **no lo desregistra**: cada edición de la consola dejaba uno huérfano asegurando su último valor, y como los faders mezclan HTP, el slider ya no podía bajar el canal nunca más. Editar un caption a mitad de show dejaba un foco arriba hasta recargar el proyecto. Y `forgetSliders` borraba los valores, así que arreglar lo primero habría hecho que cada edición apagara el rig. Ahora los faders se devuelven en el hilo del timer y los valores sobreviven, reafirmándose en el siguiente tick.
 
-### F7 — Show manager y previsualización 2D
+### F7 — Show manager y previsualización 2D ✅
 
 - [x] **Timeline multipista**, con las barras arrastrables y el cabezal de reproducción en vivo. El cuerpo de un Show era lo único que este daemon no sabía leer en absoluto: contestaba una nota diciéndolo. Ahora se leen las pistas, lo que hay colocado en cada una y cuándo, y se edita desde el navegador — añadir y quitar pistas, colocar funciones, moverlas, estirarlas, bloquearlas.
   - **Solapes rechazados en la misma pista**, nombrando con qué choca: dos cosas a la vez en una pista suenan las dos y lo que hace el rig es lo que escribiera la última, que no es algo que se pueda leer de una timeline que las dibuja apiladas. En pistas distintas sí, que es para lo que están las pistas.
   - **Un script o una colección no pueden ir en una timeline**: no tienen duración, así que no hay barra que dibujar ni final en el que pararlos. Ni un show dentro de sí mismo, que es un bucle por el que el runner se mete.
   - **`Show::write` no incrementaba `elapsed`** — el único tipo de función del motor que no lo hacía, siendo que el runner recibe `elapsed()` al construirse. Sin eso nada fuera del runner podía decir por dónde iba un pase, y el cabezal habría tenido que ser un cronómetro local: uno que deriva y que sigue corriendo cuando el show ya ha terminado. Arreglado en el motor.
   - La posición viaja en su propio mensaje de WebSocket, no como campo de la lista de funciones: `elapsed` cambia cada tick y ensuciar la lista por él empujaría todas las funciones del proyecto por todos los sockets al ritmo del flush.
-- [ ] Planta del rig con color y dimmer en vivo sobre imagen de fondo.
+- [x] **Planta del rig con color y dimmer en vivo**, sobre la imagen de fondo del proyecto. Se arrastra para colocar las fixtures, y se guarda en el `<Monitor>` de QLC+ para que la planta abra igual en el escritorio.
+  - **El color se calcula en el navegador**, no lo manda el daemon. La interfaz ya recibe todos los frames DMX; en cuanto sabe que el rojo de la fixture 4 es el canal 0 y su dímer el 6, pinta la planta entera en cada frame sin preguntar nada. Un viaje de ida y vuelta por frame convierte la planta en un pase de diapositivas, y una planta que va con retraso es peor que ninguna, porque se la cree uno.
+  - **Una fixture sin colocar no se dibuja en el origen**: se queda en una bandeja esperando sitio. Una planta que apila calladamente todas las lámparas sin colocar en una esquina parece una planta y no lo es.
+  - **Apagada se dibuja como contorno, no como negro**: una lámpara a cero y una lámpara cuyo universo no está llegando se ven idénticas si las dos se pintan negras, y solo una de las dos es un problema.
+  - **La altura se rechaza** en vez de aceptarse y perderse: este build del motor solo escribe X e Y al fichero (la tercera coordenada está tras `QMLUI` en `monitorproperties.cpp:959`), y una lámpara que se mueve al reabrir el proyecto es peor que una que nunca se pudo subir.
+  - Los frames solo se piden mientras la planta está abierta, y se tiran al salir: llegan al ritmo del flush y meterlos por el estado de React re-renderiza todo lo que haya montado.
 
 ### F8 — Extras
 

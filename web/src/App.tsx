@@ -16,6 +16,7 @@ import {
 } from './layout'
 import { type Connection, Live } from './live'
 import { MatrixWidget } from './matrix'
+import { Plan } from './plan'
 import { Setup } from './setup'
 import { CREATABLE, placeBelow } from './widgets'
 import { XYPad } from './xypad'
@@ -38,7 +39,7 @@ type Mode = 'run' | 'arrange' | 'edit'
  * the fixtures in them -- which is what makes light come out and which, until
  * now, was reachable only with curl.
  */
-type View = 'console' | 'setup' | 'functions'
+type View = 'console' | 'setup' | 'functions' | 'plan'
 
 /** Transport for a cue list: a chaser plus next and previous. */
 type CueAction = 'play' | 'stop' | 'next' | 'previous' | 'step'
@@ -62,6 +63,11 @@ export function App() {
      while one plays; a local timer would drift and would keep counting after
      the show had stopped. */
   const [shows, setShows] = useState<Record<number, number>>({})
+  /* The latest frame of each universe, kept only while the plan is open.
+     Sixty frames a second through React state would re-render the whole app;
+     the plan is the one screen that needs them, so nothing else subscribes. */
+  const [frames, setFrames] = useState<Record<number, Uint8Array>>({})
+  const [planError, setPlanError] = useState<string | null>(null)
   const [mode, setMode] = useState<Mode>('run')
   const [layout, setLayout] = useState<LayoutRows | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
@@ -94,6 +100,8 @@ export function App() {
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
       onChannelGroup: (id, value) => setGroupLevels((current) => ({ ...current, [id]: value })),
+      onUniverse: (universe, channels) =>
+        setFrames((current) => ({ ...current, [universe]: channels })),
       onShow: (id, elapsed, running) =>
         setShows((current) => {
           if (running) return { ...current, [id]: elapsed }
@@ -231,6 +239,29 @@ export function App() {
     setLevels((current) => ({ ...current, [id]: value }))
     live.current?.setSlider(id, value)
   }, [])
+
+  /* DMX frames only while the plan is open.
+   *
+   * They arrive at the flush rate, and pushing them through React state re-
+   * renders whatever is mounted. The plan is the one screen that needs them, so
+   * nothing else pays for them -- and the frames are dropped on the way out, so
+   * coming back never shows a stale look as if it were current. */
+  useEffect(() => {
+    const ids = [...new Set(fixtures.map((f) => f.universe))]
+    if (ids.length === 0) return
+
+    if (view !== 'plan') {
+      live.current?.unsubscribe(ids)
+      setFrames({})
+      return
+    }
+
+    live.current?.subscribe(ids)
+    return () => {
+      live.current?.unsubscribe(ids)
+      setFrames({})
+    }
+  }, [view, fixtures])
 
   const pages = vc ? pagesOf(vc) : []
   const current = pages[page] ?? pages[0]
@@ -386,7 +417,7 @@ export function App() {
         >
           {theme === 'stage' ? '🌙' : '☀'}
         </button>
-        {(['console', 'functions', 'setup'] as const).map((target) => (
+        {(['console', 'functions', 'setup', 'plan'] as const).map((target) => (
           <button
             key={target}
             type="button"
@@ -397,7 +428,13 @@ export function App() {
               setSelected(null)
             }}
           >
-            {target === 'console' ? 'Consola' : target === 'functions' ? 'Funciones' : 'Patch'}
+            {target === 'console'
+              ? 'Consola'
+              : target === 'functions'
+                ? 'Funciones'
+                : target === 'setup'
+                  ? 'Patch'
+                  : 'Planta'}
           </button>
         ))}
         {view === 'console' &&
@@ -503,7 +540,12 @@ export function App() {
         </div>
       )}
 
-      {view === 'setup' ? (
+      {view === 'plan' ? (
+        <main className="console">
+          {planError && <p className="editor-error">{planError}</p>}
+          <Plan revision={revision} universes={frames} onError={setPlanError} />
+        </main>
+      ) : view === 'setup' ? (
         <main className="console">
           {/* The patch changes what the console is pointing at, so a fixture
               added or removed here has to reach the widget editor too. */}

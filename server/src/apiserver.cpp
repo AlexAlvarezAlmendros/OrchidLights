@@ -43,6 +43,7 @@
 #include "qlcfixturedef.h"
 #include "fixturegroup.h"
 #include "channelmodifier.h"
+#include "monitorproperties.h"
 #include "qlcmodifierscache.h"
 #include "fixture.h"
 #include "installpaths.h"
@@ -1181,6 +1182,140 @@ void ApiServer::registerRoutes()
         QJsonObject response;
         response["removed"] = qint64(id);
         return QHttpServerResponse(response);
+    });
+
+    /* The plan: where each fixture stands, and what colour it is right now.
+     *
+     * Only the layout and the roles come from here. The colours are worked out
+     * in the browser from the DMX frames it already receives -- a round trip
+     * per frame would make the plan a slideshow, and a plan that lags is worse
+     * than no plan, because it is believed.
+     */
+    m_server->route("/api/v1/plan", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        return QHttpServerResponse(JsonView::plan(doc));
+    });
+
+    m_server->route("/api/v1/plan/fixtures/<arg>", QHttpServerRequest::Method::Put,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        const auto number = [&body](const char *key, double &into) {
+            const QJsonValue value = body.value(QLatin1String(key));
+            if (value.isDouble() == false)
+                return false;
+            into = value.toDouble();
+            return true;
+        };
+
+        double x = 0, y = 0, rotation = 0;
+        const bool hasX = number("x", x);
+        const bool hasY = number("y", y);
+        const bool hasRotation = number("rotation", rotation);
+        const QString gel = body.value("gel").toString();
+
+        /* A plan is a top view, and this build of the engine writes only X and Y
+           to the file (monitorproperties.cpp:959 puts the third coordinate
+           behind QMLUI). Accepting a height would hold it until the next save
+           and then lose it, and a lamp that moves when the project is reopened
+           is worse than one that could never be raised. */
+        if (body.contains("z"))
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("A plan is a top view: send \"x\" and \"y\". A height "
+                                            "would not survive being saved."));
+        }
+
+        /* A body that names a key with something that is not a number is a
+           mistake, not an omission. Ignoring it would move a lamp to where it
+           already was and answer 200. */
+        for (const char *key : {"x", "y", "rotation"})
+        {
+            const QJsonValue value = body.value(QLatin1String(key));
+            if (value.isUndefined() == false && value.isDouble() == false)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("\"%1\" must be a number in millimetres")
+                                     .arg(QLatin1String(key)));
+            }
+        }
+
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::setPlanPosition(doc, id, hasX ? &x : nullptr, hasY ? &y : nullptr,
+                                                hasRotation ? &rotation : nullptr,
+                                                body.contains("gel") ? &gel : nullptr);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/plan/fixtures/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::clearPlanPosition(doc, id);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::NotFound, result.error);
+
+        QJsonObject response;
+        response["removed"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* The background image the project names, served from wherever it lives on
+     * this machine.
+     *
+     * The path comes from the project rather than from the request, which is
+     * the whole reason this is safe: nothing here takes a file name from the
+     * network. A project that names a file that is gone gets a 404, which is
+     * the truth -- the drawing the plan was built against is not there.
+     */
+    m_server->route("/api/v1/plan/background", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QString path = doc->monitorProperties()->commonBackgroundImage();
+        if (path.isEmpty())
+            return jsonError(StatusCode::NotFound, QStringLiteral("This project has no plan background"));
+
+        if (QFileInfo::exists(path) == false)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("The project names \"%1\" as its plan background, and "
+                                            "it is not there").arg(path));
+        }
+
+        return QHttpServerResponse::fromFile(path);
     });
 
     /* Shows: the multi-track timeline.

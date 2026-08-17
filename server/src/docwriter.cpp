@@ -44,6 +44,7 @@
 #include "qlcfixturedef.h"
 #include "fixturegroup.h"
 #include "channelsgroup.h"
+#include "monitorproperties.h"
 #include "channelmodifier.h"
 #include "qlcmodifierscache.h"
 #include "grouphead.h"
@@ -692,6 +693,65 @@ DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
     }
 
     doc->inputOutputMap()->releaseUniverses(true);
+
+    doc->setModified();
+    return Result::success();
+}
+
+/*****************************************************************************
+ * The plan
+ *****************************************************************************/
+
+DocWriter::Result DocWriter::setPlanPosition(Doc *doc, quint32 fixtureId, const double *x,
+                                             const double *y, const double *rotation,
+                                             const QString *gel)
+{
+    const Fixture *fixture = doc->fixture(fixtureId);
+    if (fixture == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
+
+    MonitorProperties *monitor = doc->monitorProperties();
+
+    QColor colour;
+    if (gel != nullptr && gel->isEmpty() == false)
+    {
+        colour = QColor(*gel);
+        if (colour.isValid() == false)
+            return Result::failure(QStringLiteral("\"%1\" is not a colour").arg(*gel));
+    }
+
+    /* Whatever it had, so a request that moves a lamp does not also throw away
+       the gel somebody set on it. */
+    const QVector3D was = monitor->fixturePosition(fixtureId, 0, 0);
+    const QVector3D turned = monitor->fixtureRotation(fixtureId, 0, 0);
+
+    const QVector3D position(x != nullptr ? float(*x) : was.x(),
+                             y != nullptr ? float(*y) : was.y(),
+                             was.z());
+
+    monitor->setFixturePosition(fixtureId, 0, 0, position);
+
+    if (rotation != nullptr)
+        monitor->setFixtureRotation(fixtureId, 0, 0, QVector3D(turned.x(), float(*rotation),
+                                                               turned.z()));
+
+    if (gel != nullptr)
+        monitor->setFixtureGelColor(fixtureId, 0, 0, colour);
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::clearPlanPosition(Doc *doc, quint32 fixtureId)
+{
+    if (doc->fixture(fixtureId) == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
+
+    MonitorProperties *monitor = doc->monitorProperties();
+    if (monitor->containsFixture(fixtureId) == false)
+        return Result::failure(QStringLiteral("That fixture is not on the plan"));
+
+    monitor->removeFixture(fixtureId, 0, 0);
 
     doc->setModified();
     return Result::success();
