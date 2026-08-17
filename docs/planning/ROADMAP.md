@@ -267,7 +267,7 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 - [x] Universos: alta, baja, nombre, passthrough, y **patch de salida** con los plugins y líneas que el daemon tiene cargados. Un universo sin salida sale marcado, porque no llega a nada y el proyecto se ve igual de sano.
 - [x] `GET /api/v1/universes` informa ahora también del patch de entrada y del passthrough: un universo en passthrough ignora la mesa, y el operador no tenía otra forma de enterarse.
 - [x] **Grupos de fixtures en la interfaz**, con su orden: para una matriz de barras de píxel ese orden no es decoración, es lo que decide por dónde corre el efecto, así que añadir un fixture concatena en vez de recolocar el grupo entero.
-- [ ] Grupos de canales.
+- [x] **Grupos de canales**, con su fader donde se construyen. No es un grupo de fixtures: junta canales sueltos (el dímer de una, el estrobo de otra, el ventilador de la máquina de humo) bajo un único fader, y vive en el documento, no en la consola — así que ningún submáster lo escala y su id no tiene nada que ver con el de un widget. El motor acepta cualquier número de canal y lo escribe en la dirección del fixture más el desplazamiento, así que un canal más allá del último aterriza sobre el fixture de al lado: se rechaza en el borde. Y lo que un grupo suelta —un canal quitado, el grupo entero borrado— se baja a cero, porque un canal que no es de intensidad se queda exactamente donde estaba y el único mando que podía bajarlo es el que acaba de desaparecer.
 - [ ] Modificadores de canal.
 
 ### F5 — Funciones: los diez tipos 🔨

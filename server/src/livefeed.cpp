@@ -338,6 +338,43 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         return;
     }
 
+    /* A channels group moves like a fader, but its id is the document's, not
+       the console's. Kept as a message of its own so a client never has to know
+       which id space a number belongs to -- and so that a group id and a widget
+       id that happen to both be 3 cannot be confused for one another. */
+    if (type == QStringLiteral("channelgroup"))
+    {
+        const int rawId = message.value("id").toInt(-1);
+        const int raw = message.value("value").toInt(-1);
+        const quint32 sliderId = LevelSource::channelGroupSlider(quint32(rawId));
+
+        if (rawId < 0 || raw < 0 || raw > 255
+            || m_engine->levels()->knows(sliderId) == false)
+        {
+            QJsonObject error;
+            error["type"] = "error";
+            error["error"] = QStringLiteral("No such channels group, or value out of range");
+            sendJson(socket, error);
+            return;
+        }
+
+        m_engine->levels()->setValue(sliderId, uchar(raw));
+
+        QJsonObject update;
+        update["type"] = "channelgroup";
+        update["id"] = rawId;
+        update["value"] = raw;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(update).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated && it.key() != socket)
+                it.key()->sendTextMessage(payload);
+        }
+        return;
+    }
+
     if (type == QStringLiteral("xypad"))
     {
         const quint32 id = quint32(message.value("id").toInt(-1));

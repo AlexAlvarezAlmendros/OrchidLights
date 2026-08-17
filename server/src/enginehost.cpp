@@ -41,6 +41,7 @@
 #include "audioplugincache.h"
 #include "inputoutputmap.h"
 #include "mastertimer.h"
+#include "channelsgroup.h"
 #include "function.h"
 #include "universe.h"
 #include "fixture.h"
@@ -167,6 +168,22 @@ void EngineHost::teachSliders()
         return;
 
     m_levels->forgetSliders();
+
+    /* Channels groups first, and outside the console walk on purpose: they
+       belong to the document, not to the Virtual Console, so they must survive
+       a project whose console cannot be parsed at all. */
+    for (const ChannelsGroup *group : m_doc->channelsGroups())
+    {
+        if (group == nullptr)
+            continue;
+
+        QList<LevelSource::Channel> channels;
+        for (const SceneValue &value : group->getChannels())
+            channels.append(qMakePair(value.fxi, value.channel));
+
+        if (channels.isEmpty() == false)
+            m_levels->defineChannelGroup(group->id(), channels);
+    }
 
     VcWidget root;
     if (VirtualConsole::parse(m_preserved.sections, root) == false)
@@ -865,6 +882,94 @@ int EngineHost::forgetFixture(quint32 fixtureId)
     }
 
     return removed;
+}
+
+/*****************************************************************************
+ * Channels groups
+ *****************************************************************************/
+
+namespace
+{
+    /** What a group is holding right now, as level-source channels. */
+    QList<LevelSource::Channel> channelsOf(const ChannelsGroup *group)
+    {
+        QList<LevelSource::Channel> channels;
+        if (group == nullptr)
+            return channels;
+
+        for (const SceneValue &value : group->getChannels())
+            channels.append(qMakePair(value.fxi, value.channel));
+
+        return channels;
+    }
+}
+
+bool EngineHost::addChannelGroup(const QString &name, const QList<LevelSource::Channel> &channels,
+                                 quint32 &groupId, QString &errorMessage)
+{
+    DocWriter::Result result = DocWriter::Result::success();
+
+    /* Through the lock because teachSliders() afterwards is what puts the new
+       group on the wire; without it the group is in the file and does nothing
+       until the project is reloaded. */
+    withFixturesLocked([&]() {
+        result = DocWriter::addChannelsGroup(m_doc, name, channels, groupId);
+        return true;
+    });
+
+    errorMessage = result.error;
+    return result.ok;
+}
+
+bool EngineHost::updateChannelGroup(quint32 groupId, const QString *name,
+                                    const QList<LevelSource::Channel> *channels,
+                                    QString &errorMessage)
+{
+    const QList<LevelSource::Channel> before = channelsOf(m_doc->channelsGroup(groupId));
+
+    DocWriter::Result result = DocWriter::Result::success();
+
+    withFixturesLocked([&]() {
+        result = DocWriter::setChannelsGroup(m_doc, groupId, name, channels);
+        return true;
+    });
+
+    errorMessage = result.error;
+    if (result.ok == false)
+        return false;
+
+    /* Channels the group no longer has are channels nothing moves any more.
+       They stay latched at whatever the fader was holding, and the control that
+       could have lowered them is precisely the one just edited away. */
+    const QList<LevelSource::Channel> after = channelsOf(m_doc->channelsGroup(groupId));
+    QList<LevelSource::Channel> dropped;
+    for (const LevelSource::Channel &channel : before)
+    {
+        if (after.contains(channel) == false)
+            dropped.append(channel);
+    }
+
+    releaseLevels(dropped);
+    return true;
+}
+
+bool EngineHost::removeChannelGroup(quint32 groupId, QString &errorMessage)
+{
+    const QList<LevelSource::Channel> held = channelsOf(m_doc->channelsGroup(groupId));
+
+    DocWriter::Result result = DocWriter::Result::success();
+
+    withFixturesLocked([&]() {
+        result = DocWriter::removeChannelsGroup(m_doc, groupId);
+        return true;
+    });
+
+    errorMessage = result.error;
+    if (result.ok == false)
+        return false;
+
+    releaseLevels(held);
+    return true;
 }
 
 void EngineHost::rememberConsole()

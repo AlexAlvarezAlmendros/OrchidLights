@@ -16,6 +16,9 @@ export interface LiveHandlers {
   onConnection: (state: Connection) => void
   /** Another client moved a fader; ours needs to follow. */
   onSlider?: (id: number, value: number) => void
+  /** Another client moved a channels group. Its own message rather than a
+   *  slider, because group ids and widget ids are different id spaces. */
+  onChannelGroup?: (id: number, value: number) => void
   onPad?: (id: number, x: number, y: number) => void
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
@@ -80,6 +83,9 @@ export class Live {
         case 'speeddial':
           this.handlers.onSlider?.(message.id, message.value)
           break
+        case 'channelgroup':
+          this.handlers.onChannelGroup?.(message.id, message.value)
+          break
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)
           break
@@ -130,6 +136,12 @@ export class Live {
 
   setSlider(id: number, value: number): void {
     this.send({ type: 'slider', id, value })
+  }
+
+  /** Move a channels group. Addressed by group id, which is the document's own
+   *  numbering and has nothing to do with the console's. */
+  setChannelGroup(id: number, value: number): void {
+    this.send({ type: 'channelgroup', id, value })
   }
 
   /** Switch an audio triggers widget on or off. The daemon holds the
