@@ -224,6 +224,12 @@ jobs:
       - name: Smoke test - a matrix widget applies its presets
         run: ./server/test/matrix-smoke.sh orchidlightsd server/test/data/vc-matrix.qxw
 
+      # A runner has no microphone, which is the point: the daemon has to report
+      # that it could not listen rather than claim it is listening. The bars,
+      # the switch and the input list are checked either way.
+      - name: Smoke test - audio triggers say what they can and cannot hear
+        run: ./server/test/audio-smoke.sh orchidlightsd server/test/data/vc-audio.qxw
+
       # The property everything in F6 rests on: a Virtual Console goes through
       # the node tree and comes back identical. If this fails, editing widgets
       # stops being safe.
@@ -252,6 +258,7 @@ jobs:
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-references.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-frames.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-matrix.qxw
+          ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-audio.qxw
           # The sample is built out of frames: 125 widgets, and until they were
           # rendered four of them were on screen.
           ./server/test/ui-smoke.sh orchidlightsd resources/samples/Sample.qxw

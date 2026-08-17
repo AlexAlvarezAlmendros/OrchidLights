@@ -151,6 +151,10 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
     m_levels = new LevelSource(m_doc);
     m_doc->masterTimer()->registerDMXSource(m_levels);
 
+    /* No microphone is opened here: the triggers only ask for one once a
+       widget is switched on. */
+    m_triggers = new AudioTriggers(m_doc, m_levels, this);
+
     m_doc->masterTimer()->start();
     m_running = true;
 
@@ -166,7 +170,16 @@ void EngineHost::teachSliders()
 
     VcWidget root;
     if (VirtualConsole::parse(m_preserved.sections, root) == false)
+    {
+        if (m_triggers != nullptr)
+            m_triggers->learn(VcWidget());
         return;
+    }
+
+    /* Before the walk below, because a bar that holds DMX channels registers
+       itself as a slider and the walk must not clear it again. */
+    if (m_triggers != nullptr)
+        m_triggers->learn(root);
 
     /* The walk carries the submasters enclosing each widget.
      *

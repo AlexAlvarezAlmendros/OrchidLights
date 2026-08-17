@@ -134,6 +134,37 @@ struct VcWidget
      *  applied, rather than at the next cycle. */
     bool instantApply = false;
 
+    /**
+     * Audio triggers: the bars an incoming spectrum drives.
+     *
+     * One bar per frequency band, plus a volume bar for the signal as a whole.
+     * A bar does one of three things as its band rises: hold a set of DMX
+     * channels at its level, start a function above its high threshold and stop
+     * it below the low one, or drive another widget.
+     *
+     * The thresholds are what make it usable rather than a light show that
+     * flickers with the room noise.
+     */
+    struct AudioBar
+    {
+        QString name;
+        int type = 0;        //!< 0 none, 1 DMX, 2 function, 3 widget
+        int index = 0;       //!< which band, or the volume bar
+        bool isVolume = false;
+        int minThreshold = 0;
+        int maxThreshold = 255;
+        int divisor = 1;
+
+        quint32 functionId = 0;
+        quint32 targetWidgetId = 0;
+        QVector<QPair<quint32, quint32>> dmxChannels;  //!< fixture, channel
+    };
+    QVector<AudioBar> audioBars;
+
+    /** How many spectrum bands the widget was built for. The capture has to be
+     *  asked for exactly this many or the frames do not line up. */
+    int audioBands = 0;
+
     /** Clock: "stopwatch", "countdown" or "clock", and its target time. */
     QString clockType;
     int clockTime = 0;

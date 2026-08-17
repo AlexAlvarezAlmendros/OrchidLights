@@ -347,7 +347,11 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 - [x] Honestidad: un submaster que no encierra nada escalable sale **no operable** y dice cuántos widgets escala. Uno solo en un marco de etiquetas y XY pads sería justo el control que no hace nada.
 - [x] **Widget de RGB Matrix.** Es un fader sobre la matriz —a cero la para, por encima le monta la intensidad, igual que un playback— más su banco de presets: un preset de color deja un color guardado en uno de los cinco huecos del algoritmo, uno de animación cambia el algoritmo **llevándose las propiedades de script con las que se guardó** (aplicado sin ellas es otra animación).
 - [x] Los knobs, las imágenes y los textos se enseñan pero **no se ofrecen**: son continuos o necesitan un fichero. La primera versión del predicado los daba por aplicables porque `"Color1Knob"` también empieza por `"Color"` — lo cazó el test de interfaz contando cuántos salían habilitados.
-- [ ] Control de `audiotriggers`. Hay captura de audio en el motor (backend Qt6) y en esta máquina se ven dos entradas, así que es viable; queda el espectro por bandas y los umbrales por barra.
+- [x] **Audio triggers.** El motor abre el micro, hace la FFT y reparte las bandas; cada barra sujeta unos canales DMX a su nivel, arranca una función al pasar un umbral y la para al bajar de otro, o mueve otro widget. **Verificado de punta a punta**: con un micrófono con señal, el ruido de la sala movió los canales 1 y 2 (picos de 175 y 70) mientras el 3, que no tiene barra, no se tocó.
+- [x] **Dos umbrales, no uno.** Un único punto de cruce hace que la función parpadee alrededor de él, que en una lámpara es un estrobo que nadie pidió.
+- [x] **El micrófono no se abre hasta que alguien lo enciende**, y se suelta cuando se apaga el último. Es un dispositivo que el operador puede estar usando para otra cosa.
+- [x] **Elección de entrada**, `GET`/`PUT /api/v1/audio`. Es la diferencia entre un widget que no funciona y uno que escucha el conector equivocado: en esta máquina la entrada por defecto de Qt es un jack de auriculares sin nada enchufado, y desde la consola las dos cosas se ven idénticas. La captura ya leía la clave de `QSettings`; solo faltaba poder escribirla.
+- [x] Una barra que sujeta canales se registra en `LevelSource` como cualquier otro fader, así que sale en el hilo del timer, tiene su propio fader y la escalan los submasters que la envuelven, sin que esta clase sepa que existen.
 - [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
       (MIDI/OSC) por widget.
 

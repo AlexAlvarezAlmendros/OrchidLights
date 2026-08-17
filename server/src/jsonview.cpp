@@ -406,6 +406,50 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
         json["controllable"] = true;
     }
 
+    if (widget.audioBars.isEmpty() == false || widget.audioBands > 0)
+    {
+        QJsonArray bars;
+        for (const VcWidget::AudioBar &bar : widget.audioBars)
+        {
+            /* Bars of type 0 are unassigned: QLC+ writes the widget out only
+               when at least one is assigned, but the rest still appear. */
+            if (bar.type == 0)
+                continue;
+
+            QJsonObject entry;
+            entry["name"] = bar.name;
+            entry["index"] = bar.index;
+            entry["volume"] = bar.isVolume;
+            entry["minThreshold"] = bar.minThreshold;
+            entry["maxThreshold"] = bar.maxThreshold;
+
+            switch (bar.type)
+            {
+            case 1:
+                entry["drives"] = QStringLiteral("dmx");
+                entry["channels"] = bar.dmxChannels.count();
+                break;
+            case 2:
+                entry["drives"] = QStringLiteral("function");
+                entry["functionId"] = qint64(bar.functionId);
+                break;
+            case 3:
+                entry["drives"] = QStringLiteral("widget");
+                entry["widgetId"] = qint64(bar.targetWidgetId);
+                break;
+            default:
+                entry["drives"] = QStringLiteral("nothing");
+                break;
+            }
+
+            bars.append(entry);
+        }
+
+        json["bands"] = widget.audioBands;
+        json["bars"] = bars;
+        json["controllable"] = (bars.isEmpty() == false);
+    }
+
     if (widget.matrixPresets.isEmpty() == false)
     {
         QJsonArray presets;

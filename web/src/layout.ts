@@ -38,6 +38,21 @@ export interface VcWidget {
   foreground?: string
   page?: number
 
+  /** Audio triggers: how many bands the widget was built for, and what each
+   *  assigned bar drives. */
+  bands?: number
+  bars?: {
+    name: string
+    index: number
+    volume: boolean
+    minThreshold: number
+    maxThreshold: number
+    drives: string
+    functionId?: number
+    widgetId?: number
+    channels?: number
+  }[]
+
   /** Matrix widget: the presets it can apply. `applicable` is false for the
    *  kinds that are not buttons -- knobs, images and text. */
   presets?: { id: number; type: string; color?: string; resource?: string; applicable: boolean }[]

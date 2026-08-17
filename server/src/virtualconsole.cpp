@@ -90,6 +90,11 @@ namespace
            for a countdown the target as three attributes. It never writes a
            <Time> element -- that belongs to the speed dial, and reading a
            clock's time from there meant it was always zero. */
+        if (widget.type == QStringLiteral("audiotriggers"))
+        {
+            widget.audioBands = widgetAttributes.value(QStringLiteral("BarsNumber")).toInt();
+        }
+
         if (widget.type == QStringLiteral("clock"))
         {
             widget.clockType = widgetAttributes.value(QStringLiteral("Type")).toString().toLower();
@@ -325,6 +330,53 @@ namespace
                 }
 
                 widget.matrixPresets.append(preset);
+            }
+            else if ((name == QStringLiteral("VolumeBar")
+                      || name == QStringLiteral("SpectrumBar"))
+                     && widget.type == QStringLiteral("audiotriggers"))
+            {
+                const QXmlStreamAttributes bar = reader.attributes();
+
+                VcWidget::AudioBar entry;
+                entry.isVolume = (name == QStringLiteral("VolumeBar"));
+                entry.name = bar.value(QStringLiteral("Name")).toString();
+                entry.type = bar.value(QStringLiteral("Type")).toInt();
+                entry.index = bar.value(QStringLiteral("Index")).toInt();
+
+                if (bar.hasAttribute(QStringLiteral("MinThreshold")))
+                    entry.minThreshold = bar.value(QStringLiteral("MinThreshold")).toInt();
+                if (bar.hasAttribute(QStringLiteral("MaxThreshold")))
+                    entry.maxThreshold = bar.value(QStringLiteral("MaxThreshold")).toInt();
+                if (bar.hasAttribute(QStringLiteral("Divisor")))
+                    entry.divisor = bar.value(QStringLiteral("Divisor")).toInt();
+
+                entry.functionId = bar.value(QStringLiteral("FunctionID")).toUInt();
+                entry.targetWidgetId = bar.value(QStringLiteral("WidgetID")).toUInt();
+
+                while (reader.readNextStartElement())
+                {
+                    if (reader.name() == QStringLiteral("DMXChannels"))
+                    {
+                        /* "fixture,channel,fixture,channel,..." in one string.
+                           An odd count means a truncated pair, and taking the
+                           lone value as a fixture with channel zero would hold
+                           a channel nobody asked for. */
+                        const QStringList parts =
+                            reader.readElementText().split(QChar(','), Qt::SkipEmptyParts);
+
+                        for (int i = 0; i + 1 < parts.count(); i += 2)
+                        {
+                            entry.dmxChannels.append(
+                                qMakePair(parts.at(i).toUInt(), parts.at(i + 1).toUInt()));
+                        }
+                    }
+                    else
+                    {
+                        reader.skipCurrentElement();
+                    }
+                }
+
+                widget.audioBars.append(entry);
             }
             else if (name == QStringLiteral("Multipage"))
             {
