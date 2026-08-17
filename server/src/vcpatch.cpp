@@ -432,6 +432,16 @@ namespace
         return VcPatch::Result::success();
     }
 
+    /** Every child with this name, gone. */
+    void removeChildren(XmlNode &node, const QString &name)
+    {
+        for (int i = node.children.count() - 1; i >= 0; i--)
+        {
+            if (node.children.at(i).name == name)
+                node.children.removeAt(i);
+        }
+    }
+
     /**
      * QLC+ stores a colour as a decimal ARGB integer, which is QRgb printed
      * with QString::number. Anything else in that element and the desktop reads
@@ -462,7 +472,15 @@ namespace
             XmlNode &appearance = widget.childOrCreate(QStringLiteral("Appearance"));
 
             /* null is "back to the default", which is a thing an operator asks
-               for and which an empty string does not say. */
+               for and which an empty string does not say.
+             *
+               Written as the word "Default", which is exactly what the desktop
+               writes and reads (vcwidget.cpp:872 applies anything that is not
+               Default and ignores Default itself). Removing the element
+               instead would mean the same thing to every reader -- but it would
+               also mean this daemon deletes nodes on a project it barely
+               models, to save four lines of XML that QLC+ puts back the next
+               time it saves. */
             if (value.isNull())
             {
                 appearance.childOrCreate(QString::fromLatin1(element)).text =
@@ -555,11 +573,7 @@ namespace
         {
             /* Removed, not blanked: an <Input> with no attributes is read by
                QLC+ as universe 0, channel 0 -- a binding to something real. */
-            for (int i = widget.children.count() - 1; i >= 0; i--)
-            {
-                if (widget.children.at(i).name == QStringLiteral("Input"))
-                    widget.children.removeAt(i);
-            }
+            removeChildren(widget, QStringLiteral("Input"));
             return Result::success();
         }
 

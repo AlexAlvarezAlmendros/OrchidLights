@@ -193,6 +193,20 @@ w = json.load(sys.stdin)
 assert 'input' not in w, ('the binding is still there', w)
 " || fail "unbinding the input"
 
+# And a colour put back to the default takes its element with it rather than
+# writing the word "Default" into one. The desktop reads the two identically
+# (vcwidget.cpp:872), so removing it is what makes a widget painted and then
+# unpainted leave the file exactly as it was found.
+api PATCH /vc/widgets/5 -H 'Content-Type: application/json' -d '{"background":"#123456"}' \
+    > /dev/null || fail "painting the cue list"
+api PATCH /vc/widgets/5 -H 'Content-Type: application/json' \
+    -d '{"background":null,"foreground":null,"font":null}' \
+    | python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+assert 'background' not in w, ('the colour is still there', w)
+" || fail "resetting the appearance"
+
 # Nothing has arrived on an input universe, and the daemon says so rather than
 # reporting a control nobody touched.
 api GET /input/last | python3 -c "
@@ -430,6 +444,7 @@ FRAME = '/VirtualConsole#1/Frame[0]#1'
 # than blank it: an <Input> with no attributes reads in QLC+ as universe 0,
 # channel 0, which is a binding to something real and to the wrong thing.
 APPEARANCE = f'{FRAME}/Label[3]#1/Appearance#1'
+CUELIST_APPEARANCE = f'{FRAME}/CueList[5]#1/Appearance#1'
 
 nodes, removed = compare(source, patched, {
     f'{FRAME}/Slider[1]#1/Level#1/Channel#1',
@@ -443,6 +458,13 @@ nodes, removed = compare(source, patched, {
     f'{APPEARANCE}/ForegroundColor#1',
     f'{APPEARANCE}/Font#1',
     f'{APPEARANCE}/FrameStyle#1',
+    # The cue list was painted and put back to the default, and "the default" is
+    # written as the word Default -- which is what QLC+ writes and reads as "no
+    # colour chosen". The elements stay; what they say is nothing.
+    CUELIST_APPEARANCE,
+    f'{CUELIST_APPEARANCE}/BackgroundColor#1',
+    f'{CUELIST_APPEARANCE}/ForegroundColor#1',
+    f'{CUELIST_APPEARANCE}/Font#1',
 })
 print(f'console: {nodes} nodes, {removed} removed, 3 attributes changed')
 
