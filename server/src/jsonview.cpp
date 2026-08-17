@@ -76,6 +76,25 @@ QJsonObject JsonView::fixture(const Fixture *fixture)
        right and one that is right. */
     json["resolved"] = (def != nullptr && mode != nullptr);
 
+    /* How many of its channels pass through a curve on the way out.
+     *
+     * Only the count, so the patch list can mark the fixtures worth opening: a
+     * lamp behaving oddly is explained by a modifier more often than by
+     * anything else in the patch, and there is no other way to notice one
+     * without opening every fixture in turn.
+     *
+     * The const_cast is Fixture::channelModifier missing a const overload
+     * upstream; it reads a member and changes nothing. */
+    Fixture *mutableFixture = const_cast<Fixture *>(fixture);
+    int modifiers = 0;
+    for (quint32 i = 0; i < fixture->channels(); i++)
+    {
+        if (mutableFixture->channelModifier(i) != nullptr)
+            modifiers++;
+    }
+    if (modifiers > 0)
+        json["modifiers"] = modifiers;
+
     return json;
 }
 

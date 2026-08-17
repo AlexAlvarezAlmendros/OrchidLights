@@ -42,6 +42,8 @@
 #include "qlcchannel.h"
 #include "qlcfixturedef.h"
 #include "fixturegroup.h"
+#include "channelmodifier.h"
+#include "qlcmodifierscache.h"
 #include "fixture.h"
 #include "installpaths.h"
 #include "qlcconfig.h"
@@ -303,7 +305,7 @@ void ApiServer::registerRoutes()
         if (ok == false)
             return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
 
-        const Fixture *fixture = doc->fixture(id);
+        Fixture *fixture = doc->fixture(id);
         if (fixture == nullptr)
             return jsonError(StatusCode::NotFound, QStringLiteral("No such fixture"));
 
@@ -320,6 +322,14 @@ void ApiServer::registerRoutes()
                                                : QStringLiteral("Canal %1").arg(i + 1);
             if (channel != nullptr)
                 entry["group"] = QLCChannel::groupToString(channel->group());
+
+            /* The modifier bends every value this channel puts out, and it is
+               part of the patch rather than of any cue -- so a lamp behaving
+               oddly is explained here or nowhere. */
+            const ChannelModifier *modifier = fixture->channelModifier(i);
+            if (modifier != nullptr)
+                entry["modifier"] = modifier->name();
+
             channels.append(entry);
         }
         body["channelList"] = channels;
@@ -1170,6 +1180,112 @@ void ApiServer::registerRoutes()
 
         QJsonObject response;
         response["removed"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* Channel modifiers: the curve a channel's values pass through on the way
+     * out.
+     *
+     * "Invert" turns a fader upside down; "Exponential Deep" bends a dimmer to
+     * match a lamp that does not fade linearly; "Always Full" pins a channel
+     * that has to stay open. It belongs to the patch rather than to any cue,
+     * which is why it is edited on the fixture and not in a scene.
+     */
+    m_server->route("/api/v1/modifiers", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray names;
+        for (const QString &name : doc->modifiersCache()->templateNames())
+            names.append(name);
+
+        QJsonObject body;
+        body["modifiers"] = names;
+        return QHttpServerResponse(body);
+    });
+
+    /* The curve itself, 256 values.
+     *
+     * Worth a route, because the names are the only thing a client has to go on
+     * and they do not say much: "Exponential Medium" and "Exponential Deep" are
+     * both plausible and only one of them is what the lamp needs. Drawn, they
+     * are obvious. */
+    m_server->route("/api/v1/modifiers/<arg>", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &name, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        ChannelModifier *modifier = doc->modifiersCache()->modifier(name);
+        if (modifier == nullptr)
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No channel modifier named \"%1\"").arg(name));
+
+        QJsonArray curve;
+        for (int i = 0; i < 256; i++)
+            curve.append(int(modifier->getValue(uchar(i))));
+
+        QJsonObject body;
+        body["name"] = modifier->name();
+        body["curve"] = curve;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/fixtures/<arg>/modifiers", QHttpServerRequest::Method::Put,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        /* Absent is not empty: a PUT that forgot the key, or a malformed body,
+           would otherwise read as "take every modifier off this fixture". */
+        if (body.value("modifiers").isObject() == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send a \"modifiers\" object of "
+                                            "{\"<channel>\": \"<name>\"}. To clear them all, "
+                                            "send an empty one."));
+        }
+
+        const QJsonObject wanted = body.value("modifiers").toObject();
+        QMap<quint32, QString> byChannel;
+
+        for (auto it = wanted.constBegin(); it != wanted.constEnd(); ++it)
+        {
+            bool channelOk = false;
+            const uint channel = it.key().toUInt(&channelOk);
+            if (channelOk == false)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("\"%1\" is not a channel number").arg(it.key()));
+            }
+
+            /* null clears one channel without having to send the rest. */
+            byChannel.insert(quint32(channel),
+                             it.value().isNull() ? QString() : it.value().toString());
+        }
+
+        DocWriter::Result result = DocWriter::Result::success();
+
+        /* Through the lock: this claims the universes to push the new curves
+           down, and the timer thread is writing to them. */
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::setChannelModifiers(doc, id, byChannel);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        response["modifiers"] = wanted;
         return QHttpServerResponse(response);
     });
 

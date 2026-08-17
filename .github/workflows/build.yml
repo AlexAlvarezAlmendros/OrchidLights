@@ -237,6 +237,14 @@ jobs:
       - name: Smoke test - channels groups drive their channels and let go of them
         run: ./server/test/channelgroup-smoke.sh orchidlightsd server/test/data/channel-groups.qxw
 
+      # A channel modifier is the curve a channel's values pass through on the
+      # way out, and it belongs to the patch rather than to any cue. Read off
+      # the wire, including the case the naive implementation gets wrong: a
+      # channel left latched with nothing holding it, which is written by
+      # nobody and would stay uncurved for as long as the look was up.
+      - name: Smoke test - channel modifiers bend what they say they bend
+        run: ./server/test/modifier-smoke.sh orchidlightsd server/test/data/modifiers.qxw
+
       # The property everything in F6 rests on: a Virtual Console goes through
       # the node tree and comes back identical. If this fails, editing widgets
       # stops being safe.
@@ -267,6 +275,7 @@ jobs:
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-matrix.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-audio.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/channel-groups.qxw
+          ./server/test/ui-smoke.sh orchidlightsd server/test/data/modifiers.qxw
           # The sample is built out of frames: 125 widgets, and until they were
           # rendered four of them were on screen.
           ./server/test/ui-smoke.sh orchidlightsd resources/samples/Sample.qxw

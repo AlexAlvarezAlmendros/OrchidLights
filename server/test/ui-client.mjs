@@ -494,6 +494,66 @@ try {
   })()`)
   check('channels groups can be built from the browser', channelGrouped === 'ok', channelGrouped)
 
+  /* Channel modifiers: the curve a channel's values pass through on the way
+     out. Driven here because the panel is three round trips deep -- open the
+     fixture, read its channels, read the curve of whatever is attached -- and
+     each of them can fail in a way that leaves a control that looks operable. */
+  const curved = await evaluate(`(async () => {
+    const tab = [...document.querySelectorAll('.tabs button')].find(b => b.textContent.startsWith('Fixtures'))
+    if (!tab) return 'no fixtures tab'
+    tab.click()
+    await new Promise(r => setTimeout(r, 700))
+
+    const row = document.querySelector('.table-row')
+    if (!row) return 'no fixtures in this project'
+
+    const toggle = [...row.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('∿'))
+    if (!toggle) return 'no curves button'
+    toggle.click()
+    await new Promise(r => setTimeout(r, 1200))
+
+    const panel = document.querySelector('.modifiers')
+    if (!panel) return 'the panel never opened'
+
+    const rows = panel.querySelectorAll('.channels li')
+    if (rows.length === 0) return 'the panel lists no channels'
+
+    const select = panel.querySelector('select')
+    if (!select) return 'no modifier picker'
+    const invert = [...select.options].find(o => o.value === 'Invert')
+    if (!invert) return 'the templates did not load: ' + [...select.options].map(o => o.value).join(',')
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    setter.call(select, 'Invert')
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 1600))
+
+    const after = document.querySelector('.modifiers')
+    if (!after) return 'the panel closed itself'
+    if (after.querySelector('select').value !== 'Invert') return 'the modifier did not stick'
+
+    /* Drawn, not merely named: the shape is the only thing that tells
+       Exponential Medium from Exponential Deep. */
+    const curve = after.querySelector('svg.curve polyline')
+    if (!curve) return 'the curve was not drawn'
+    const points = curve.getAttribute('points').split(' ')
+    if (points.length !== 256) return 'the curve has ' + points.length + ' points'
+
+    // Invert: the first point is at the top of the box and the last at the bottom.
+    const y = p => Number(p.split(',')[1])
+    if (!(y(points[0]) < 1 && y(points[255]) > 99)) {
+      return 'the curve drawn is not the one chosen: ' + points[0] + ' .. ' + points[255]
+    }
+
+    setter.call(select, '')
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 1600))
+
+    const cleared = document.querySelector('.modifiers select')
+    return cleared && cleared.value === '' ? 'ok' : 'it could not be taken off again'
+  })()`)
+  check('channel modifiers can be attached from the browser', curved === 'ok', curved)
+
   /* Two people on the same show. An edit made anywhere else has to arrive
      here, or the second phone is quietly showing a console that no longer
      exists -- and the first anyone finds out is mid-cue. */
