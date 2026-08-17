@@ -267,7 +267,8 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 - [x] **Mapa de 512 canales** por universo, con cada fixture de un color: un solape se ve antes de convertirse en una luz que no responde. La alta ya lo rechaza (`Channel 1 of universe 1 is already used by "Par 1"`).
 - [x] Universos: alta, baja, nombre, passthrough, y **patch de salida** con los plugins y líneas que el daemon tiene cargados. Un universo sin salida sale marcado, porque no llega a nada y el proyecto se ve igual de sano.
 - [x] `GET /api/v1/universes` informa ahora también del patch de entrada y del passthrough: un universo en passthrough ignora la mesa, y el operador no tenía otra forma de enterarse.
-- [ ] Grupos de fixtures y grupos de canales en la interfaz (la API ya está).
+- [x] **Grupos de fixtures en la interfaz**, con su orden: para una matriz de barras de píxel ese orden no es decoración, es lo que decide por dónde corre el efecto, así que añadir un fixture concatena en vez de recolocar el grupo entero.
+- [ ] Grupos de canales.
 - [ ] Modificadores de canal.
 
 ### F5 — Funciones: los diez tipos 🔨
@@ -285,7 +286,9 @@ Sin esto no hay CRUD de nada, así que va primero y va completa.
 - [x] **Gestor de funciones en el navegador.** Lista agrupada por tipo, crear los diez, renombrar, tiempos, arrancar/parar y borrar. El borrado enseña a quién le hace falta la función antes de forzarlo, en vez de dejar pasos de chaser apuntando a nada.
 - [x] Edición de cuerpo para las tres formas que son listas de cosas: valores de una **escena** (por fixture y canal, con nombre), pasos de un **chaser**, miembros de una **colección**. Los demás tipos lo dicen en vez de enseñar un editor vacío que se leería como "esta función no tiene nada".
 
-**Pendiente:** cuerpo de `Show` — el timeline multipista, que es F7. Y la edición de EFX, RGBMatrix, Script, Audio y Vídeo desde la interfaz: la API ya está.
+- [x] **Lectura y edición de los cinco cuerpos que faltaban** — EFX (patrón, geometría y cabezas con nombre), RGBMatrix (algoritmo, grupo y tantos colores como acepte el algoritmo), Script, Audio y Vídeo. Las claves de lectura son las mismas que acepta el `PUT`, para que un cliente lea un cuerpo, cambie un campo y lo mande de vuelta sin traducir.
+
+**Pendiente:** cuerpo de `Show` — el timeline multipista, que es F7, y el único que sigue diciendo honestamente que no es legible.
 
 > **Peligro que el mapeo destapó y que ahora se respeta**: `EFX::m_fixtures` es una `QList` sin mutex que `EFX::write()` recorre **en el hilo del `MasterTimer` cada 20 ms**. Reconstruirla en caliente libera objetos que ese hilo está usando. Cambiar los fixtures de un EFX **lo para y espera** antes de tocar la lista, igual que hacen los dos editores de escritorio. Lo mismo para rebindear la escena de un Sequence, cuyos pasos solo significan algo contra ella.
 
