@@ -19,6 +19,7 @@ import {
   type FunctionState,
   api,
 } from './api'
+import { ShowTimeline } from './show'
 
 /** The seven EFX patterns the engine has. Fixed, unlike the RGB algorithms,
  *  which are scripts and are asked for at runtime. */
@@ -50,6 +51,7 @@ export function Functions({
   functions,
   fixtures,
   running,
+  shows,
   revision,
   onToggle,
   onChanged,
@@ -57,6 +59,9 @@ export function Functions({
   functions: FunctionState[]
   fixtures: FixtureState[]
   running: Set<number>
+  /** Where each running show has got to, by function id. The daemon's clock,
+   *  not ours: a local timer drifts and keeps going after the show ends. */
+  shows: Record<number, number>
   revision: number
   onToggle: (id: number) => void
   onChanged: () => void
@@ -168,6 +173,8 @@ export function Functions({
           functions={functions}
           fixtures={fixtures}
           revision={revision}
+          elapsed={shows[current.id]}
+          running={running.has(current.id)}
           onRun={run}
           onClose={() => setSelected(null)}
         />
@@ -181,6 +188,8 @@ function FunctionEditor({
   functions,
   fixtures,
   revision,
+  elapsed,
+  running,
   onRun,
   onClose,
 }: {
@@ -188,6 +197,8 @@ function FunctionEditor({
   functions: FunctionState[]
   fixtures: FixtureState[]
   revision: number
+  elapsed: number | undefined
+  running: boolean
   onRun: (action: () => Promise<unknown>) => Promise<void>
   onClose: () => void
 }) {
@@ -327,6 +338,17 @@ function FunctionEditor({
       )}
       {body?.type === 'Collection' && (
         <Members fn={fn} body={body} functions={functions} onApply={apply} />
+      )}
+      {body?.type === 'Show' && (
+        <ShowTimeline
+          fn={fn}
+          body={body}
+          functions={functions}
+          elapsed={elapsed}
+          running={running}
+          onRun={onRun}
+          onReload={reloadBody}
+        />
       )}
       {body?.note && <p className="hint">{body.note}</p>}
 

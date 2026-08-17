@@ -51,8 +51,40 @@ export interface FunctionBody {
   scene?: number // Sequence
   sceneName?: string
 
+  // Show
+  tracks?: ShowTrack[]
+  duration?: number
+  timeDivision?: string
+  bpm?: number
+
   /** Present only when the body is honestly not readable yet. */
   note?: string
+}
+
+/** One track of a show: a scene, and the functions placed along it in time. */
+export interface ShowTrack {
+  id: number
+  name: string
+  mute: boolean
+  scene?: number
+  sceneName?: string
+  functions: ShowItem[]
+}
+
+export interface ShowItem {
+  id: number
+  function: number
+  /** Milliseconds from the start of the show. */
+  start: number
+  /** Milliseconds. Never 0 on the way out: an item stored at 0 borrows the
+   *  function's own duration, and that is what the timeline honours. */
+  duration: number
+  locked: boolean
+  color?: string
+  name: string
+  type?: string
+  /** The function it points at is gone. The show plays silence there. */
+  missing?: boolean
 }
 
 export interface FixtureGroup {
@@ -256,6 +288,48 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   removeGroup: (id: number) => json<unknown>(`/api/v1/fixture-groups/${id}`, { method: 'DELETE' }),
+
+  addTrack: (showId: number, body: { name?: string; scene?: number }) =>
+    json<{ id: number }>(`/api/v1/functions/${showId}/tracks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  patchTrack: (
+    showId: number,
+    trackId: number,
+    patch: { name?: string; mute?: boolean; scene?: number },
+  ) =>
+    json<unknown>(`/api/v1/functions/${showId}/tracks/${trackId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  removeTrack: (showId: number, trackId: number) =>
+    json<unknown>(`/api/v1/functions/${showId}/tracks/${trackId}`, { method: 'DELETE' }),
+
+  addShowItem: (
+    showId: number,
+    trackId: number,
+    body: { function: number; start: number; duration?: number },
+  ) =>
+    json<{ id: number }>(`/api/v1/functions/${showId}/tracks/${trackId}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  patchShowItem: (
+    showId: number,
+    itemId: number,
+    patch: { start?: number; duration?: number; color?: string; locked?: boolean },
+  ) =>
+    json<unknown>(`/api/v1/functions/${showId}/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  removeShowItem: (showId: number, itemId: number) =>
+    json<unknown>(`/api/v1/functions/${showId}/items/${itemId}`, { method: 'DELETE' }),
 
   /** The channel modifier templates the daemon loaded, by name. */
   modifiers: () => json<{ modifiers: string[] }>('/api/v1/modifiers'),

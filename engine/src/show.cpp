@@ -498,6 +498,14 @@ void Show::write(MasterTimer* timer, QList<Universe *> universes)
     if (isPaused())
         return;
 
+    /* Every other Function type does this and Show did not, so Function::elapsed()
+       stayed at 0 for the whole of a show: nothing outside the runner could say
+       where a pase had got to. The runner is even handed elapsed() when it is
+       built (see preRun), so the value was always meant to be kept.
+
+       Skipped while paused, which is what makes a paused show hold its place. */
+    incrementElapsed();
+
     m_runner->write(timer);
 }
 

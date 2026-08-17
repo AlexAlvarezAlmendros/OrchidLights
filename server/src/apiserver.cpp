@@ -1183,6 +1183,221 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response);
     });
 
+    /* Shows: the multi-track timeline.
+     *
+     * A show is the one function whose body is a screen rather than a list, and
+     * the only one this daemon could not read at all. A track holds a scene and
+     * carries functions placed in time; the sequences on it are that scene's
+     * values over the length of the show.
+     */
+    m_server->route("/api/v1/functions/<arg>/tracks", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 showId = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Show id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const quint32 sceneId = body.contains("scene")
+                                    ? quint32(body.value("scene").toInt(-1))
+                                    : Function::invalidId();
+
+        quint32 trackId = 0;
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::addShowTrack(doc, showId, body.value("name").toString(), sceneId,
+                                             trackId);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(trackId);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/functions/<arg>/tracks/<arg>", QHttpServerRequest::Method::Patch,
+                    [this, doc, denied](const QString &rawShow, const QString &rawTrack,
+                                        const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool showOk = false, trackOk = false;
+        const quint32 showId = rawShow.toUInt(&showOk);
+        const quint32 trackId = rawTrack.toUInt(&trackOk);
+        if (showOk == false || trackOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        const QString name = body.value("name").toString();
+        const bool mute = body.value("mute").toBool();
+        const quint32 scene = quint32(body.value("scene").toInt(-1));
+
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::setShowTrack(doc, showId, trackId,
+                                             body.contains("name") ? &name : nullptr,
+                                             body.contains("mute") ? &mute : nullptr,
+                                             body.contains("scene") ? &scene : nullptr);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(trackId);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/functions/<arg>/tracks/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, doc, denied](const QString &rawShow, const QString &rawTrack,
+                                        const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool showOk = false, trackOk = false;
+        const quint32 showId = rawShow.toUInt(&showOk);
+        const quint32 trackId = rawTrack.toUInt(&trackOk);
+        if (showOk == false || trackOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::removeShowTrack(doc, showId, trackId);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["removed"] = qint64(trackId);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/functions/<arg>/tracks/<arg>/items",
+                    QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QString &rawShow, const QString &rawTrack,
+                                        const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool showOk = false, trackOk = false;
+        const quint32 showId = rawShow.toUInt(&showOk);
+        const quint32 trackId = rawTrack.toUInt(&trackOk);
+        if (showOk == false || trackOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        if (body.value("function").isDouble() == false || body.value("function").toInt(-1) < 0)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Send a \"function\" id"));
+
+        const int start = body.value("start").toInt(0);
+        const int duration = body.value("duration").toInt(0);
+        if (start < 0 || duration < 0)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("A start and a duration are milliseconds, and neither "
+                                            "can be negative"));
+        }
+
+        quint32 itemId = 0;
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::addShowItem(doc, showId, trackId,
+                                            quint32(body.value("function").toInt()),
+                                            quint32(start), quint32(duration), itemId);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(itemId);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/functions/<arg>/items/<arg>", QHttpServerRequest::Method::Patch,
+                    [this, doc, denied](const QString &rawShow, const QString &rawItem,
+                                        const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool showOk = false, itemOk = false;
+        const quint32 showId = rawShow.toUInt(&showOk);
+        const quint32 itemId = rawItem.toUInt(&itemOk);
+        if (showOk == false || itemOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        const int start = body.value("start").toInt(-1);
+        const int duration = body.value("duration").toInt(-1);
+        if ((body.contains("start") && start < 0) || (body.contains("duration") && duration < 0))
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("A start and a duration are milliseconds, and neither "
+                                            "can be negative"));
+        }
+
+        const quint32 startValue = quint32(start);
+        const quint32 durationValue = quint32(duration);
+        const QString color = body.value("color").toString();
+        const bool locked = body.value("locked").toBool();
+
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::setShowItem(doc, showId, itemId,
+                                            body.contains("start") ? &startValue : nullptr,
+                                            body.contains("duration") ? &durationValue : nullptr,
+                                            body.contains("color") ? &color : nullptr,
+                                            body.contains("locked") ? &locked : nullptr);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(itemId);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/functions/<arg>/items/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, doc, denied](const QString &rawShow, const QString &rawItem,
+                                        const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool showOk = false, itemOk = false;
+        const quint32 showId = rawShow.toUInt(&showOk);
+        const quint32 itemId = rawItem.toUInt(&itemOk);
+        if (showOk == false || itemOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&]() {
+            result = DocWriter::removeShowItem(doc, showId, itemId);
+            return true;
+        });
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["removed"] = qint64(itemId);
+        return QHttpServerResponse(response);
+    });
+
     /* Channel modifiers: the curve a channel's values pass through on the way
      * out.
      *

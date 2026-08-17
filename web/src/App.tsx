@@ -58,6 +58,10 @@ export function App() {
   /* Channels groups, kept apart from the console's faders on purpose: a group
      and a widget can both be number 3 and have nothing to do with each other. */
   const [groupLevels, setGroupLevels] = useState<Record<number, number>>({})
+  /* Where each running show has got to, by function id. The daemon sends it
+     while one plays; a local timer would drift and would keep counting after
+     the show had stopped. */
+  const [shows, setShows] = useState<Record<number, number>>({})
   const [mode, setMode] = useState<Mode>('run')
   const [layout, setLayout] = useState<LayoutRows | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
@@ -90,6 +94,12 @@ export function App() {
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
       onChannelGroup: (id, value) => setGroupLevels((current) => ({ ...current, [id]: value })),
+      onShow: (id, elapsed, running) =>
+        setShows((current) => {
+          if (running) return { ...current, [id]: elapsed }
+          const { [id]: _gone, ...rest } = current
+          return rest
+        }),
       onPad: (id, x, y) => setPads((current) => ({ ...current, [id]: { x, y } })),
       onSpectrum: (bands, volume) => setSpectrum({ bands, volume }),
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
@@ -509,6 +519,7 @@ export function App() {
           <Functions
             functions={functions}
             fixtures={fixtures}
+            shows={shows}
             running={running}
             revision={revision}
             onToggle={toggle}

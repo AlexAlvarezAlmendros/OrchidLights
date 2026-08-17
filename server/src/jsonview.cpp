@@ -36,6 +36,9 @@
 #include "rgbmatrix.h"
 #include "efxfixture.h"
 #include "sequence.h"
+#include "showfunction.h"
+#include "show.h"
+#include "track.h"
 #include "script.h"
 #include "audio.h"
 #include "video.h"
@@ -371,9 +374,84 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
         return json;
     }
 
-    /* Only Show is left, and its body is a multi-track timeline -- a screen of
-       its own, not a list. Saying so beats an empty object that reads as "this
-       function is empty". */
+    if (function->type() == Function::ShowType)
+    {
+        /* A multi-track timeline. Each track carries functions placed at a
+           time, and what a track is *bound* to matters as much as what is on
+           it: a track holds a scene, and the sequences on that track are that
+           scene's values over time. A track whose scene is gone is a track
+           whose sequences address nothing. */
+        const Show *show = qobject_cast<const Show *>(function);
+
+        QJsonArray tracks;
+        quint32 total = 0;
+
+        for (const Track *track : show->tracks())
+        {
+            QJsonObject entry;
+            entry["id"] = qint64(track->id());
+            entry["name"] = track->name();
+            entry["mute"] = track->isMute();
+
+            const quint32 sceneId = track->getSceneID();
+            if (sceneId != Function::invalidId())
+            {
+                entry["scene"] = qint64(sceneId);
+                const Function *scene = doc->function(sceneId);
+                entry["sceneName"] = scene != nullptr ? scene->name()
+                                                      : QStringLiteral("(borrada)");
+            }
+
+            QJsonArray items;
+            for (const ShowFunction *item : track->showFunctions())
+            {
+                const Function *placed = doc->function(item->functionID());
+
+                QJsonObject one;
+                one["id"] = qint64(item->id());
+                one["function"] = qint64(item->functionID());
+                one["start"] = qint64(item->startTime());
+
+                /* The duration the timeline actually honours. A ShowFunction
+                   left at 0 borrows the function's own, and reporting the
+                   stored 0 would draw a bar of no width for something that
+                   plays for a minute. */
+                const quint32 duration = item->duration(doc);
+                one["duration"] = qint64(duration);
+                one["locked"] = item->isLocked();
+
+                if (item->color().isValid())
+                    one["color"] = item->color().name();
+
+                if (placed != nullptr)
+                {
+                    one["name"] = placed->name();
+                    one["type"] = Function::typeToString(placed->type());
+                }
+                else
+                {
+                    /* Reported rather than hidden: a show with a hole in it
+                       plays silence where a cue used to be, and the timeline is
+                       the only place that can say so. */
+                    one["missing"] = true;
+                    one["name"] = QStringLiteral("(borrada)");
+                }
+
+                total = qMax(total, item->startTime() + duration);
+                items.append(one);
+            }
+
+            entry["functions"] = items;
+            tracks.append(entry);
+        }
+
+        json["tracks"] = tracks;
+        json["duration"] = qint64(total);
+        json["timeDivision"] = Show::tempoToString(show->timeDivisionType());
+        json["bpm"] = show->timeDivisionBPM();
+        return json;
+    }
+
     json["note"] = QStringLiteral("The body of a %1 is not readable yet")
                        .arg(Function::typeToString(function->type()).toLower());
     return json;

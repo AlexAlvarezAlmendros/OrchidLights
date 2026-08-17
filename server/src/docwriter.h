@@ -222,6 +222,30 @@ namespace DocWriter
     /** Sequence: the scene it drives. Its steps use the chaser step calls. */
     Result setSequenceScene(Doc *doc, quint32 sequenceId, quint32 sceneId);
 
+    /* ---- Shows: the multi-track timeline ------------------------------- */
+
+    /**
+     * Tracks. A track holds a scene and carries functions placed in time; the
+     * sequences on it are that scene's values over the length of the show.
+     */
+    Result addShowTrack(Doc *doc, quint32 showId, const QString &name, quint32 sceneId,
+                        quint32 &trackId);
+    Result removeShowTrack(Doc *doc, quint32 showId, quint32 trackId);
+    Result setShowTrack(Doc *doc, quint32 showId, quint32 trackId, const QString *name,
+                        const bool *mute, const quint32 *sceneId);
+
+    /**
+     * One function placed on a track at a time.
+     *
+     * `duration` of 0 means "as long as the function itself lasts", which is
+     * what the engine stores and what the timeline honours.
+     */
+    Result addShowItem(Doc *doc, quint32 showId, quint32 trackId, quint32 functionId,
+                       quint32 start, quint32 duration, quint32 &itemId);
+    Result setShowItem(Doc *doc, quint32 showId, quint32 itemId, const quint32 *start,
+                       const quint32 *duration, const QString *color, const bool *locked);
+    Result removeShowItem(Doc *doc, quint32 showId, quint32 itemId);
+
     Result addFixtureGroup(Doc *doc, const QString &name, const QList<quint32> &fixtureIds,
                            quint32 &groupId);
     Result removeFixtureGroup(Doc *doc, quint32 groupId);

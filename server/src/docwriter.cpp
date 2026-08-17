@@ -33,6 +33,8 @@
 #include "script.h"
 #include "scene.h"
 #include "show.h"
+#include "showfunction.h"
+#include "track.h"
 #include "audio.h"
 #include "video.h"
 #include "efx.h"
@@ -690,6 +692,316 @@ DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
     }
 
     doc->inputOutputMap()->releaseUniverses(true);
+
+    doc->setModified();
+    return Result::success();
+}
+
+/*****************************************************************************
+ * Shows: the multi-track timeline
+ *****************************************************************************/
+
+namespace
+{
+    /** The show with this id, or nullptr with a reason set. */
+    Show *showById(Doc *doc, quint32 showId, QString &error)
+    {
+        Function *function = doc->function(showId);
+        if (function == nullptr || function->type() != Function::ShowType)
+        {
+            error = QStringLiteral("No show with id %1").arg(showId);
+            return nullptr;
+        }
+
+        return qobject_cast<Show *>(function);
+    }
+
+    /**
+     * What a track will accept.
+     *
+     * The desktop's own filter (ui/src/showmanager/showmanager.cpp:610): scenes,
+     * chasers, sequences, audio, video, matrices and EFX in; shows, scripts and
+     * collections out. The reasons differ and both matter -- a show inside a
+     * show is a loop the runner walks into, while a script or a collection has
+     * no duration at all, so there is no bar to draw and no end to stop it at.
+     */
+    bool placeable(Function::Type type)
+    {
+        switch (type)
+        {
+        case Function::SceneType:
+        case Function::ChaserType:
+        case Function::SequenceType:
+        case Function::AudioType:
+        case Function::VideoType:
+        case Function::RGBMatrixType:
+        case Function::EFXType:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    /** The track carrying this item, or nullptr. */
+    Track *trackOf(Show *show, quint32 itemId)
+    {
+        return show->getTrackFromShowFunctionID(itemId);
+    }
+}
+
+DocWriter::Result DocWriter::addShowTrack(Doc *doc, quint32 showId, const QString &name,
+                                          quint32 sceneId, quint32 &trackId)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    if (sceneId != Function::invalidId())
+    {
+        const Function *scene = doc->function(sceneId);
+        if (scene == nullptr || scene->type() != Function::SceneType)
+            return Result::failure(QStringLiteral("No scene with id %1").arg(sceneId));
+    }
+
+    /* The show is the track's QObject parent, and that is not decoration:
+       Track::createShowFunction reads it to get the next item id, and a track
+       without one hands every item the id 0 -- so the second item on a track
+       cannot be told from the first, and editing one edits both. The v4 desktop
+       has exactly that bug (ui/src/showmanager/showmanager.cpp:752). */
+    Track *track = new Track(sceneId, show);
+    track->setName(name.trimmed().isEmpty() ? QStringLiteral("Pista %1").arg(show->getTracksCount() + 1)
+                                            : name.trimmed());
+
+    if (show->addTrack(track) == false)
+    {
+        delete track;
+        return Result::failure(QStringLiteral("The engine refused the track"));
+    }
+
+    trackId = track->id();
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::removeShowTrack(Doc *doc, quint32 showId, quint32 trackId)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    if (show->track(trackId) == nullptr)
+        return Result::failure(QStringLiteral("No track with id %1 in \"%2\"")
+                                   .arg(trackId).arg(show->name()));
+
+    /* Not while it plays. The runner holds pointers into the tracks it is
+       stepping through, and freeing one underneath it is a crash rather than a
+       wrong cue. */
+    if (show->isRunning() && show->stopAndWait() == false)
+    {
+        return Result::failure(QStringLiteral("\"%1\" did not stop in time; refusing to change "
+                                              "its tracks while it runs").arg(show->name()));
+    }
+
+    if (show->removeTrack(trackId) == false)
+        return Result::failure(QStringLiteral("The engine refused to remove the track"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setShowTrack(Doc *doc, quint32 showId, quint32 trackId,
+                                          const QString *name, const bool *mute,
+                                          const quint32 *sceneId)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    Track *track = show->track(trackId);
+    if (track == nullptr)
+    {
+        return Result::failure(QStringLiteral("No track with id %1 in \"%2\"")
+                                   .arg(trackId).arg(show->name()));
+    }
+
+    if (name != nullptr && name->trimmed().isEmpty())
+        return Result::failure(QStringLiteral("A track needs a name"));
+
+    if (sceneId != nullptr && *sceneId != Function::invalidId())
+    {
+        const Function *scene = doc->function(*sceneId);
+        if (scene == nullptr || scene->type() != Function::SceneType)
+            return Result::failure(QStringLiteral("No scene with id %1").arg(*sceneId));
+    }
+
+    if (name != nullptr)
+        track->setName(name->trimmed());
+    if (mute != nullptr)
+        track->setMute(*mute);
+    if (sceneId != nullptr)
+        track->setSceneID(*sceneId);
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::addShowItem(Doc *doc, quint32 showId, quint32 trackId,
+                                         quint32 functionId, quint32 start, quint32 duration,
+                                         quint32 &itemId)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    Track *track = show->track(trackId);
+    if (track == nullptr)
+    {
+        return Result::failure(QStringLiteral("No track with id %1 in \"%2\"")
+                                   .arg(trackId).arg(show->name()));
+    }
+
+    Function *placed = doc->function(functionId);
+    if (placed == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(functionId));
+
+    if (placed->id() == showId)
+        return Result::failure(QStringLiteral("A show cannot be placed inside itself"));
+
+    if (placeable(placed->type()) == false)
+    {
+        return Result::failure(
+            QStringLiteral("A %1 cannot go on a timeline: it has no duration to draw or to stop "
+                           "it at")
+                .arg(Function::typeToString(placed->type()).toLower()));
+    }
+
+    /* Overlaps are refused rather than drawn on top of each other. Two things
+       on one track at the same time both play, and what the rig does is
+       whichever wrote last -- which is not something an operator can read off
+       a timeline that shows them stacked. */
+    const quint32 length = duration > 0 ? duration : placed->totalDuration();
+    const quint32 end = start + length;
+
+    for (const ShowFunction *existing : track->showFunctions())
+    {
+        const quint32 otherStart = existing->startTime();
+        const quint32 otherEnd = otherStart + existing->duration(doc);
+
+        if (start < otherEnd && otherStart < end)
+        {
+            const Function *other = doc->function(existing->functionID());
+            return Result::failure(
+                QStringLiteral("That overlaps \"%1\", which runs from %2 to %3 ms on this track")
+                    .arg(other != nullptr ? other->name() : QStringLiteral("(borrada)"))
+                    .arg(otherStart).arg(otherEnd));
+        }
+    }
+
+    ShowFunction *item = track->createShowFunction(functionId);
+    item->setStartTime(start);
+    item->setDuration(duration);
+
+    itemId = item->id();
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setShowItem(Doc *doc, quint32 showId, quint32 itemId,
+                                         const quint32 *start, const quint32 *duration,
+                                         const QString *color, const bool *locked)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    ShowFunction *item = show->showFunction(itemId);
+    Track *track = trackOf(show, itemId);
+    if (item == nullptr || track == nullptr)
+    {
+        return Result::failure(QStringLiteral("No item with id %1 in \"%2\"")
+                                   .arg(itemId).arg(show->name()));
+    }
+
+    if (item->isLocked() && (start != nullptr || duration != nullptr))
+    {
+        return Result::failure(QStringLiteral("That item is locked; unlock it before moving it"));
+    }
+
+    const quint32 newStart = start != nullptr ? *start : item->startTime();
+    const quint32 stored = duration != nullptr ? *duration : item->duration();
+    Function *placed = doc->function(item->functionID());
+    const quint32 length = stored > 0 ? stored
+                                      : (placed != nullptr ? placed->totalDuration() : 0);
+
+    for (const ShowFunction *existing : track->showFunctions())
+    {
+        if (existing == item)
+            continue;
+
+        const quint32 otherStart = existing->startTime();
+        const quint32 otherEnd = otherStart + existing->duration(doc);
+
+        if (newStart < otherEnd && otherStart < newStart + length)
+        {
+            const Function *other = doc->function(existing->functionID());
+            return Result::failure(
+                QStringLiteral("That would overlap \"%1\", which runs from %2 to %3 ms on this "
+                               "track")
+                    .arg(other != nullptr ? other->name() : QStringLiteral("(borrada)"))
+                    .arg(otherStart).arg(otherEnd));
+        }
+    }
+
+    QColor parsed;
+    if (color != nullptr)
+    {
+        parsed = QColor(*color);
+        if (parsed.isValid() == false)
+            return Result::failure(QStringLiteral("\"%1\" is not a colour").arg(*color));
+    }
+
+    if (start != nullptr)
+        item->setStartTime(*start);
+    if (duration != nullptr)
+        item->setDuration(*duration);
+    if (color != nullptr)
+        item->setColor(parsed);
+    if (locked != nullptr)
+        item->setLocked(*locked);
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::removeShowItem(Doc *doc, quint32 showId, quint32 itemId)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    ShowFunction *item = show->showFunction(itemId);
+    Track *track = trackOf(show, itemId);
+    if (item == nullptr || track == nullptr)
+    {
+        return Result::failure(QStringLiteral("No item with id %1 in \"%2\"")
+                                   .arg(itemId).arg(show->name()));
+    }
+
+    /* Same reason as removing a track: the runner is holding this. */
+    if (show->isRunning() && show->stopAndWait() == false)
+    {
+        return Result::failure(QStringLiteral("\"%1\" did not stop in time; refusing to change "
+                                              "it while it runs").arg(show->name()));
+    }
+
+    if (track->removeShowFunction(item) == false)
+        return Result::failure(QStringLiteral("The engine refused to remove the item"));
 
     doc->setModified();
     return Result::success();

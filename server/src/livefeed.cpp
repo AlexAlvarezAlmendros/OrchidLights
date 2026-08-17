@@ -707,6 +707,7 @@ void LiveFeed::flush()
         m_pending.clear();
         m_functionsDirty = false;
         m_chaserSteps.clear();
+        m_runningShows.clear();
         m_changed.clear();
         m_projectDirty = false;
         return;
@@ -726,6 +727,45 @@ void LiveFeed::flush()
             m_chaserSteps.insert(function->id(), step);
             m_functionsDirty = true;
         }
+    }
+
+    /* Where a running show has got to.
+     *
+     * Its own message rather than a field on the function list: elapsed changes
+     * every tick, and marking the list dirty for it would push every function
+     * in the project down every socket at the flush rate. This is three numbers.
+     *
+     * Without it a timeline is a drawing. With it the playhead is the show's
+     * own clock, which is the difference between watching a pase and looking at
+     * a picture of one. */
+    for (Function *function : m_engine->doc()->functions())
+    {
+        if (function->type() != Function::ShowType)
+            continue;
+
+        const bool running = function->isRunning();
+        if (running == false && m_runningShows.contains(function->id()) == false)
+            continue;
+
+        QJsonObject message;
+        message["type"] = "show";
+        message["id"] = qint64(function->id());
+        message["running"] = running;
+        message["elapsed"] = qint64(running ? function->elapsed() : 0);
+
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+
+        if (running)
+            m_runningShows.insert(function->id());
+        else
+            m_runningShows.remove(function->id());
     }
 
     /* The spectrum, at the flush rate rather than the capture's. The capture

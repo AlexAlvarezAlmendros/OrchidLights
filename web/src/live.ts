@@ -20,6 +20,9 @@ export interface LiveHandlers {
    *  slider, because group ids and widget ids are different id spaces. */
   onChannelGroup?: (id: number, value: number) => void
   onPad?: (id: number, x: number, y: number) => void
+  /** Where a running show has got to, in milliseconds. Sent at the flush rate
+   *  while one plays, and once more with running: false when it ends. */
+  onShow?: (id: number, elapsed: number, running: boolean) => void
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
   onChanged?: (what: string[]) => void
@@ -85,6 +88,9 @@ export class Live {
           break
         case 'channelgroup':
           this.handlers.onChannelGroup?.(message.id, message.value)
+          break
+        case 'show':
+          this.handlers.onShow?.(message.id, message.elapsed, message.running)
           break
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)

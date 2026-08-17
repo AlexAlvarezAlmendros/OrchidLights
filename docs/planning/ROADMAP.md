@@ -358,7 +358,11 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 ### F7 — Show manager y previsualización 2D
 
-- [ ] Timeline multipista.
+- [x] **Timeline multipista**, con las barras arrastrables y el cabezal de reproducción en vivo. El cuerpo de un Show era lo único que este daemon no sabía leer en absoluto: contestaba una nota diciéndolo. Ahora se leen las pistas, lo que hay colocado en cada una y cuándo, y se edita desde el navegador — añadir y quitar pistas, colocar funciones, moverlas, estirarlas, bloquearlas.
+  - **Solapes rechazados en la misma pista**, nombrando con qué choca: dos cosas a la vez en una pista suenan las dos y lo que hace el rig es lo que escribiera la última, que no es algo que se pueda leer de una timeline que las dibuja apiladas. En pistas distintas sí, que es para lo que están las pistas.
+  - **Un script o una colección no pueden ir en una timeline**: no tienen duración, así que no hay barra que dibujar ni final en el que pararlos. Ni un show dentro de sí mismo, que es un bucle por el que el runner se mete.
+  - **`Show::write` no incrementaba `elapsed`** — el único tipo de función del motor que no lo hacía, siendo que el runner recibe `elapsed()` al construirse. Sin eso nada fuera del runner podía decir por dónde iba un pase, y el cabezal habría tenido que ser un cronómetro local: uno que deriva y que sigue corriendo cuando el show ya ha terminado. Arreglado en el motor.
+  - La posición viaja en su propio mensaje de WebSocket, no como campo de la lista de funciones: `elapsed` cambia cada tick y ensuciar la lista por él empujaría todas las funciones del proyecto por todos los sockets al ritmo del flush.
 - [ ] Planta del rig con color y dimmer en vivo sobre imagen de fondo.
 
 ### F8 — Extras
