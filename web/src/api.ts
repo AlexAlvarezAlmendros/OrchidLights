@@ -101,6 +101,9 @@ export interface FixtureState {
   address: number
   channels: number
   resolved: boolean
+  /** How many of its channels pass through a modifier curve. Absent when
+   *  none do, which is the usual case. */
+  modifiers?: number
   manufacturer?: string
   model?: string
   mode?: string
@@ -133,7 +136,7 @@ export interface UniverseMap {
 
 /** One fixture with its channels named. Only the detail route carries these. */
 export interface FixtureDetail extends FixtureState {
-  channelList: { index: number; name: string; group?: string }[]
+  channelList: { index: number; name: string; group?: string; modifier?: string }[]
 }
 
 /**
@@ -253,6 +256,20 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   removeGroup: (id: number) => json<unknown>(`/api/v1/fixture-groups/${id}`, { method: 'DELETE' }),
+
+  /** The channel modifier templates the daemon loaded, by name. */
+  modifiers: () => json<{ modifiers: string[] }>('/api/v1/modifiers'),
+  /** The 256 values a modifier maps to. Names like "Exponential Medium" say
+   *  nothing on their own; drawn, they are obvious. */
+  modifierCurve: (name: string) =>
+    json<{ name: string; curve: number[] }>(`/api/v1/modifiers/${encodeURIComponent(name)}`),
+  /** Replace a fixture's modifiers. A channel not named loses its curve. */
+  setModifiers: (id: number, modifiers: Record<string, string | null>) =>
+    json<unknown>(`/api/v1/fixtures/${id}/modifiers`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modifiers }),
+    }),
 
   channelGroups: () => json<ChannelGroup[]>('/api/v1/channel-groups'),
   addChannelGroup: (name: string, channels: { fixture: number; channel: number }[]) =>

@@ -432,6 +432,49 @@ button.danger {
   margin-top: 0.4rem;
 }
 
+/* Channel modifiers, under the fixture they belong to. */
+.modifiers {
+  padding: 0.5rem 0.75rem 0.75rem;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  background: var(--surface);
+}
+
+.modifiers .channels li small {
+  display: block;
+}
+
+.modifiers select {
+  flex: 0 1 12rem;
+  min-width: 0;
+}
+
+/* The 256 values of a curve, drawn. Small on purpose: it is there to tell
+   Exponential Medium from Exponential Deep at a glance, not to be studied. */
+.curve {
+  width: 3rem;
+  height: 1.75rem;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.curve polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Space held while the curve is on its way, so the row does not jump. */
+.curve-loading {
+  width: 3rem;
+  height: 1.75rem;
+  flex: none;
+}
+
 /* A channels group's own fader, on the patch screen. Full width because it is
    the point of the card, not an afterthought below the channel list. */
 .group-fader {

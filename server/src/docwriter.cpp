@@ -42,6 +42,8 @@
 #include "qlcfixturedef.h"
 #include "fixturegroup.h"
 #include "channelsgroup.h"
+#include "channelmodifier.h"
+#include "qlcmodifierscache.h"
 #include "grouphead.h"
 #include "qlcpoint.h"
 #include "fixture.h"
@@ -612,6 +614,82 @@ DocWriter::Result DocWriter::setFixtureGroupMembers(Doc *doc, quint32 groupId,
         for (quint32 id : added)
             group->assignFixture(id, QLCPoint(x++, row));
     }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
+                                                 const QMap<quint32, QString> &byChannel)
+{
+    Fixture *fixture = doc->fixture(fixtureId);
+    if (fixture == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
+
+    /* Everything resolved before anything is attached: half a map applied is a
+       patch nobody asked for and nobody can see. */
+    QMap<quint32, ChannelModifier *> resolved;
+
+    for (auto it = byChannel.constBegin(); it != byChannel.constEnd(); ++it)
+    {
+        if (it.key() >= fixture->channels())
+        {
+            return Result::failure(QStringLiteral("\"%1\" has %2 channels, so it has no channel %3")
+                                       .arg(fixture->name())
+                                       .arg(fixture->channels())
+                                       .arg(it.key()));
+        }
+
+        if (it.value().isEmpty())
+            continue;
+
+        ChannelModifier *modifier = doc->modifiersCache()->modifier(it.value());
+        if (modifier == nullptr)
+        {
+            return Result::failure(QStringLiteral("No channel modifier named \"%1\"")
+                                       .arg(it.value()));
+        }
+
+        resolved.insert(it.key(), modifier);
+    }
+
+    const QList<Universe *> universes = doc->inputOutputMap()->universes();
+    if (int(fixture->universe()) >= universes.count())
+    {
+        return Result::failure(QStringLiteral("\"%1\" is patched to universe %2, which no longer "
+                                              "exists")
+                                   .arg(fixture->name())
+                                   .arg(fixture->universe() + 1));
+    }
+
+    /* Attached here rather than through Doc::updateFixtureChannelCapabilities,
+       which is what the desktop calls and which does far more than this asks
+       for: it re-applies every channel's *default* value on the way past. Using
+       it would drop the rest of the fixture to its defaults because one channel
+       got a curve, and on a rig holding a look that is a lamp going out for no
+       reason the operator can see. */
+    QList<Universe *> claimed = doc->inputOutputMap()->claimUniverses();
+    Universe *universe = claimed.at(int(fixture->universe()));
+    const quint32 address = fixture->address();
+
+    for (quint32 i = 0; i < fixture->channels(); i++)
+    {
+        ChannelModifier *modifier = resolved.value(i, nullptr);
+
+        /* Both halves. The fixture keeps it because that is what gets saved;
+           the universe gets it because that is what applies it. One without the
+           other works until the project is reloaded, or only until it is.
+
+           Universe::setChannelModifier recomputes the channel on its way out,
+           which is what makes a curve reach a latched value straight away: a
+           channel a fader or a running function holds is written every tick and
+           would pick it up anyway, but one left sitting at a value is written
+           by nobody, and would stay uncurved for as long as the look was up. */
+        fixture->setChannelModifier(i, modifier);
+        universe->setChannelModifier(ushort(address + i), modifier);
+    }
+
+    doc->inputOutputMap()->releaseUniverses(true);
 
     doc->setModified();
     return Result::success();

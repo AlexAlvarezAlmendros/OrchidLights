@@ -106,6 +106,20 @@ namespace DocWriter
     Result updateFixture(Doc *doc, quint32 fixtureId, const QString &name,
                          int universe, int address);
 
+    /**
+     * Attach channel modifiers to a fixture's channels, by template name.
+     *
+     * A modifier is a 256-entry remap applied on the way out: "Invert" turns a
+     * fader upside down, "Exponential Deep" bends a dimmer curve to match a
+     * lamp that does not fade linearly. It belongs to the patch, not to a cue,
+     * which is why it lives here and not in a function.
+     *
+     * The map replaces whatever the fixture had: a channel not named loses its
+     * modifier. Sending an empty map clears them all.
+     */
+    Result setChannelModifiers(Doc *doc, quint32 fixtureId,
+                               const QMap<quint32, QString> &byChannel);
+
     /* ---- Fixture groups ------------------------------------------------ */
 
     /* ---- Functions ----------------------------------------------------- */
