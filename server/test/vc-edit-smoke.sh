@@ -130,6 +130,68 @@ assert found[0]['geometry'] == {'x': 700, 'y': 10, 'width': 120, 'height': 50}, 
     || fail "a label was accepted as a parent frame"
 
 # ---------------------------------------------------------------------------
+# Undo and redo, which is what makes deleting a widget survivable.
+# ---------------------------------------------------------------------------
+
+# Nothing has been undone yet, but three edits are behind us.
+api GET /vc/history | python3 -c "
+import json, sys
+h = json.load(sys.stdin)
+assert h['undo'] > 0, ('nothing to undo after editing', h)
+assert h['redo'] == 0, h
+" || fail "GET /vc/history"
+
+BEFORE=$(api GET /vc | python3 -c "
+import json, sys
+def walk(w):
+    yield w
+    for c in w.get('children', []):
+        yield from walk(c)
+print(sum(1 for _ in walk(json.load(sys.stdin))))
+")
+
+api DELETE /vc/widgets/5 > /dev/null || fail "DELETE the cue list"
+api POST /vc/undo | python3 -c "
+import json, sys
+h = json.load(sys.stdin)
+assert h['redo'] == 1, ('undoing should leave something to redo', h)
+" || fail "POST /vc/undo"
+
+api GET /vc | python3 -c "
+import json, sys
+def walk(w):
+    yield w
+    for c in w.get('children', []):
+        yield from walk(c)
+tree = list(walk(json.load(sys.stdin)))
+assert len(tree) == $BEFORE, ('undo did not put the console back', len(tree), $BEFORE)
+# And the widget itself, not merely something of the right shape.
+assert any(w.get('id') == 5 and w['type'] == 'cuelist' for w in tree), 'the cue list did not come back'
+" || fail "the console did not come back after undo"
+
+api POST /vc/redo > /dev/null || fail "POST /vc/redo"
+api GET /vc | python3 -c "
+import json, sys
+def walk(w):
+    yield w
+    for c in w.get('children', []):
+        yield from walk(c)
+assert not any(w.get('id') == 5 for w in walk(json.load(sys.stdin))), 'redo did not take it away again'
+" || fail "redo did not repeat the deletion"
+
+api POST /vc/undo > /dev/null || fail "POST /vc/undo (second)"
+
+# An edit after undoing is a new branch: what was ahead is gone.
+api PATCH /vc/widgets/3 -H 'Content-Type: application/json' -d '{"caption":"Escenario Izquierda"}' > /dev/null
+api GET /vc/history | python3 -c "
+import json, sys
+h = json.load(sys.stdin)
+assert h['redo'] == 0, ('a new edit should discard what was ahead', h)
+" || fail "a new edit did not clear the redo history"
+
+[ "$(code POST /vc/redo)" = "409" ] || fail "redoing with nothing ahead did not answer 409"
+
+# ---------------------------------------------------------------------------
 # What a widget does, not just where it sits. A control that looks right and
 # does nothing is the failure mode this whole section exists to prevent.
 # ---------------------------------------------------------------------------

@@ -334,6 +334,11 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
         teachSliders();
     }
 
+    /* A different console entirely, so its history means nothing: undoing into
+       another show's widgets would be worse than not undoing at all. */
+    m_undo.clear();
+    m_redo.clear();
+
     /* Announced either way: a load that failed cleared the document, and a
        client still showing the old show is showing something that is gone. */
     emit projectReplaced();
@@ -496,6 +501,8 @@ QVector<ConsoleLayout::Page> EngineHost::layout() const
 
 void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
 {
+    rememberConsole();
+
     /* Merge by page, do not replace wholesale. The interface only ever sends
        the page being edited, so replacing everything silently dropped the
        arrangement of every other page in the console. */
@@ -683,6 +690,11 @@ VcPatch::Result EngineHost::editWidget(const QString &widgetId, const QJsonObjec
     if (checked.ok == false)
         return checked;
 
+    /* Remembered before the change, and only once it is going to happen: a
+       refused edit that still filled the undo stack would make the button undo
+       nothing at all. */
+    rememberConsole();
+
     const VcPatch::Result result = VcPatch::editWidget(m_preserved.sections, widgetId, patch);
     if (result.ok == false)
         return result;
@@ -703,6 +715,8 @@ VcPatch::Result EngineHost::addWidget(const QString &type, const QString &parent
     const VcPatch::Result checked = checkReferences(QString(), properties);
     if (checked.ok == false)
         return checked;
+
+    rememberConsole();
 
     const VcPatch::Result result =
         VcPatch::addWidget(m_preserved.sections, type, parentId, properties, newId);
@@ -758,6 +772,8 @@ VcPatch::Result EngineHost::removeWidget(const QString &widgetId)
         }
     }
 
+    rememberConsole();
+
     QStringList removedIds;
     const VcPatch::Result result =
         VcPatch::removeWidget(m_preserved.sections, widgetId, removedIds);
@@ -778,6 +794,8 @@ VcPatch::Result EngineHost::removeWidget(const QString &widgetId)
 
 VcPatch::Result EngineHost::assignWidgetIds(int &assigned)
 {
+    rememberConsole();
+
     const VcPatch::Result result = VcPatch::assignIds(m_preserved.sections, assigned);
 
     if (result.ok && assigned > 0)
@@ -847,6 +865,50 @@ int EngineHost::forgetFixture(quint32 fixtureId)
     }
 
     return removed;
+}
+
+void EngineHost::rememberConsole()
+{
+    m_undo.append(m_preserved);
+
+    /* Bounded, because a long editing session should not grow without limit.
+       Fifty is far past what anyone reaches for, and the sections are a few
+       kilobytes each. */
+    while (m_undo.count() > 50)
+        m_undo.removeFirst();
+
+    /* A new edit is a new branch: whatever was undone is no longer ahead. */
+    m_redo.clear();
+}
+
+bool EngineHost::undoConsole()
+{
+    if (m_undo.isEmpty())
+        return false;
+
+    m_redo.append(m_preserved);
+    m_preserved = m_undo.takeLast();
+
+    teachSliders();
+    m_doc->setModified();
+    emit consoleChanged();
+
+    return true;
+}
+
+bool EngineHost::redoConsole()
+{
+    if (m_redo.isEmpty())
+        return false;
+
+    m_undo.append(m_preserved);
+    m_preserved = m_redo.takeLast();
+
+    teachSliders();
+    m_doc->setModified();
+    emit consoleChanged();
+
+    return true;
 }
 
 QString EngineHost::projectErrors() const
