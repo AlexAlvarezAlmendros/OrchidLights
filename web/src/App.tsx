@@ -1257,7 +1257,15 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
     setHeld(0)
   }
 
-  useEffect(() => () => stop(), [])
+  /* Clearing the interval directly rather than through stop(): the cleanup
+     must not depend on a function that is rebuilt on every render, and there is
+     no state to reset on the way out of a component that is going away. */
+  useEffect(
+    () => () => {
+      if (timer.current !== null) window.clearInterval(timer.current)
+    },
+    [],
+  )
 
   return (
     <button
