@@ -1031,3 +1031,208 @@ button.linkish.left {
 .audio-band[data-assigned="true"] {
   background: var(--live);
 }
+
+/* ---------------------------------------------------------------------------
+   The show manager: a multi-track timeline.
+
+   The lanes scroll horizontally and the track heads do not, so a show longer
+   than the screen can still be read: the name of the track a bar is on is the
+   one thing that must never scroll away from it.
+   ------------------------------------------------------------------------- */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.timeline-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.timeline-head .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 14rem;
+}
+
+.timeline-body {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.timeline-tracks {
+  flex: none;
+  width: 12rem;
+  border-right: 1px solid var(--border);
+  /* The ruler's height, so the first track head lines up with the first lane. */
+  padding-top: 1.5rem;
+}
+
+.track-head {
+  height: 3.5rem;
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  justify-content: center;
+}
+
+.track-head input {
+  min-height: 1.6rem;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.85rem;
+}
+
+.track-controls {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.track-controls select {
+  flex: 1;
+  min-width: 0;
+  min-height: 1.6rem;
+  padding: 0 0.2rem;
+  font-size: 0.75rem;
+}
+
+.track-controls button {
+  min-height: 1.6rem;
+  min-width: 1.6rem;
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+}
+
+.track-controls button[data-muted="true"] {
+  border-color: var(--danger);
+}
+
+.timeline-lanes {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.timeline-scroll {
+  overflow-x: auto;
+}
+
+.ruler {
+  position: relative;
+  height: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  min-width: 100%;
+}
+
+.tick {
+  position: absolute;
+  top: 0.2rem;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  border-left: 1px solid var(--border);
+  padding-left: 0.2rem;
+  white-space: nowrap;
+}
+
+.lane {
+  position: relative;
+  height: 3.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.bar {
+  position: absolute;
+  top: 0.35rem;
+  height: 2.8rem;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  padding: 0.15rem 0.3rem;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.bar[data-dragging="true"] {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+
+/* A bar whose function is gone. The show plays silence there, and the timeline
+   is the only place that can say so. */
+.bar[data-missing="true"] {
+  background: var(--danger);
+}
+
+.bar[data-locked="true"] {
+  cursor: not-allowed;
+}
+
+.bar-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-time {
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.bar-lock,
+.bar-remove {
+  position: absolute;
+  top: 0.1rem;
+  min-height: 1.1rem;
+  min-width: 1.1rem;
+  padding: 0;
+  font-size: 0.65rem;
+  line-height: 1;
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
+  color: inherit;
+}
+
+.bar-lock {
+  right: 1.4rem;
+}
+
+.bar-remove {
+  right: 0.15rem;
+}
+
+/* The grip that changes how long a function plays. */
+.bar-grip {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 0.5rem;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+/* The show's own clock. */
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--danger);
+  pointer-events: none;
+}

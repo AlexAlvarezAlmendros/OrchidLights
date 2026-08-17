@@ -170,15 +170,19 @@ assert 'note' not in body, ('$TYPE still reports its body as unreadable', body)
         || fail "could not delete the $TYPE"
 done
 
-# And the one that is honestly not readable: a Show is a multi-track timeline,
-# which is a screen of its own rather than a list.
+# And a Show, whose body is a multi-track timeline. A new one is empty, and
+# empty has to read as empty rather than as unreadable: the note this used to
+# answer meant "this daemon cannot tell you", which is a different thing from
+# "there is nothing on it yet".
 SHOW=$(curl -sf -X POST --max-time 5 "$BASE/functions" -H 'Content-Type: application/json' \
        -d '{"type":"Show","name":"Prueba Show"}' \
        | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 curl -sf --max-time 5 "$BASE/functions/$SHOW/body" | python3 -c '
 import json, sys
 body = json.load(sys.stdin)
-assert "note" in body, ("a Show should say its body is not readable yet", body)
+assert body.get("tracks") == [], ("a new Show should have no tracks", body)
+assert body.get("duration") == 0, ("and no length", body)
+assert "note" not in body, ("and should not claim to be unreadable", body)
 ' || fail "GET body of a Show"
 curl -sf -X DELETE --max-time 5 "$BASE/functions/$SHOW" > /dev/null || true
 

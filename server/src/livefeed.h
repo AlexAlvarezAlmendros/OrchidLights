@@ -128,6 +128,10 @@ private:
      *  chasers come and go and a stale connection is worse than a comparison. */
     QHash<quint32, int> m_chaserSteps;
 
+    /** Shows that were running at the last flush, so a stop is reported once
+     *  rather than never. */
+    QSet<quint32> m_runningShows;
+
     QTimer m_flushTimer;
 };
 

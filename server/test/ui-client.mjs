@@ -554,6 +554,90 @@ try {
   })()`)
   check('channel modifiers can be attached from the browser', curved === 'ok', curved)
 
+  /* The show manager. Driven in a real browser because the interesting part is
+     a pointer drag: a bar follows the finger optimistically and the move is
+     committed on release, and the whole design rests on a refusal putting it
+     back where it was. */
+  await click('Funciones')
+  await sleep(900)
+
+  const timeline = await evaluate(`(async () => {
+    const open = [...document.querySelectorAll('.table-row .linkish')].find(b => b.textContent.trim() === 'Pase')
+    if (!open) return 'none'      // this project has no show
+    open.click()
+    await new Promise(r => setTimeout(r, 1200))
+
+    const timeline = document.querySelector('.timeline')
+    if (!timeline) return 'the timeline never opened'
+
+    const bars = () => [...document.querySelectorAll('.timeline .bar')]
+    if (bars().length !== 2) return 'expected two bars, got ' + bars().length
+    if (!bars()[0].textContent.includes('Rojo')) return 'the bars are not labelled: ' + bars()[0].textContent
+
+    /* Second bar starts at 800 ms. At the default zoom of 60 px/s that is
+       48 px from the left, and the two must not be drawn on top of each other. */
+    const left = b => Number.parseFloat(b.style.left)
+    if (!(left(bars()[1]) > left(bars()[0]))) {
+      return 'the bars are drawn in the wrong order: ' + left(bars()[0]) + ' / ' + left(bars()[1])
+    }
+
+    // Drag the second bar to the right by 120 px, which is two seconds.
+    const bar = bars()[1]
+    const before = left(bar)
+    const box = bar.getBoundingClientRect()
+    const at = (type, x) => bar.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, pointerId: 1, clientX: x, clientY: box.top + box.height / 2,
+    }))
+
+    // setPointerCapture on a synthetic pointer id throws in some builds; the
+    // component only needs the events, so make it a no-op for this run.
+    bar.setPointerCapture = () => {}
+
+    /* No pause between these on purpose. The handlers keep the live drag in a
+       ref, so a pointermove that arrives before React has committed the
+       pointerdown still counts -- and a short quick drag that begins and ends
+       inside one frame is not silently dropped. */
+    at('pointerdown', box.left + 10)
+    at('pointermove', box.left + 70)
+    at('pointermove', box.left + 130)
+
+    /* React batches pointermove, so the commit lands after the handler
+       returns; reading synchronously would test the scheduler, not the drag. */
+    await new Promise(r => setTimeout(r, 80))
+
+    // Optimistic: it must have moved before anything was sent.
+    const during = left(bars()[1])
+    at('pointerup', box.left + 130)
+    await new Promise(r => setTimeout(r, 1500))
+
+    if (!(during > before)) {
+      return 'the bar did not follow the pointer: ' + before + ' -> ' + during
+        + ' dragging=' + bars()[1].getAttribute('data-dragging')
+        + ' props=' + Object.keys(bar[Object.keys(bar).find(k => k.startsWith('__reactProps'))] || {}).join(',')
+
+    }
+
+    const after = bars()[1]
+    if (!after) return 'the bar vanished'
+    if (Math.abs(left(after) - (before + 120)) > 8) {
+      return 'the move did not stick: ' + before + ' -> ' + left(after)
+    }
+
+    // And the daemon agrees, which is the half a drawing cannot fake.
+    const body = await (await fetch('/api/v1/functions/3/body')).json()
+    const moved = body.tracks[0].functions.find(f => f.name === 'Verde')
+    if (!moved || moved.start !== 2800) return 'the daemon has it at ' + moved?.start
+
+    // Put it back, so the project is where the next assertion expects it.
+    await fetch('/api/v1/functions/3/items/' + moved.id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start: 800 }),
+    })
+    return 'ok'
+  })()`)
+  check('a show timeline can be dragged in the browser', timeline === 'none' || timeline === 'ok', timeline)
+
   /* Two people on the same show. An edit made anywhere else has to arrive
      here, or the second phone is quietly showing a console that no longer
      exists -- and the first anyone finds out is mid-cue. */
