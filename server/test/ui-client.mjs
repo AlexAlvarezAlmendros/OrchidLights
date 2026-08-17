@@ -300,6 +300,47 @@ try {
   })()`)
   check('and deleted again', removed === 'ok', removed)
 
+  /* The five types whose bodies had no read side at all until now. Created,
+     edited and deleted by clicking, because an API nobody can reach from the
+     browser is an API that is not finished. */
+  const bodies = await evaluate(`(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    const problems = []
+
+    for (const [type, expect] of [['EFX', 'Patrón'], ['RGBMatrix', 'Algoritmo'],
+                                  ['Script', 'Programa'], ['Audio', 'Archivo'],
+                                  ['Video', 'Archivo o URL']]) {
+      const kind = document.querySelector('.setup .card select')
+      selectSetter.call(kind, type)
+      kind.dispatchEvent(new Event('change', { bubbles: true }))
+
+      const nameField = document.querySelector('.setup .card input')
+      setter.call(nameField, 'Prueba ' + type)
+      nameField.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise(r => setTimeout(r, 100))
+
+      ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Crear').click()
+      await new Promise(r => setTimeout(r, 1400))
+
+      const panel = document.querySelector('.setup article.card')
+      if (!panel) { problems.push(type + ': no editor'); continue }
+      if (panel.textContent.includes('no es legible') || /not readable/.test(panel.textContent)) {
+        problems.push(type + ': reported as unreadable')
+      }
+      if (!panel.textContent.includes(expect)) {
+        problems.push(type + ': no "' + expect + '" field')
+      }
+
+      ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Eliminar función').click()
+      await new Promise(r => setTimeout(r, 1200))
+    }
+
+    return problems.length === 0 ? 'ok' : problems.join('; ')
+  })()`)
+  check('every editable type has an editor', bodies === 'ok', bodies)
+  await screenshot('06b-bodies')
+
   /* The patch: universes, their output, and the fixtures in them. This is what
      makes light come out, and until now none of it was reachable from a
      browser at all. */
@@ -339,6 +380,45 @@ try {
     return rows > 0 && makers > 10 ? 'ok' : rows + ' fixtures, ' + makers + ' manufacturers'
   })()`)
   check('the fixture list and the library are there', patched === 'ok', patched)
+
+  const grouped = await evaluate(`(async () => {
+    const tab = [...document.querySelectorAll('.tabs button')].find(b => b.textContent.startsWith('Grupos'))
+    if (!tab) return 'no groups tab'
+    tab.click()
+    await new Promise(r => setTimeout(r, 700))
+
+    const before = document.querySelectorAll('.setup article.card').length
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    const input = document.querySelector('.setup .card input')
+    setter.call(input, 'Grupo de prueba')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 100))
+
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Crear grupo').click()
+    await new Promise(r => setTimeout(r, 1300))
+    if (document.querySelectorAll('.setup article.card').length !== before + 1) {
+      return 'the group did not appear'
+    }
+
+    // And put a fixture in it, which is the part an RGB matrix depends on.
+    const add = [...document.querySelectorAll('.setup article.card select')]
+      .find(s => s.options[0]?.textContent.startsWith('Añadir fixture'))
+    if (!add || add.options.length < 2) return 'no fixture picker in the group'
+
+    const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    selectSetter.call(add, add.options[1].value)
+    add.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 1300))
+
+    const members = document.querySelectorAll('.setup article.card .channels li').length
+    ;[...document.querySelectorAll('.setup article.card button')]
+      .find(b => b.textContent.trim() === 'Eliminar').click()
+    await new Promise(r => setTimeout(r, 1200))
+
+    return members >= 1 ? 'ok' : 'the fixture did not join the group'
+  })()`)
+  check('fixture groups can be built from the browser', grouped === 'ok', grouped)
   await screenshot('07-fixtures')
 
   /* Two people on the same show. An edit made anywhere else has to arrive

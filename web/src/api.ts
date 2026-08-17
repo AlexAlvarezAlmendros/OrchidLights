@@ -30,7 +30,35 @@ export interface FunctionBody {
     channelName?: string
   }[]
   members?: { function: number; name: string }[]
+
+  /* EFX: the pattern, its geometry, and the heads that follow it. `fixtures`
+     is what PUT takes back; `heads` is the same list with names on it. */
+  algorithm?: string
+  geometry?: { width: number; height: number; xOffset: number; yOffset: number; rotation: number }
+  fixtures?: number[]
+  heads?: { fixture: number; head: number; name: string }[]
+
+  /* RGB matrix: the group it runs across and the colours it accepts. */
+  fixtureGroup?: number
+  groupName?: string
+  colors?: string[]
+  acceptsColors?: number
+
+  data?: string // Script: the program
+  source?: string // Audio and Video: the file or URL
+  volume?: number
+
+  scene?: number // Sequence
+  sceneName?: string
+
+  /** Present only when the body is honestly not readable yet. */
   note?: string
+}
+
+export interface FixtureGroup {
+  id: number
+  name: string
+  fixtures: number[]
 }
 
 export interface FixtureState {
@@ -168,6 +196,31 @@ export const api = {
     }),
   removeChaserStep: (id: number, index: number) =>
     json<unknown>(`/api/v1/functions/${id}/steps/${index}`, { method: 'DELETE' }),
+  /** One route for every remaining type: the daemon dispatches on the
+   *  function's own type, so a caller need not know which shape it takes. */
+  setBody: (id: number, body: Record<string, unknown>) =>
+    json<unknown>(`/api/v1/functions/${id}/body`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  algorithms: () => json<{ algorithms: string[] }>('/api/v1/algorithms'),
+
+  groups: () => json<FixtureGroup[]>('/api/v1/fixture-groups'),
+  addGroup: (name: string, fixtures: number[]) =>
+    json<{ id: number }>('/api/v1/fixture-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, fixtures }),
+    }),
+  patchGroup: (id: number, patch: { name?: string; fixtures?: number[] }) =>
+    json<unknown>(`/api/v1/fixture-groups/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  removeGroup: (id: number) => json<unknown>(`/api/v1/fixture-groups/${id}`, { method: 'DELETE' }),
+
   setMembers: (id: number, members: number[]) =>
     json<unknown>(`/api/v1/functions/${id}/members`, {
       method: 'PUT',

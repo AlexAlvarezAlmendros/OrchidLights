@@ -141,6 +141,47 @@ running = [f for f in json.load(sys.stdin) if f['running']]
 assert any(f['id'] == $FUNC for f in running), f'function $FUNC is not among {running}'
 " || fail "the started function is not reported as running"
 
+# The body of every type the writer can edit, read back.
+#
+# Without the read side a client can change a body it cannot see, which is not
+# editing, it is guessing -- and for five of the ten types there was no read
+# side at all until now.
+for pair in "EFX:algorithm" "RGBMatrix:algorithm" "Script:data" "Audio:source" "Video:source"; do
+    TYPE=${pair%%:*}
+    FIELD=${pair##*:}
+
+    NEW=$(curl -sf -X POST --max-time 5 "$BASE/functions" \
+          -H 'Content-Type: application/json' \
+          -d "{\"type\":\"$TYPE\",\"name\":\"Prueba $TYPE\"}" \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') \
+        || fail "could not create a $TYPE"
+
+    curl -sf --max-time 5 "$BASE/functions/$NEW/body" | python3 -c "
+import json, sys
+body = json.load(sys.stdin)
+assert body['type'] == '$TYPE', body
+# The field may be empty on a function nobody has filled in yet; what matters
+# is that it is reported at all rather than 'not readable'.
+assert '$FIELD' in body, ('$TYPE body is missing $FIELD', body)
+assert 'note' not in body, ('$TYPE still reports its body as unreadable', body)
+" || fail "GET body of a $TYPE"
+
+    curl -sf -X DELETE --max-time 5 "$BASE/functions/$NEW" > /dev/null \
+        || fail "could not delete the $TYPE"
+done
+
+# And the one that is honestly not readable: a Show is a multi-track timeline,
+# which is a screen of its own rather than a list.
+SHOW=$(curl -sf -X POST --max-time 5 "$BASE/functions" -H 'Content-Type: application/json' \
+       -d '{"type":"Show","name":"Prueba Show"}' \
+       | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+curl -sf --max-time 5 "$BASE/functions/$SHOW/body" | python3 -c '
+import json, sys
+body = json.load(sys.stdin)
+assert "note" in body, ("a Show should say its body is not readable yet", body)
+' || fail "GET body of a Show"
+curl -sf -X DELETE --max-time 5 "$BASE/functions/$SHOW" > /dev/null || true
+
 # Blackout is the button every desk has; it must stop everything.
 curl -sf -X POST --max-time 5 "$BASE/blackout" > /dev/null || fail "POST /blackout"
 for _ in $(seq 1 25); do

@@ -29,7 +29,16 @@
 #include "universe.h"
 #include "fixture.h"
 #include "qlcchannel.h"
+#include "rgbalgorithm.h"
+#include "fixturegroup.h"
 #include "collection.h"
+#include "rgbmatrix.h"
+#include "efxfixture.h"
+#include "sequence.h"
+#include "script.h"
+#include "audio.h"
+#include "video.h"
+#include "efx.h"
 #include "chaserstep.h"
 #include "scenevalue.h"
 #include "function.h"
@@ -241,9 +250,110 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
         return json;
     }
 
-    /* Everything else can be created, renamed, timed and deleted, but its body
-       is not readable here yet. Saying so beats an empty list that reads as
-       "this function is empty". */
+    if (function->type() == Function::EFXType)
+    {
+        const EFX *efx = qobject_cast<const EFX *>(function);
+
+        json["algorithm"] = EFX::algorithmToString(efx->algorithm());
+
+        QJsonObject geometry;
+        geometry["width"] = efx->width();
+        geometry["height"] = efx->height();
+        geometry["xOffset"] = efx->xOffset();
+        geometry["yOffset"] = efx->yOffset();
+        geometry["rotation"] = efx->rotation();
+        json["geometry"] = geometry;
+
+        /* Twice over, on purpose: "fixtures" is exactly what PUT takes back,
+           and "heads" is the same thing with names on it. An EFX listing
+           "fixture 7" is one nobody can check against the rig. */
+        QJsonArray ids;
+        QJsonArray heads;
+        for (const EFXFixture *member : efx->fixtures())
+        {
+            ids.append(qint64(member->head().fxi));
+
+            QJsonObject entry;
+            entry["fixture"] = qint64(member->head().fxi);
+            entry["head"] = member->head().head;
+
+            const Fixture *fixture = doc->fixture(member->head().fxi);
+            entry["name"] = fixture != nullptr ? fixture->name()
+                                               : QStringLiteral("(borrado)");
+            heads.append(entry);
+        }
+        json["fixtures"] = ids;
+        json["heads"] = heads;
+        return json;
+    }
+
+    if (function->type() == Function::RGBMatrixType)
+    {
+        const RGBMatrix *matrix = qobject_cast<const RGBMatrix *>(function);
+
+        const RGBAlgorithm *algorithm = matrix->algorithm();
+        json["algorithm"] = algorithm != nullptr ? algorithm->name() : QString();
+
+        /* A matrix without a group is legal to build and produces nothing, so
+           the group is reported rather than assumed. */
+        const quint32 groupId = matrix->fixtureGroup();
+        json["fixtureGroup"] = qint64(groupId);
+
+        const FixtureGroup *group = doc->fixtureGroup(groupId);
+        json["groupName"] = group != nullptr ? group->name() : QString();
+
+        QJsonArray colors;
+        const int accepted = algorithm != nullptr ? algorithm->acceptColors() : 0;
+        for (int i = 0; i < accepted; i++)
+        {
+            const QColor color = matrix->getColor(i);
+            colors.append(color.isValid() ? color.name() : QString());
+        }
+
+        /* The same spelling PUT takes, so a client can read a body, change a
+           field and send it straight back. */
+        json["colors"] = colors;
+        json["acceptsColors"] = accepted;
+        return json;
+    }
+
+    if (function->type() == Function::ScriptType)
+    {
+        json["data"] = qobject_cast<const Script *>(function)->data();
+        return json;
+    }
+
+    if (function->type() == Function::AudioType)
+    {
+        const Audio *audio = qobject_cast<const Audio *>(function);
+        json["source"] = audio->getSourceFileName();
+        json["volume"] = audio->volume();
+        return json;
+    }
+
+    if (function->type() == Function::VideoType)
+    {
+        json["source"] = qobject_cast<const Video *>(function)->sourceUrl();
+        return json;
+    }
+
+    if (function->type() == Function::SequenceType)
+    {
+        /* A sequence is a chaser bound to one scene: its steps are that
+           scene's values, step by step, so both halves have to be reported. */
+        const Sequence *sequence = qobject_cast<const Sequence *>(function);
+        const quint32 sceneId = sequence->boundSceneID();
+
+        json["scene"] = qint64(sceneId);
+        const Function *scene = doc->function(sceneId);
+        json["sceneName"] = scene != nullptr ? scene->name() : QStringLiteral("(borrada)");
+        json["steps"] = sequence->stepsCount();
+        return json;
+    }
+
+    /* Only Show is left, and its body is a multi-track timeline -- a screen of
+       its own, not a list. Saying so beats an empty object that reads as "this
+       function is empty". */
     json["note"] = QStringLiteral("The body of a %1 is not readable yet")
                        .arg(Function::typeToString(function->type()).toLower());
     return json;

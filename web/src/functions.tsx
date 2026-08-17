@@ -20,6 +20,18 @@ import {
   api,
 } from './api'
 
+/** The seven EFX patterns the engine has. Fixed, unlike the RGB algorithms,
+ *  which are scripts and are asked for at runtime. */
+const EFX_ALGORITHMS = ['Circle', 'Eight', 'Line', 'Diamond', 'Square', 'SquareChoppy', 'Leaf']
+
+const GEOMETRY_LABELS: Record<string, string> = {
+  width: 'Ancho',
+  height: 'Alto',
+  xOffset: 'Centro X',
+  yOffset: 'Centro Y',
+  rotation: 'Rotación',
+}
+
 /** The ten types the engine can create, in the order a show gets built. */
 const TYPES = [
   { value: 'Scene', label: 'Escena' },
@@ -257,6 +269,62 @@ function FunctionEditor({
       {body?.type === 'Chaser' && (
         <ChaserSteps fn={fn} body={body} functions={functions} onApply={apply} />
       )}
+      {body?.type === 'EFX' && <EfxBody fn={fn} body={body} fixtures={fixtures} onApply={apply} />}
+      {body?.type === 'RGBMatrix' && <MatrixBody fn={fn} body={body} onApply={apply} />}
+      {body?.type === 'Script' && (
+        <TextBody
+          label="Programa"
+          value={body.data ?? ''}
+          rows={8}
+          placeholder={'wait:1000\nsetfixture:0 ch:0 val:255'}
+          onApply={(data) => apply(() => api.setBody(fn.id, { data }))}
+        />
+      )}
+      {body?.type === 'Audio' && (
+        <>
+          <TextBody
+            label="Archivo"
+            value={body.source ?? ''}
+            placeholder="/ruta/al/audio.wav"
+            onApply={(source) => apply(() => api.setBody(fn.id, { source }))}
+          />
+          <label className="field">
+            <span>Volumen</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              defaultValue={Math.round((body.volume ?? 1) * 100)}
+              onPointerUp={(e) =>
+                apply(() =>
+                  api.setBody(fn.id, {
+                    volume: Number((e.target as HTMLInputElement).value) / 100,
+                  }),
+                )
+              }
+            />
+          </label>
+          {/* The decoders load, but nothing bundles a multimedia backend yet,
+              so a file that reads fine still will not play. */}
+          <p className="hint">
+            Los decodificadores cargan, pero todavía no hay backend de audio: suena en silencio.
+          </p>
+        </>
+      )}
+      {body?.type === 'Video' && (
+        <TextBody
+          label="Archivo o URL"
+          value={body.source ?? ''}
+          placeholder="/ruta/al/video.mp4"
+          onApply={(source) => apply(() => api.setBody(fn.id, { source }))}
+        />
+      )}
+      {body?.type === 'Sequence' && (
+        <p className="hint">
+          Vinculada a la escena <strong>{body.sceneName}</strong>. Sus pasos son valores de esa
+          escena, uno por paso.
+        </p>
+      )}
       {body?.type === 'Collection' && (
         <Members fn={fn} body={body} functions={functions} onApply={apply} />
       )}
@@ -284,6 +352,254 @@ function FunctionEditor({
         Eliminar función
       </button>
     </article>
+  )
+}
+
+/**
+ * A body that is one piece of text: a script's program, a media file's path.
+ *
+ * Committed on leaving the field rather than on every keystroke -- a script is
+ * parsed by the engine on the way in, and validating half a line on each
+ * character would report errors that are only true for a moment.
+ */
+function TextBody({
+  label,
+  value,
+  rows,
+  placeholder,
+  onApply,
+}: {
+  label: string
+  value: string
+  rows?: number
+  placeholder?: string
+  onApply: (value: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the source changes
+  useEffect(() => setDraft(value), [value])
+
+  const commit = () => draft !== value && onApply(draft)
+
+  if (rows) {
+    return (
+      <label className="field">
+        <span>{label}</span>
+        <textarea
+          rows={rows}
+          value={draft}
+          placeholder={placeholder}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+        />
+      </label>
+    )
+  }
+
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+        }}
+      />
+    </label>
+  )
+}
+
+/** An EFX is a pattern, its geometry, and the heads that follow it. */
+function EfxBody({
+  fn,
+  body,
+  fixtures,
+  onApply,
+}: {
+  fn: FunctionState
+  body: FunctionBody
+  fixtures: FixtureState[]
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const heads = body.heads ?? []
+  const ids = body.fixtures ?? []
+
+  const setGeometry = (key: string, value: number) =>
+    onApply(() => api.setBody(fn.id, { geometry: { ...body.geometry, [key]: value } }))
+
+  return (
+    <>
+      <label className="field">
+        <span>Patrón</span>
+        <select
+          value={body.algorithm ?? ''}
+          onChange={(e) => onApply(() => api.setBody(fn.id, { algorithm: e.target.value }))}
+        >
+          {EFX_ALGORITHMS.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="fields">
+        {(['width', 'height', 'xOffset', 'yOffset', 'rotation'] as const).map((key) => (
+          <label className="field" key={key}>
+            <span>{GEOMETRY_LABELS[key]}</span>
+            <input
+              type="number"
+              min={0}
+              max={key === 'rotation' ? 359 : 255}
+              defaultValue={body.geometry?.[key] ?? 0}
+              onBlur={(e) => {
+                const value = Number(e.target.value)
+                if (value !== (body.geometry?.[key] ?? 0)) setGeometry(key, value)
+              }}
+            />
+          </label>
+        ))}
+      </div>
+
+      <div className="field">
+        <span>Cabezas ({heads.length})</span>
+        {heads.length === 0 && <p className="hint">Este EFX no mueve ninguna cabeza.</p>}
+
+        <ul className="channels">
+          {heads.map((head) => (
+            <li key={`${head.fixture}-${head.head}`}>
+              <span>{head.name}</span>
+              <button
+                type="button"
+                aria-label={`Quitar ${head.name}`}
+                onClick={() =>
+                  onApply(() =>
+                    api.setBody(fn.id, { fixtures: ids.filter((id) => id !== head.fixture) }),
+                  )
+                }
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        <div className="channel-add">
+          <select
+            value=""
+            aria-label="Añadir cabeza"
+            onChange={(e) => {
+              if (e.target.value === '') return
+              onApply(() => api.setBody(fn.id, { fixtures: [...ids, Number(e.target.value)] }))
+            }}
+          >
+            <option value="">Añadir fixture…</option>
+            {fixtures
+              .filter((f) => !ids.includes(f.id))
+              .map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+          </select>
+        </div>
+        {/* Changing the set stops the function first: EFX walks its fixture
+            list on the timer thread every 20 ms, so editing it live is a
+            use-after-free. Both desktop editors stop before touching it. */}
+        <p className="hint">Cambiar las cabezas para el efecto antes de tocarlas.</p>
+      </div>
+    </>
+  )
+}
+
+/** An RGB matrix runs an algorithm across a fixture group. */
+function MatrixBody({
+  fn,
+  body,
+  onApply,
+}: {
+  fn: FunctionState
+  body: FunctionBody
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [algorithms, setAlgorithms] = useState<string[]>([])
+  const [groups, setGroups] = useState<{ id: number; name: string }[]>([])
+
+  useEffect(() => {
+    api
+      .algorithms()
+      .then((r) => setAlgorithms(r.algorithms))
+      .catch(() => setAlgorithms([]))
+    api
+      .groups()
+      .then(setGroups)
+      .catch(() => setGroups([]))
+  }, [])
+
+  const colors = body.colors ?? []
+
+  return (
+    <>
+      <label className="field">
+        <span>Algoritmo ({algorithms.length})</span>
+        <select
+          value={body.algorithm ?? ''}
+          onChange={(e) => onApply(() => api.setBody(fn.id, { algorithm: e.target.value }))}
+        >
+          <option value="">(ninguno)</option>
+          {algorithms.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
+        <span>Grupo</span>
+        <select
+          value={body.fixtureGroup ?? ''}
+          onChange={(e) =>
+            onApply(() => api.setBody(fn.id, { fixtureGroup: Number(e.target.value) }))
+          }
+        >
+          <option value="">(ninguno — esta matriz no emite nada)</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {/* How many colours the algorithm takes is the algorithm's business, so
+          the pickers follow it rather than a fixed number. */}
+      {colors.length > 0 && (
+        <div className="fields">
+          {colors.map((colour, index) => (
+            // The position is the identity: an algorithm takes a fixed number
+            // of colours, in order.
+            // biome-ignore lint/suspicious/noArrayIndexKey: the index is the slot
+            <label className="field" key={`color-${index}`}>
+              <span>Color {index + 1}</span>
+              <input
+                type="color"
+                defaultValue={colour || '#ffffff'}
+                onBlur={(e) => {
+                  const next = [...colors]
+                  next[index] = e.target.value
+                  onApply(() => api.setBody(fn.id, { colors: next }))
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
