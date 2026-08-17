@@ -133,6 +133,9 @@ namespace
                 const QXmlStreamAttributes attributes = reader.attributes();
                 const QStringView id = attributes.value(QStringLiteral("ID"));
 
+                if (attributes.hasAttribute(QStringLiteral("InstantApply")))
+                    widget.instantApply = true;
+
                 if (id.isEmpty() == false)
                 {
                     if (widget.hasFunction == false)
@@ -289,6 +292,39 @@ namespace
                 }
 
                 widget.padHeads.append(head);
+            }
+            else if (name == QStringLiteral("Control")
+                     && widget.type == QStringLiteral("matrix"))
+            {
+                VcWidget::MatrixPreset preset;
+                preset.id = reader.attributes().value(QStringLiteral("ID")).toInt();
+
+                while (reader.readNextStartElement())
+                {
+                    const QStringView field = reader.name();
+
+                    if (field == QStringLiteral("Type"))
+                        preset.type = reader.readElementText().trimmed();
+                    else if (field == QStringLiteral("Color"))
+                        preset.color = reader.readElementText().trimmed();
+                    else if (field == QStringLiteral("Resource"))
+                        preset.resource = reader.readElementText().trimmed();
+                    else if (field == QStringLiteral("Property"))
+                    {
+                        /* An animation preset carries the script properties it
+                           was stored with, and applying it without them gives a
+                           different animation. */
+                        const QString key =
+                            reader.attributes().value(QStringLiteral("Name")).toString();
+                        preset.properties.append(qMakePair(key, reader.readElementText()));
+                    }
+                    else
+                    {
+                        reader.skipCurrentElement();
+                    }
+                }
+
+                widget.matrixPresets.append(preset);
             }
             else if (name == QStringLiteral("Multipage"))
             {

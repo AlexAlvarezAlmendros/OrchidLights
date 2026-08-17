@@ -14,6 +14,7 @@ import {
   pagesOf,
 } from './layout'
 import { type Connection, Live } from './live'
+import { MatrixWidget } from './matrix'
 import { Setup } from './setup'
 import { CREATABLE, placeBelow } from './widgets'
 import { XYPad } from './xypad'
@@ -174,6 +175,10 @@ export function App() {
 
   const cueList = useCallback((chaser: number, action: CueAction, index = -1) => {
     live.current?.cuelist(chaser, action, index)
+  }, [])
+
+  const applyPreset = useCallback((id: number, preset: number) => {
+    live.current?.setMatrixPreset(id, preset)
   }, [])
 
   const movePad = useCallback((id: number, x: number, y: number) => {
@@ -468,6 +473,7 @@ export function App() {
                 onCueList={cueList}
                 pads={pads}
                 onPad={movePad}
+                onPreset={applyPreset}
                 levels={levels}
                 onLevel={setLevel}
                 onSpeed={setSpeed}
@@ -508,6 +514,7 @@ function Surface({
   onCueList,
   pads,
   onPad,
+  onPreset,
   levels,
   onLevel,
   onSpeed,
@@ -526,6 +533,7 @@ function Surface({
   onCueList: (chaser: number, action: CueAction, index?: number) => void
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
+  onPreset: (id: number, preset: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -561,6 +569,7 @@ function Surface({
                 onCueList={onCueList}
                 pads={pads}
                 onPad={onPad}
+                onPreset={onPreset}
                 levels={levels}
                 onLevel={onLevel}
                 onSpeed={onSpeed}
@@ -624,6 +633,7 @@ function Widget({
   onCueList,
   pads,
   onPad,
+  onPreset,
   levels,
   onLevel,
   onSpeed,
@@ -642,6 +652,7 @@ function Widget({
   onCueList: (chaser: number, action: CueAction, index?: number) => void
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
+  onPreset: (id: number, preset: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -719,6 +730,18 @@ function Widget({
     )
   }
 
+  if (widget.type === 'matrix') {
+    return (
+      <MatrixWidget
+        widget={widget}
+        style={style}
+        value={levels[widget.id ?? -1] ?? widget.value ?? 0}
+        onLevel={onLevel}
+        onPreset={onPreset}
+      />
+    )
+  }
+
   if (widget.type === 'xypad') {
     return (
       <XYPad
@@ -767,6 +790,7 @@ function Widget({
         onCueList={onCueList}
         pads={pads}
         onPad={onPad}
+        onPreset={onPreset}
         levels={levels}
         onLevel={onLevel}
         onSpeed={onSpeed}
@@ -808,6 +832,7 @@ function NestedFrame({
   onCueList,
   pads,
   onPad,
+  onPreset,
   levels,
   onLevel,
   onSpeed,
@@ -820,6 +845,7 @@ function NestedFrame({
   onCueList: (chaser: number, action: CueAction, index?: number) => void
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
+  onPreset: (id: number, preset: number) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -874,6 +900,7 @@ function NestedFrame({
                 onCueList={onCueList}
                 pads={pads}
                 onPad={onPad}
+                onPreset={onPreset}
                 levels={levels}
                 onLevel={onLevel}
                 onSpeed={onSpeed}

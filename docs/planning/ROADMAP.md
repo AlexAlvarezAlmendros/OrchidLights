@@ -345,7 +345,9 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 - [x] Una función arrancada **con el submaster ya bajo** sube escalada, no a tope. Los botones y las cue lists no se disparan desde aquí, así que no hay mensaje donde colgar una bandera: se comprueban cada tick, que con un puñado de ellos sale más barato que rastrearlo.
 - [x] **Divergencia consciente con QLC+**, documentada en el código: con dos submasters en el mismo marco, QLC+ depende del orden y **oscurece el rig un poco más en cada reemisión**. Aquí es un producto sobre la cadena, idempotente y sin orden. Un submaster nunca se escala a sí mismo ni a sus hermanos.
 - [x] Honestidad: un submaster que no encierra nada escalable sale **no operable** y dice cuántos widgets escala. Uno solo en un marco de etiquetas y XY pads sería justo el control que no hace nada.
-- [ ] Control completo: `audiotriggers`, `animation` (control de RGB Matrix).
+- [x] **Widget de RGB Matrix.** Es un fader sobre la matriz —a cero la para, por encima le monta la intensidad, igual que un playback— más su banco de presets: un preset de color deja un color guardado en uno de los cinco huecos del algoritmo, uno de animación cambia el algoritmo **llevándose las propiedades de script con las que se guardó** (aplicado sin ellas es otra animación).
+- [x] Los knobs, las imágenes y los textos se enseñan pero **no se ofrecen**: son continuos o necesitan un fichero. La primera versión del predicado los daba por aplicables porque `"Color1Knob"` también empieza por `"Color"` — lo cazó el test de interfaz contando cuántos salían habilitados.
+- [ ] Control de `audiotriggers`. Hay captura de audio en el motor (backend Qt6) y en esta máquina se ven dos entradas, así que es viable; queda el espectro por bandas y los umbrales por barra.
 - [ ] Apariencia (colores, fuentes) y controles externos: mapeo de entrada
       (MIDI/OSC) por widget.
 

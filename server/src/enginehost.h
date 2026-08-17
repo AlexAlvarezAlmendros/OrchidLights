@@ -188,6 +188,14 @@ public:
      *  fixture cannot inherit its id and its sliders with it. */
     int forgetFixture(quint32 fixtureId);
 
+    /**
+     * Apply one of a Matrix widget's presets to the matrix it drives.
+     *
+     * The preset lives in the console and the matrix lives in Doc, so this is
+     * the one place that knows both. Returns false with a readable reason.
+     */
+    bool applyMatrixPreset(quint32 widgetId, int presetId, QString &errorMessage);
+
     /** Anything the engine could not resolve while loading the project. */
     QString projectErrors() const;
 

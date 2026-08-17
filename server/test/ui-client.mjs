@@ -401,19 +401,23 @@ try {
       return 'the group did not appear'
     }
 
-    // And put a fixture in it, which is the part an RGB matrix depends on.
-    const add = [...document.querySelectorAll('.setup article.card select')]
+    /* The one just made, which is the last: a project may already have groups,
+       and the first one's picker is empty when it already holds everything. */
+    const cards = [...document.querySelectorAll('.setup article.card')]
+    const mine = cards[cards.length - 1]
+    const add = [...mine.querySelectorAll('select')]
       .find(s => s.options[0]?.textContent.startsWith('Añadir fixture'))
-    if (!add || add.options.length < 2) return 'no fixture picker in the group'
+    if (!add || add.options.length < 2) return 'no fixture picker in the new group'
 
     const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
     selectSetter.call(add, add.options[1].value)
     add.dispatchEvent(new Event('change', { bubbles: true }))
     await new Promise(r => setTimeout(r, 1300))
 
-    const members = document.querySelectorAll('.setup article.card .channels li').length
-    ;[...document.querySelectorAll('.setup article.card button')]
-      .find(b => b.textContent.trim() === 'Eliminar').click()
+    const refreshed = [...document.querySelectorAll('.setup article.card')]
+    const last = refreshed[refreshed.length - 1]
+    const members = last.querySelectorAll('.channels li').length
+    ;[...last.querySelectorAll('button')].find(b => b.textContent.trim() === 'Eliminar').click()
     await new Promise(r => setTimeout(r, 1200))
 
     return members >= 1 ? 'ok' : 'the fixture did not join the group'
@@ -528,6 +532,25 @@ try {
   })()`)
   check('a paged frame shows one page at a time', paged === 'none' || paged === 'ok', paged)
   await screenshot('08-frames')
+
+  /* A matrix widget, if this console has one: its fader and its preset bank. */
+  const matrix = await evaluate(`(async () => {
+    const el = document.querySelector('.widget.matrix')
+    if (!el) return 'none'
+
+    const buttons = el.querySelectorAll('.matrix-preset')
+    if (buttons.length === 0) return 'the matrix has no presets on screen'
+
+    // The kinds that are not buttons must be shown but not offered.
+    const offered = [...buttons].filter(b => !b.disabled).length
+    if (offered === buttons.length) return 'every preset is offered, including the knob'
+
+    const fader = el.querySelector('input[type=range]')
+    if (!fader) return 'no fader'
+
+    return 'ok ' + offered + '/' + buttons.length + ' offered'
+  })()`)
+  check('a matrix widget shows its fader and presets', matrix === 'none' || matrix.startsWith('ok'), matrix)
 
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {

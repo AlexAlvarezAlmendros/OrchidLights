@@ -30,6 +30,7 @@
 #include "fixturelibrary.h"
 #include "workspaceloader.h"
 #include "virtualconsole.h"
+#include "docwriter.h"
 #include "levelsource.h"
 
 #include "qlcfile.h"
@@ -220,6 +221,14 @@ void EngineHost::teachSliders()
         else if (widget->type == QStringLiteral("cuelist") && widget->hasChaser)
         {
             m_levels->defineCueList(widget->id, widget->chaserId, item.scope);
+        }
+        else if (widget->type == QStringLiteral("matrix") && widget->hasFunction
+                 && widget->functionId != UINT_MAX)
+        {
+            /* A matrix widget is a fader over its matrix: at zero it stops it,
+               above zero it rides its intensity. Exactly a playback slider, so
+               it is registered as one rather than growing a second path. */
+            m_levels->definePlayback(widget->id, widget->functionId, item.scope);
         }
 
         if (widget->padHeads.isEmpty() == false)
@@ -768,6 +777,49 @@ VcPatch::Result EngineHost::assignWidgetIds(int &assigned)
     }
 
     return result;
+}
+
+bool EngineHost::applyMatrixPreset(quint32 widgetId, int presetId, QString &errorMessage)
+{
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root) == false)
+    {
+        errorMessage = QStringLiteral("This project has no Virtual Console");
+        return false;
+    }
+
+    const VcWidget *widget = VirtualConsole::find(root, widgetId);
+    if (widget == nullptr || widget->type != QStringLiteral("matrix"))
+    {
+        errorMessage = QStringLiteral("No matrix widget with id %1").arg(widgetId);
+        return false;
+    }
+
+    if (widget->hasFunction == false || widget->functionId == UINT_MAX)
+    {
+        errorMessage = QStringLiteral("\"%1\" does not drive a matrix").arg(widget->caption);
+        return false;
+    }
+
+    for (const VcWidget::MatrixPreset &preset : widget->matrixPresets)
+    {
+        if (preset.id != presetId)
+            continue;
+
+        QList<QPair<QString, QString>> properties;
+        for (const auto &property : preset.properties)
+            properties.append(property);
+
+        const DocWriter::Result result =
+            DocWriter::applyMatrixPreset(m_doc, widget->functionId, preset.type, preset.color,
+                                         preset.resource, properties, widget->instantApply);
+
+        errorMessage = result.error;
+        return result.ok;
+    }
+
+    errorMessage = QStringLiteral("Widget %1 has no preset %2").arg(widgetId).arg(presetId);
+    return false;
 }
 
 int EngineHost::forgetFixture(quint32 fixtureId)

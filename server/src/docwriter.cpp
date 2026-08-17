@@ -971,6 +971,93 @@ DocWriter::Result DocWriter::setRgbMatrix(Doc *doc, quint32 matrixId, int fixtur
     return Result::success();
 }
 
+DocWriter::Result DocWriter::applyMatrixPreset(Doc *doc, quint32 matrixId, const QString &type,
+                                               const QString &color, const QString &resource,
+                                               const QList<QPair<QString, QString>> &properties,
+                                               bool instant)
+{
+    Function *function = doc->function(matrixId);
+    if (function == nullptr || function->type() != Function::RGBMatrixType)
+        return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
+
+    RGBMatrix *matrix = qobject_cast<RGBMatrix *>(function);
+
+    /* Slot from the type name: Color1..Color5, and the Reset forms that clear
+       one. Five is the most any algorithm accepts. */
+    const auto slotOf = [&type](const QString &suffix) {
+        for (int i = 1; i <= 5; i++)
+        {
+            if (type == QStringLiteral("Color%1%2").arg(i).arg(suffix))
+                return i - 1;
+        }
+        return -1;
+    };
+
+    const int slot = slotOf(QString());
+    if (slot >= 0)
+    {
+        const QColor chosen(color);
+        if (chosen.isValid() == false)
+            return Result::failure(QStringLiteral("\"%1\" is not a colour").arg(color));
+
+        matrix->setColor(slot, chosen);
+        if (instant)
+            matrix->updateColorDelta();
+
+        doc->setModified();
+        return Result::success();
+    }
+
+    const int reset = slotOf(QStringLiteral("Reset"));
+    if (reset >= 0)
+    {
+        /* An invalid colour is how the engine spells "this slot is unset",
+           which is not the same as black. */
+        matrix->setColor(reset, QColor());
+        if (instant)
+            matrix->updateColorDelta();
+
+        doc->setModified();
+        return Result::success();
+    }
+
+    if (type == QStringLiteral("Animation"))
+    {
+        /* Validated against the list first: RGBAlgorithm::algorithm() cannot
+           report a bad name -- it falls through to the script cache, which
+           returns an empty but non-null RGBScript. The matrix would then run
+           and emit nothing, with no error anywhere. */
+        if (RGBAlgorithm::algorithms(doc).contains(resource) == false)
+            return Result::failure(QStringLiteral("No algorithm called \"%1\"").arg(resource));
+
+        RGBAlgorithm *algorithm = RGBAlgorithm::algorithm(doc, resource);
+        if (algorithm == nullptr)
+            return Result::failure(QStringLiteral("No algorithm called \"%1\"").arg(resource));
+
+        /* Algorithm first, then its properties.
+         *
+         * RGBMatrix::setProperty forwards to the algorithm instance under the
+         * matrix's own mutex (rgbmatrix.cpp:426), so setting them afterwards
+         * reaches the one that is now running -- and does it without this file
+         * needing to know what a script is. Setting them first would put them
+         * on the algorithm that is about to be replaced. */
+        matrix->setAlgorithm(algorithm);
+
+        for (const auto &property : properties)
+            matrix->setProperty(property.first, property.second);
+        if (instant)
+            matrix->updateColorDelta();
+
+        doc->setModified();
+        return Result::success();
+    }
+
+    /* Knobs are continuous and images and text need a file, so neither is a
+       button. Refusing beats applying something else. */
+    return Result::failure(
+        QStringLiteral("Presets of type \"%1\" cannot be applied from here yet").arg(type));
+}
+
 DocWriter::Result DocWriter::setScriptData(Doc *doc, quint32 scriptId, const QString &data)
 {
     Function *function = doc->function(scriptId);

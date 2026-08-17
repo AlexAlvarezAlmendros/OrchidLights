@@ -219,6 +219,11 @@ jobs:
       - name: Smoke test - a submaster scales what it should and nothing else
         run: ./server/test/submaster-smoke.sh orchidlightsd server/test/data/vc-submaster.qxw
 
+      # A matrix preset can look applied in the model and be wrong on the wire,
+      # so the colour ones are read back off the universe.
+      - name: Smoke test - a matrix widget applies its presets
+        run: ./server/test/matrix-smoke.sh orchidlightsd server/test/data/vc-matrix.qxw
+
       # The property everything in F6 rests on: a Virtual Console goes through
       # the node tree and comes back identical. If this fails, editing widgets
       # stops being safe.
@@ -246,6 +251,7 @@ jobs:
 
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-references.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-frames.qxw
+          ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-matrix.qxw
           # The sample is built out of frames: 125 widgets, and until they were
           # rendered four of them were on screen.
           ./server/test/ui-smoke.sh orchidlightsd resources/samples/Sample.qxw

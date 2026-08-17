@@ -374,6 +374,40 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         return;
     }
 
+    if (type == QStringLiteral("matrix"))
+    {
+        /* Addressed by widget, not by function: the preset belongs to the
+           widget, and which matrix it drives is the widget's business. */
+        const quint32 widgetId = quint32(message.value("id").toInt(-1));
+        const int presetId = message.value("preset").toInt(-1);
+
+        QString error;
+        if (m_engine->applyMatrixPreset(widgetId, presetId, error) == false)
+        {
+            QJsonObject reply;
+            reply["type"] = "error";
+            reply["error"] = error;
+            sendJson(socket, reply);
+            return;
+        }
+
+        /* Echoed to everyone including the sender: unlike a fader, a preset is
+           a discrete change and there is no drag to stutter. */
+        QJsonObject update;
+        update["type"] = "matrix";
+        update["id"] = qint64(widgetId);
+        update["preset"] = presetId;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(update).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+        return;
+    }
+
     if (type == QStringLiteral("cuelist"))
     {
         /* A cue list is a chaser plus transport. The action goes to the chaser

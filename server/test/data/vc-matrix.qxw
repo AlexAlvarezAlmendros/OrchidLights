@@ -1,0 +1,95 @@
+<!DOCTYPE Workspace>
+<!--
+  A Matrix widget over an RGB matrix, with the presets a real one carries.
+
+  The widget itself is a fader: at zero it stops the matrix, above zero it
+  rides its intensity, exactly like a playback slider. The presets are its own
+  and each does something different to the running matrix:
+
+    - a colour preset drops a stored colour into one of the five slots;
+    - a reset preset clears one, which is not the same as setting it black;
+    - an animation preset swaps the algorithm, carrying the script properties
+      it was stored with. Applied without them it is a different animation.
+
+  The knob preset is here to be refused: it is continuous, not a button, and
+  offering it would be a control that does nothing.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>0</ID>
+   <Name>Pixel 1</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>1</ID>
+   <Name>Pixel 2</Name>
+   <Universe>0</Universe>
+   <Address>3</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <!-- The shapes here are the engine's own, taken from a project it wrote
+       itself: a head's index is the element text, not an attribute, and a
+       hand-written guess at that made the group loader run past its own
+       element and swallow the Virtual Console that follows. -->
+  <FixtureGroup ID="0">
+   <Name>Barra</Name>
+   <Size X="2" Y="1"/>
+   <Head X="0" Y="0" Fixture="0">0</Head>
+   <Head X="1" Y="0" Fixture="1">0</Head>
+  </FixtureGroup>
+  <Function ID="0" Type="RGBMatrix" Name="Matriz">
+   <Speed FadeIn="0" FadeOut="0" Duration="1000"/>
+   <Direction>Forward</Direction>
+   <RunOrder>Loop</RunOrder>
+   <Algorithm Type="Plain"/>
+   <Color Index="0">4294901760</Color>
+   <ControlMode>RGB</ControlMode>
+   <FixtureGroup>0</FixtureGroup>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <Matrix Caption="Matriz" ID="1">
+    <WindowState Visible="True" X="10" Y="10" Width="300" Height="300"/>
+    <Function ID="0" InstantApply="true"/>
+    <Control ID="1">
+     <Type>Color1</Type>
+     <Color>#00ff00</Color>
+    </Control>
+    <Control ID="2">
+     <Type>Color1</Type>
+     <Color>#0000ff</Color>
+    </Control>
+    <Control ID="3">
+     <Type>Color1Reset</Type>
+     <Color>#000000</Color>
+    </Control>
+    <Control ID="4">
+     <Type>Animation</Type>
+     <Resource>Stripes</Resource>
+    </Control>
+    <Control ID="5">
+     <Type>Color1Knob</Type>
+     <Color>#ffffff</Color>
+    </Control>
+   </Matrix>
+  </Frame>
+ </VirtualConsole>
+</Workspace>
