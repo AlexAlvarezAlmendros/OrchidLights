@@ -100,14 +100,18 @@ before, after = index(console(sys.argv[1])), index(console(sys.argv[2]))
 # The run paints one widget and puts it back to the default, and "the default"
 # is written as the word Default -- which is what QLC+ itself writes, and what
 # it reads as "no colour chosen". So a widget that arrived without an
-# <Appearance> ends with one that says nothing. Allowed here, and only here:
-# anything else the console gains or loses is a failure.
-appearance = {k for k in set(before) ^ set(after) if '/Appearance#' in k}
-difference = (set(before) ^ set(after)) - appearance
+# <Appearance> ends with one that says nothing.
+#
+# Allowed, but only in that direction: an Appearance node that *disappeared* is
+# a colour somebody lost, and that stays a failure.
+appearance = {k for k in (set(after) - set(before)) if '/Appearance#' in k}
 
-assert not difference, (
-    'the console gained or lost nodes: '
-    f'{sorted(difference)[:5]}')
+assert not (set(before) - set(after)), (
+    'the console lost nodes: '
+    f'{sorted(set(before) - set(after))[:5]}')
+assert not (set(after) - set(before) - appearance), (
+    'the console gained nodes nobody asked for: '
+    f'{sorted(set(after) - set(before) - appearance)[:5]}')
 
 assigned = 0
 for key in sorted(set(before) & set(after)):
