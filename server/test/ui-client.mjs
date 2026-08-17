@@ -898,6 +898,103 @@ try {
   })()`)
   check('a matrix widget shows its fader and presets', matrix === 'none' || matrix.startsWith('ok'), matrix)
 
+  /* Operator mode, and the app installing.
+   *
+   * The phone this is for is taped to a truss and gets reopened by somebody who
+   * did not put it there, so the mode has to survive a reload -- and everything
+   * that edits has to be *gone from the markup*, not hidden with a class: a
+   * control that is only invisible is still there for a stray tap. */
+  const locked = await evaluate(`(async () => {
+    const buttons = () => [...document.querySelectorAll('.topbar button')].map(b => b.textContent.trim())
+
+    const enter = [...document.querySelectorAll('.topbar button')].find(b => b.textContent.trim() === 'Operador')
+    if (!enter) return 'no operator button'
+    enter.click()
+    await new Promise(r => setTimeout(r, 600))
+
+    const shown = buttons().join('|')
+    for (const gone of ['Editar', 'Ordenar', 'Patch', 'Funciones', 'Planta']) {
+      if (shown.includes(gone)) return gone + ' is still there in operator mode: ' + shown
+    }
+    if (document.querySelector('.app').getAttribute('data-operator') !== 'true') {
+      return 'the app is not in operator mode'
+    }
+
+    /* And the console is still live: this is a mode that removes editing, not
+       one that removes the desk. */
+    if (document.querySelectorAll('.widget').length === 0) return 'the console went with it'
+
+    return 'ok'
+  })()`)
+  check('operator mode leaves only the console', locked === 'ok', locked)
+
+  /* Reloaded, because that is what happens to a phone left on a truss. */
+  await send('Page.reload', {})
+  await sleep(4000)
+
+  const stuck = await evaluate(`(() => {
+    const app = document.querySelector('.app')
+    if (!app) return 'the app did not come back'
+    if (app.getAttribute('data-operator') !== 'true') return 'operator mode did not survive a reload'
+    return 'ok'
+  })()`)
+  check('and survives a reload', stuck === 'ok', stuck)
+
+  /* Leaving takes a second of deliberate pressure. A tap is what a sleeve does;
+     this is a guard against accidents and does not pretend to be a lock. */
+  const released = await evaluate(`(async () => {
+    const unlock = document.querySelector('.unlock')
+    if (!unlock) return 'no unlock button'
+
+    const at = type => unlock.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1 }))
+
+    // A tap does nothing.
+    at('pointerdown')
+    at('pointerup')
+    await new Promise(r => setTimeout(r, 400))
+    if (document.querySelector('.app').getAttribute('data-operator') !== 'true') {
+      return 'a tap got out of operator mode'
+    }
+
+    // A second of it does.
+    at('pointerdown')
+    await new Promise(r => setTimeout(r, 1400))
+    at('pointerup')
+    await new Promise(r => setTimeout(r, 400))
+
+    if (document.querySelector('.app').getAttribute('data-operator') === 'true') {
+      return 'holding did not get out'
+    }
+    const shown = [...document.querySelectorAll('.topbar button')].map(b => b.textContent.trim()).join('|')
+    return shown.includes('Patch') ? 'ok' : 'the rest of the interface did not come back: ' + shown
+  })()`)
+  check('and takes a press and hold to leave', released === 'ok', released)
+
+  /* Installable: the three files a browser needs at the root, served by the
+     daemon itself. */
+  const installable = await evaluate(`(async () => {
+    const manifest = await fetch('/manifest.webmanifest')
+    if (!manifest.ok) return 'no manifest: ' + manifest.status
+    const parsed = await manifest.json()
+    if (parsed.display !== 'standalone') return 'the manifest does not ask for standalone'
+    if (!parsed.icons?.length) return 'the manifest names no icon'
+
+    const icon = await fetch(parsed.icons[0].src)
+    if (!icon.ok) return 'the icon the manifest names is not there'
+
+    const worker = await fetch('/sw.js')
+    if (!worker.ok) return 'no service worker'
+
+    /* A service worker only controls paths under its own, so this one has to be
+       at the root -- and the daemon has to serve it as script, or the browser
+       refuses to register it. */
+    const type = worker.headers.get('content-type') || ''
+    if (!type.includes('javascript')) return 'the worker is served as ' + type
+
+    return 'ok'
+  })()`)
+  check('the app can be installed to a home screen', installable === 'ok', installable)
+
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {
   check('the run completed', false, error.message)

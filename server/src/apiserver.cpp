@@ -240,6 +240,40 @@ void ApiServer::registerRoutes()
                 QStringLiteral("index.html")));
         });
 
+        /* The three files a browser needs at the root to install the app: the
+         * manifest, the icon it names, and the service worker.
+         *
+         * A service worker is only allowed to control the paths under its own,
+         * so /sw.js has to be at the root -- it cannot live in assets/ with
+         * everything else. Named one by one rather than served from a
+         * directory: this is the only part of the tree where a file name from
+         * the network could reach a path, and an allow-list has no traversal to
+         * get wrong.
+         */
+        struct RootFile { const char *path; const char *file; const char *type; };
+        static const RootFile rootFiles[] = {
+            {"/manifest.webmanifest", "manifest.webmanifest", "application/manifest+json"},
+            {"/icon.svg", "icon.svg", "image/svg+xml"},
+            {"/sw.js", "sw.js", "text/javascript"},
+        };
+
+        for (const RootFile &entry : rootFiles)
+        {
+            const QString file = QString::fromLatin1(entry.file);
+            const QString type = QString::fromLatin1(entry.type);
+
+            m_server->route(QString::fromLatin1(entry.path), QHttpServerRequest::Method::Get,
+                            [webRoot, file, type]() {
+                const QString path = QDir(webRoot).absoluteFilePath(file);
+                if (QFileInfo::exists(path) == false)
+                    return jsonError(StatusCode::NotFound, QStringLiteral("No such file"));
+
+                QHttpServerResponse response = QHttpServerResponse::fromFile(path);
+                response.setHeader("Content-Type", type.toUtf8());
+                return response;
+            });
+        }
+
         m_server->route("/assets/<arg>", [webRoot](const QString &name) {
             /* Vite writes hashed names into assets/ and nothing else, but the
                name still arrives from the network: refuse anything that could
