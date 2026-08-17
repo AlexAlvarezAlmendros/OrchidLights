@@ -406,6 +406,37 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
         json["controllable"] = true;
     }
 
+    if (widget.matrixPresets.isEmpty() == false)
+    {
+        QJsonArray presets;
+        for (const VcWidget::MatrixPreset &preset : widget.matrixPresets)
+        {
+            QJsonObject entry;
+            entry["id"] = preset.id;
+            entry["type"] = preset.type;
+            if (preset.color.isEmpty() == false)
+                entry["color"] = preset.color;
+            if (preset.resource.isEmpty() == false)
+                entry["resource"] = preset.resource;
+
+            /* Colour and animation presets are buttons and can be applied.
+               Knobs are continuous, and images and text need a file: they are
+               reported rather than offered, because a control that looks live
+               and does nothing is the failure this project exists to avoid.
+             *
+             * Note the Knob exclusion is not decoration -- "Color1Knob" starts
+             * with "Color" too, and a prefix test alone offered every knob. */
+            entry["applicable"] =
+                (preset.type.startsWith(QStringLiteral("Color"))
+                 && preset.type.contains(QStringLiteral("Knob")) == false)
+                || preset.type == QStringLiteral("Animation");
+            presets.append(entry);
+        }
+
+        json["presets"] = presets;
+        json["instantApply"] = widget.instantApply;
+    }
+
     if (widget.pages > 0)
     {
         json["pages"] = widget.pages;

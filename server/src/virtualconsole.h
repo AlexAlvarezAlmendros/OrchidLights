@@ -112,6 +112,28 @@ struct VcWidget
     double padX = 0.0;
     double padY = 0.0;
 
+    /**
+     * Matrix widget: the presets it can apply to the RGB matrix it drives.
+     *
+     * A colour preset drops a stored colour into one of the algorithm's five
+     * slots; an animation preset swaps the algorithm, carrying whatever script
+     * properties were stored with it. The properties are not decoration -- an
+     * animation applied without them is a different animation.
+     */
+    struct MatrixPreset
+    {
+        int id = 0;
+        QString type;      //!< Color1..Color5, Color1Reset.., Animation, Image, Text
+        QString color;     //!< "#rrggbb", colour presets only
+        QString resource;  //!< algorithm or file name, for the rest
+        QVector<QPair<QString, QString>> properties;
+    };
+    QVector<MatrixPreset> matrixPresets;
+
+    /** Whether the widget recomputes the colour ramp as soon as a preset is
+     *  applied, rather than at the next cycle. */
+    bool instantApply = false;
+
     /** Clock: "stopwatch", "countdown" or "clock", and its target time. */
     QString clockType;
     int clockTime = 0;

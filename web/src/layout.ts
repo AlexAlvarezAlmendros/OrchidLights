@@ -38,6 +38,11 @@ export interface VcWidget {
   foreground?: string
   page?: number
 
+  /** Matrix widget: the presets it can apply. `applicable` is false for the
+   *  kinds that are not buttons -- knobs, images and text. */
+  presets?: { id: number; type: string; color?: string; resource?: string; applicable: boolean }[]
+  instantApply?: boolean
+
   /* Frames. A frame holds other widgets, and may page through them. */
   pages?: number
   currentPage?: number

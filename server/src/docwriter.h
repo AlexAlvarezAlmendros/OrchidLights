@@ -166,6 +166,22 @@ namespace DocWriter
     Result setRgbMatrix(Doc *doc, quint32 matrixId, int fixtureGroupId,
                         const QString &algorithm, const QList<QString> &colours);
 
+    /**
+     * Apply one of a Matrix widget's presets to the RGB matrix it drives.
+     *
+     * A colour preset drops a colour into one of the algorithm's five slots; an
+     * animation preset swaps the algorithm, carrying the script properties the
+     * preset was stored with -- an animation applied without them is a
+     * different animation.
+     *
+     * `instant` recomputes the colour ramp straight away rather than at the
+     * next cycle, which is what the widget's InstantApply flag asks for.
+     */
+    Result applyMatrixPreset(Doc *doc, quint32 matrixId, const QString &type,
+                             const QString &color, const QString &resource,
+                             const QList<QPair<QString, QString>> &properties,
+                             bool instant);
+
     /** Script: the program text. */
     Result setScriptData(Doc *doc, quint32 scriptId, const QString &data);
 

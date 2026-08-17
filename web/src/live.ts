@@ -76,6 +76,10 @@ export class Live {
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)
           break
+        case 'matrix':
+          // Nothing to mirror locally: the change lands in the engine, and the
+          // matrix's own output is what the operator watches.
+          break
         case 'changed':
           this.handlers.onChanged?.(message.what ?? ['project'])
           break
@@ -109,6 +113,12 @@ export class Live {
 
   setSlider(id: number, value: number): void {
     this.send({ type: 'slider', id, value })
+  }
+
+  /** Apply one of a matrix widget's presets. Addressed by widget, because the
+   *  preset belongs to the widget and the matrix is its business. */
+  setMatrixPreset(id: number, preset: number): void {
+    this.send({ type: 'matrix', id, preset })
   }
 
   /** Aim an XY pad, 0..1 on each axis. What that means for each head is the
