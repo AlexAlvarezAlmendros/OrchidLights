@@ -1184,6 +1184,40 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response);
     });
 
+    /* The last external control this daemon saw.
+     *
+     * Nobody knows that their fader is channel 47 of input universe 1, so a
+     * binding is learned by pressing the thing. The live feed carries these as
+     * they happen, which is what an interface in learn mode watches; this route
+     * is for the case where it missed one, and it says plainly when nothing has
+     * arrived at all -- a daemon with no input plugins patched will never see
+     * anything, and that is worth being told rather than waiting for.
+     */
+    m_server->route("/api/v1/input/last", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const EngineHost::SeenInput seen = m_engine->lastInput();
+
+        QJsonObject body;
+        body["seen"] = seen.valid;
+        if (seen.valid)
+        {
+            body["universe"] = qint64(seen.universe);
+            body["channel"] = qint64(seen.channel);
+            body["value"] = int(seen.value);
+        }
+        else
+        {
+            body["note"] = QStringLiteral(
+                "Nothing has arrived on an input universe since this daemon started. Patch an "
+                "input in Universes, then move the control.");
+        }
+
+        return QHttpServerResponse(body);
+    });
+
     /* The plan: where each fixture stands, and what colour it is right now.
      *
      * Only the layout and the roles come from here. The colours are worked out

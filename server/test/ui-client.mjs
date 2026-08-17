@@ -708,6 +708,69 @@ try {
   })()`)
   check('the plan shows what each lamp is doing', litUp === 'none' || litUp === 'ok', litUp)
 
+  /* Appearance, edited from the browser. Cosmetic on a desk is not decoration:
+     a colour bank where every button is grey is one nobody can use in the dark,
+     and until now these were the one thing this daemon could read and could not
+     change. */
+  check('back to the console for the appearance', (await click('Consola')) === 'ok')
+  await sleep(800)
+  check('edit mode opens again', (await click('Editar')) === 'ok')
+  await sleep(600)
+
+  const painted = await evaluate(`(async () => {
+    const widget = document.querySelector('.widget')
+    if (!widget) return 'no widgets'
+    widget.click()
+    await new Promise(r => setTimeout(r, 900))
+
+    const panel = document.querySelector('.editor')
+    if (!panel) return 'the editor never opened'
+
+    const appearance = panel.querySelector('details.appearance')
+    if (!appearance) return 'no appearance panel'
+    appearance.open = true
+
+    const colour = appearance.querySelector('input[type=color]')
+    if (!colour) return 'no colour picker'
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    setter.call(colour, '#ff8800')
+    colour.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 1500))
+
+    /* The daemon is the one that has to agree. A picker that shows orange
+       while the file says nothing is exactly the failure this whole codebase
+       is arranged against. */
+    const vc = await (await fetch('/api/v1/vc')).json()
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+    const painted = walk(vc).filter(w => w.background === '#ff8800')
+    if (painted.length !== 1) return painted.length + ' widgets came back orange'
+
+    /* And it reaches the screen, which is a different question: the console
+       renders the colour through a custom property. */
+    const drawn = [...document.querySelectorAll('.widget')]
+      .find(w => w.style.getPropertyValue('--widget-bg') === 'rgb(255, 136, 0)'
+              || w.style.getPropertyValue('--widget-bg') === '#ff8800')
+    if (!drawn) return 'the colour did not reach the widget'
+
+    /* Back to the default, which is not the same as picking a grey that
+       matches: QLC+ writes "Default" and each theme renders it its own way. */
+    const reset = [...appearance.querySelectorAll('button')]
+      .find(b => b.textContent.includes('por defecto'))
+    if (!reset) return 'no reset button'
+    reset.click()
+    await new Promise(r => setTimeout(r, 1500))
+
+    const after = await (await fetch('/api/v1/vc')).json()
+    if (walk(after).some(w => w.background === '#ff8800')) return 'the colour did not come off'
+
+    return 'ok'
+  })()`)
+  check('a widget can be painted from the browser', painted === 'ok', painted)
+
+  check('leaving edit mode again', (await click('Listo')) === 'ok')
+  await sleep(500)
+
   /* Two people on the same show. An edit made anywhere else has to arrive
      here, or the second phone is quietly showing a console that no longer
      exists -- and the first anyone finds out is mid-cue. */

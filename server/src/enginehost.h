@@ -238,7 +238,28 @@ public:
     /** Anything the engine could not resolve while loading the project. */
     QString projectErrors() const;
 
+    /**
+     * The last external input this daemon saw, for binding a widget to it.
+     *
+     * Learning a control by pressing it is the only way anybody binds MIDI:
+     * nobody knows that their fader is channel 47 of input universe 1, and a
+     * form asking for two numbers is a form nobody can fill in.
+     */
+    struct SeenInput
+    {
+        bool valid = false;
+        quint32 universe = 0;
+        quint32 channel = 0;
+        uchar value = 0;
+    };
+
+    SeenInput lastInput() const { return m_lastInput; }
+
 signals:
+    /** An external control moved. Carried live because learning a binding means
+     *  watching for the next thing the operator touches. */
+    void inputSeen(quint32 universe, quint32 channel, uchar value);
+
     /**
      * The Virtual Console changed.
      *
@@ -267,6 +288,7 @@ private:
 
     Doc *m_doc = nullptr;
     LevelSource *m_levels = nullptr;
+    SeenInput m_lastInput;
     AudioTriggers *m_triggers = nullptr;
     bool m_running = false;
 

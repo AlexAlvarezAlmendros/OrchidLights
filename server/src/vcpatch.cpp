@@ -21,6 +21,9 @@
 #include <QJsonArray>
 #include <QSet>
 
+#include <QColor>
+#include <QFont>
+
 #include "vcpatch.h"
 #include "xmltree.h"
 
@@ -430,6 +433,161 @@ namespace
     }
 
     /**
+     * QLC+ stores a colour as a decimal ARGB integer, which is QRgb printed
+     * with QString::number. Anything else in that element and the desktop reads
+     * black.
+     */
+    QString argbFromColour(const QColor &colour)
+    {
+        return QString::number(quint32(colour.rgb()));
+    }
+
+    /**
+     * How a widget looks: two colours, a font and a frame.
+     *
+     * "Default" rather than a removed element is what QLC+ writes for "no
+     * choice", and it is not the same as absent -- the desktop's own writer
+     * always emits all four. Following it keeps a project that goes through
+     * here byte-comparable with one that did not.
+     */
+    VcPatch::Result setAppearance(XmlNode &widget, const QJsonObject &patch)
+    {
+        using Result = VcPatch::Result;
+
+        const auto colour = [&](const char *key, const char *element) -> Result {
+            const QJsonValue value = patch.value(QLatin1String(key));
+            if (value.isUndefined())
+                return Result::success();
+
+            XmlNode &appearance = widget.childOrCreate(QStringLiteral("Appearance"));
+
+            /* null is "back to the default", which is a thing an operator asks
+               for and which an empty string does not say. */
+            if (value.isNull())
+            {
+                appearance.childOrCreate(QString::fromLatin1(element)).text =
+                    QStringLiteral("Default");
+                return Result::success();
+            }
+
+            const QColor parsed(value.toString());
+            if (parsed.isValid() == false)
+            {
+                return Result::failure(QStringLiteral("\"%1\" is not a colour")
+                                           .arg(value.toString()));
+            }
+
+            appearance.childOrCreate(QString::fromLatin1(element)).text = argbFromColour(parsed);
+            return Result::success();
+        };
+
+        Result result = colour("background", "BackgroundColor");
+        if (result.ok == false)
+            return result;
+
+        result = colour("foreground", "ForegroundColor");
+        if (result.ok == false)
+            return result;
+
+        if (patch.contains(QStringLiteral("font")))
+        {
+            const QJsonValue value = patch.value(QStringLiteral("font"));
+            XmlNode &appearance = widget.childOrCreate(QStringLiteral("Appearance"));
+
+            if (value.isNull())
+            {
+                appearance.childOrCreate(QStringLiteral("Font")).text = QStringLiteral("Default");
+            }
+            else
+            {
+                /* Round-tripped through QFont rather than stored as typed. The
+                   file holds QFont::toString(), sixteen comma-separated fields,
+                   and the desktop reads it with fromString(): a family name
+                   written straight in would read as a font with no size, no
+                   weight and no style, which renders as something nobody
+                   chose. */
+                QFont font;
+                if (font.fromString(value.toString()) == false)
+                {
+                    return Result::failure(
+                        QStringLiteral("\"%1\" is not a font. Send what QFont::toString() "
+                                       "produces, or a family and a size like \"Arial,14\".")
+                            .arg(value.toString()));
+                }
+
+                appearance.childOrCreate(QStringLiteral("Font")).text = font.toString();
+            }
+        }
+
+        if (patch.contains(QStringLiteral("frameStyle")))
+        {
+            const QString style = patch.value(QStringLiteral("frameStyle")).toString();
+            static const QStringList allowed = {QStringLiteral("None"), QStringLiteral("Sunken"),
+                                                QStringLiteral("Raised")};
+
+            if (allowed.contains(style) == false)
+            {
+                return Result::failure(QStringLiteral("A frame style is None, Sunken or Raised, "
+                                                      "not \"%1\"").arg(style));
+            }
+
+            widget.childOrCreate(QStringLiteral("Appearance"))
+                .childOrCreate(QStringLiteral("FrameStyle"))
+                .text = style;
+        }
+
+        return Result::success();
+    }
+
+    /**
+     * The external control bound to a widget: a MIDI note, an OSC message, a
+     * fader on a wing.
+     *
+     * null unbinds it. The universe is an *input* universe, which is a
+     * different numbering from the DMX universes the fixtures live in -- same
+     * word, and confusing the two puts a widget on a control nobody can find.
+     */
+    VcPatch::Result setInput(XmlNode &widget, const QJsonValue &value)
+    {
+        using Result = VcPatch::Result;
+
+        if (value.isNull())
+        {
+            /* Removed, not blanked: an <Input> with no attributes is read by
+               QLC+ as universe 0, channel 0 -- a binding to something real. */
+            for (int i = widget.children.count() - 1; i >= 0; i--)
+            {
+                if (widget.children.at(i).name == QStringLiteral("Input"))
+                    widget.children.removeAt(i);
+            }
+            return Result::success();
+        }
+
+        if (value.isObject() == false)
+        {
+            return Result::failure(QStringLiteral("An input is {\"universe\": n, \"channel\": n}, "
+                                                  "or null to unbind it"));
+        }
+
+        const QJsonObject input = value.toObject();
+        const QJsonValue universe = input.value(QStringLiteral("universe"));
+        const QJsonValue channel = input.value(QStringLiteral("channel"));
+
+        if (universe.isDouble() == false || channel.isDouble() == false
+            || universe.toInt(-1) < 0 || channel.toInt(-1) < 0)
+        {
+            return Result::failure(
+                QStringLiteral("An input needs a non-negative \"universe\" and \"channel\""));
+        }
+
+        XmlNode &node = widget.childOrCreate(QStringLiteral("Input"));
+        node.setAttribute(QStringLiteral("Universe"), QString::number(universe.toInt()));
+        node.setAttribute(QStringLiteral("Channel"), QString::number(channel.toInt()));
+
+        return Result::success();
+    }
+
+    /**
      * Apply a patch to one widget.
      *
      * Every key is optional and only what is present is touched -- that is what
@@ -496,6 +654,27 @@ namespace
 
                 window.setAttribute(QLatin1String(field.attribute), QString::number(pixels));
             }
+        }
+
+        /* How it looks. Cosmetic on a desk is not decoration: a colour bank
+           where every button is grey is a colour bank nobody can use in the
+           dark, and the operator chose those colours for a reason. */
+        if (patch.contains(QStringLiteral("background"))
+            || patch.contains(QStringLiteral("foreground"))
+            || patch.contains(QStringLiteral("font"))
+            || patch.contains(QStringLiteral("frameStyle")))
+        {
+            const Result result = setAppearance(widget, patch);
+            if (result.ok == false)
+                return result;
+        }
+
+        /* What moves it from outside. */
+        if (patch.contains(QStringLiteral("input")))
+        {
+            const Result result = setInput(widget, patch.value(QStringLiteral("input")));
+            if (result.ok == false)
+                return result;
         }
 
         /* What the widget does, as opposed to where it sits. Each of these

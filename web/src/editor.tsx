@@ -46,6 +46,7 @@ export function WidgetEditor({
   widget,
   functions,
   fixtures,
+  learning,
   onApply,
   onDelete,
   onClose,
@@ -53,6 +54,9 @@ export function WidgetEditor({
   widget: VcWidget
   functions: FunctionState[]
   fixtures: FixtureState[]
+  /** The last external control the daemon saw, so a binding can be learned by
+   *  pressing the thing rather than typed as two numbers nobody knows. */
+  learning: { universe: number; channel: number; value: number } | null
   onApply: (patch: WidgetPatch) => Promise<void>
   onDelete: () => Promise<void>
   onClose: () => void
@@ -231,6 +235,9 @@ export function WidgetEditor({
         </>
       )}
 
+      <Appearance widget={widget} busy={busy} onApply={apply} />
+      <ExternalInput widget={widget} busy={busy} onApply={apply} learning={learning} />
+
       <button
         type="button"
         className="danger"
@@ -405,4 +412,180 @@ function secondsToTime(total: number) {
 function timeToSeconds(value: string) {
   const [h = '0', m = '0', s = '0'] = value.split(':')
   return Number(h) * 3600 + Number(m) * 60 + Number(s)
+}
+
+/**
+ * How a widget looks.
+ *
+ * Cosmetic on a desk is not decoration: a colour bank where every button is
+ * grey is a colour bank nobody can use in the dark, and the operator chose
+ * those colours for a reason. The font travels back as the file holds it --
+ * QFont::toString(), sixteen fields -- with only the family and size edited, so
+ * the fourteen nobody touches survive.
+ */
+function Appearance({
+  widget,
+  busy,
+  onApply,
+}: {
+  widget: VcWidget
+  busy: boolean
+  onApply: (patch: WidgetPatch) => Promise<void>
+}) {
+  const family = widget.fontFamily ?? ''
+  const size = widget.fontSize ?? 12
+
+  return (
+    <details className="appearance">
+      <summary>Apariencia</summary>
+
+      <div className="fields">
+        <label className="field">
+          <span>Fondo</span>
+          <input
+            type="color"
+            value={widget.background ?? '#1a1c22'}
+            disabled={busy}
+            onChange={(e) => onApply({ background: e.target.value })}
+          />
+        </label>
+
+        <label className="field">
+          <span>Texto</span>
+          <input
+            type="color"
+            value={widget.foreground ?? '#f2f3f5'}
+            disabled={busy}
+            onChange={(e) => onApply({ foreground: e.target.value })}
+          />
+        </label>
+      </div>
+
+      <div className="fields">
+        <label className="field grow-field">
+          <span>Tipografía</span>
+          <input
+            defaultValue={family}
+            placeholder="Por defecto"
+            disabled={busy}
+            onBlur={(e) => {
+              const next = e.target.value.trim()
+              if (next === family) return
+              onApply({ font: next === '' ? null : `${next},${size}` })
+            }}
+          />
+        </label>
+
+        <label className="field">
+          <span>Cuerpo</span>
+          <input
+            type="number"
+            min={6}
+            max={72}
+            value={size}
+            disabled={busy || family === ''}
+            onChange={(e) => onApply({ font: `${family},${e.target.value}` })}
+          />
+        </label>
+      </div>
+
+      <label className="field">
+        <span>Marco</span>
+        <select
+          value={widget.frameStyle ?? 'None'}
+          disabled={busy}
+          onChange={(e) => onApply({ frameStyle: e.target.value })}
+        >
+          <option value="None">Sin marco</option>
+          <option value="Sunken">Hundido</option>
+          <option value="Raised">Elevado</option>
+        </select>
+      </label>
+
+      {/* Back to the desk's own colours, which is not the same as picking a
+          grey that happens to match it: QLC+ writes "Default" and every theme
+          then renders it in its own way. */}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onApply({ background: null, foreground: null, font: null })}
+      >
+        Volver a lo de por defecto
+      </button>
+    </details>
+  )
+}
+
+/**
+ * The external control bound to this widget: a MIDI note, an OSC message, a
+ * fader on a wing.
+ *
+ * Learned by pressing the thing. Nobody knows that their fader is channel 47 of
+ * input universe 1, and a form asking for two numbers is a form nobody can fill
+ * in -- so the panel watches for the next control that moves and offers it.
+ */
+function ExternalInput({
+  widget,
+  busy,
+  learning,
+  onApply,
+}: {
+  widget: VcWidget
+  busy: boolean
+  learning: { universe: number; channel: number; value: number } | null
+  onApply: (patch: WidgetPatch) => Promise<void>
+}) {
+  const [listening, setListening] = useState(false)
+  const bound = widget.input
+
+  /* Bind to whatever arrives while listening. Applied here rather than on a
+     second press: the operator's hand is on the control, and asking them to
+     come back to the screen to confirm is asking them to lose it. */
+  useEffect(() => {
+    if (!listening || learning === null) return
+    setListening(false)
+    onApply({ input: { universe: learning.universe, channel: learning.channel } })
+  }, [listening, learning, onApply])
+
+  return (
+    <details className="external-input">
+      <summary>Control externo</summary>
+
+      {bound ? (
+        <p className="hint">
+          Universo de entrada {bound.universe}, canal {bound.channel}.
+        </p>
+      ) : (
+        <p className="hint">Sin asignar.</p>
+      )}
+
+      <div className="fields">
+        <button
+          type="button"
+          aria-pressed={listening}
+          disabled={busy}
+          onClick={() => setListening((on) => !on)}
+        >
+          {listening ? 'Esperando… mueve el control' : 'Aprender'}
+        </button>
+
+        <button
+          type="button"
+          disabled={busy || bound === undefined}
+          onClick={() => onApply({ input: null })}
+        >
+          Quitar
+        </button>
+      </div>
+
+      {/* An input universe with nothing patched into it never reports
+          anything, and a button that waits forever looks broken rather than
+          unpatched. */}
+      {listening && (
+        <p className="hint">
+          Si no llega nada, comprueba que hay una entrada parcheada en Patch → Universos.
+        </p>
+      )}
+    </details>
+  )
 }

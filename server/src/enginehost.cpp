@@ -148,6 +148,17 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
     m_doc->inputOutputMap()->setBeatGeneratorType(InputOutputMap::Internal);
     m_doc->inputOutputMap()->startUniverses();
 
+    /* Every external control that moves, remembered and passed on.
+     *
+     * Not filtered by value: a button that sends 127 and then 0 is two events,
+     * and learning from the second would bind to the release. The interface
+     * decides what to keep; this only reports. */
+    connect(m_doc->inputOutputMap(), &InputOutputMap::inputValueChanged, this,
+            [this](quint32 universe, quint32 channel, uchar value) {
+        m_lastInput = {true, universe, channel, value};
+        emit inputSeen(universe, channel, value);
+    });
+
     /* Registered before the timer starts, so the first tick already has it. */
     m_levels = new LevelSource(m_doc);
     m_doc->masterTimer()->registerDMXSource(m_levels);

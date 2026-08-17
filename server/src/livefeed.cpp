@@ -89,6 +89,31 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(m_engine, &EngineHost::consoleChanged, this, &LiveFeed::onConsoleChanged);
     connect(m_engine, &EngineHost::projectReplaced, this, &LiveFeed::onProjectReplaced);
 
+    /* External controls, passed straight through rather than coalesced into the
+       flush.
+     *
+     * Binding a widget to a fader means watching for the next thing the
+       operator touches, and a control that has already moved on by the time the
+       message arrives is the wrong one. These are a handful of bytes and only
+       arrive when somebody is turning something. */
+    connect(m_engine, &EngineHost::inputSeen, this,
+            [this](quint32 universe, quint32 channel, uchar value) {
+        QJsonObject message;
+        message["type"] = "input";
+        message["universe"] = qint64(universe);
+        message["channel"] = qint64(channel);
+        message["value"] = int(value);
+
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+    });
+
     connect(&m_flushTimer, &QTimer::timeout, this, &LiveFeed::flush);
     setStreamRate(25);
 }

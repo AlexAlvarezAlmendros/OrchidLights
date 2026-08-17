@@ -671,6 +671,39 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
     if (widget.foreground.isEmpty() == false)
         json["foreground"] = widget.foreground;
 
+    /* The font as the file holds it -- QFont::toString(), sixteen fields --
+       plus the two an operator actually chooses, split out. A browser cannot do
+       anything with "Arial,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1" except send it
+       back, and the round trip is what keeps the other fourteen fields. */
+    if (widget.font.isEmpty() == false)
+    {
+        json["font"] = widget.font;
+
+        const QStringList parts = widget.font.split(QLatin1Char(','));
+        if (parts.count() >= 2)
+        {
+            json["fontFamily"] = parts.at(0);
+            const int size = parts.at(1).toInt();
+            if (size > 0)
+                json["fontSize"] = size;
+        }
+    }
+
+    if (widget.frameStyle.isEmpty() == false)
+        json["frameStyle"] = widget.frameStyle;
+
+    /* What moves this widget from outside. The universe is an input universe,
+       which is a different numbering from the DMX universes the fixtures live
+       in, so it is reported under its own key rather than next to anything that
+       might be mistaken for a patch. */
+    if (widget.hasInput)
+    {
+        QJsonObject input;
+        input["universe"] = qint64(widget.inputUniverse);
+        input["channel"] = qint64(widget.inputChannel);
+        json["input"] = input;
+    }
+
     if (widget.hasFunction)
         json["functionId"] = qint64(widget.functionId);
     if (widget.action.isEmpty() == false)

@@ -23,6 +23,9 @@ export interface LiveHandlers {
   /** Where a running show has got to, in milliseconds. Sent at the flush rate
    *  while one plays, and once more with running: false when it ends. */
   onShow?: (id: number, elapsed: number, running: boolean) => void
+  /** An external control moved. Carried live because binding a widget to one
+   *  means watching for the next thing the operator touches. */
+  onInput?: (universe: number, channel: number, value: number) => void
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
   onChanged?: (what: string[]) => void
@@ -91,6 +94,9 @@ export class Live {
           break
         case 'show':
           this.handlers.onShow?.(message.id, message.elapsed, message.running)
+          break
+        case 'input':
+          this.handlers.onInput?.(message.universe, message.channel, message.value)
           break
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)
