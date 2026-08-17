@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FixtureState, type FunctionState, type WidgetPatch, api } from './api'
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
+import { AudioTriggers } from './audiotriggers'
 import { CueList } from './cuelist'
 import { WidgetEditor } from './editor'
 import { Functions } from './functions'
@@ -65,6 +66,13 @@ export function App() {
   /** Bumped whenever the project changed under us, so the screens that keep
    *  their own state know to re-read it. */
   const [revision, setRevision] = useState(0)
+  const [spectrum, setSpectrum] = useState<{ bands: number[]; volume: number }>({
+    bands: [],
+    volume: 0,
+  })
+  const [audio, setAudio] = useState<
+    Record<number, { enabled: boolean; capturing: boolean; unavailable?: string }>
+  >({})
   /** Which page of the frame on screen, for a frame that has pages. */
   const [framePage, setFramePage] = useState(0)
 
@@ -77,6 +85,8 @@ export function App() {
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
       onPad: (id, x, y) => setPads((current) => ({ ...current, [id]: { x, y } })),
+      onSpectrum: (bands, volume) => setSpectrum({ bands, volume }),
+      onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
       /* Somebody else edited the show. Re-read what they touched rather than
          patching a local copy from the message: the daemon decides what a
          change means, and two clients guessing at it is how they drift. */
@@ -175,6 +185,10 @@ export function App() {
 
   const cueList = useCallback((chaser: number, action: CueAction, index = -1) => {
     live.current?.cuelist(chaser, action, index)
+  }, [])
+
+  const toggleAudio = useCallback((id: number, enabled: boolean) => {
+    live.current?.setAudioTriggers(id, enabled)
   }, [])
 
   const applyPreset = useCallback((id: number, preset: number) => {
@@ -474,6 +488,9 @@ export function App() {
                 pads={pads}
                 onPad={movePad}
                 onPreset={applyPreset}
+                audio={audio}
+                spectrum={spectrum}
+                onAudio={toggleAudio}
                 levels={levels}
                 onLevel={setLevel}
                 onSpeed={setSpeed}
@@ -515,6 +532,9 @@ function Surface({
   pads,
   onPad,
   onPreset,
+  audio,
+  spectrum,
+  onAudio,
   levels,
   onLevel,
   onSpeed,
@@ -534,6 +554,9 @@ function Surface({
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
   onPreset: (id: number, preset: number) => void
+  audio: Record<number, { enabled: boolean; capturing: boolean; unavailable?: string }>
+  spectrum: { bands: number[]; volume: number }
+  onAudio: (id: number, enabled: boolean) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -570,6 +593,9 @@ function Surface({
                 pads={pads}
                 onPad={onPad}
                 onPreset={onPreset}
+                audio={audio}
+                spectrum={spectrum}
+                onAudio={onAudio}
                 levels={levels}
                 onLevel={onLevel}
                 onSpeed={onSpeed}
@@ -634,6 +660,9 @@ function Widget({
   pads,
   onPad,
   onPreset,
+  audio,
+  spectrum,
+  onAudio,
   levels,
   onLevel,
   onSpeed,
@@ -653,6 +682,9 @@ function Widget({
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
   onPreset: (id: number, preset: number) => void
+  audio: Record<number, { enabled: boolean; capturing: boolean; unavailable?: string }>
+  spectrum: { bands: number[]; volume: number }
+  onAudio: (id: number, enabled: boolean) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -730,6 +762,22 @@ function Widget({
     )
   }
 
+  if (widget.type === 'audiotriggers') {
+    const state = audio[widget.id ?? -1]
+    return (
+      <AudioTriggers
+        widget={widget}
+        style={style}
+        spectrum={spectrum.bands}
+        volume={spectrum.volume}
+        enabled={state?.enabled === true}
+        capturing={state?.capturing === true}
+        {...(state?.unavailable ? { unavailable: state.unavailable } : {})}
+        onToggle={onAudio}
+      />
+    )
+  }
+
   if (widget.type === 'matrix') {
     return (
       <MatrixWidget
@@ -791,6 +839,9 @@ function Widget({
         pads={pads}
         onPad={onPad}
         onPreset={onPreset}
+        audio={audio}
+        spectrum={spectrum}
+        onAudio={onAudio}
         levels={levels}
         onLevel={onLevel}
         onSpeed={onSpeed}
@@ -833,6 +884,9 @@ function NestedFrame({
   pads,
   onPad,
   onPreset,
+  audio,
+  spectrum,
+  onAudio,
   levels,
   onLevel,
   onSpeed,
@@ -846,6 +900,9 @@ function NestedFrame({
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
   onPreset: (id: number, preset: number) => void
+  audio: Record<number, { enabled: boolean; capturing: boolean; unavailable?: string }>
+  spectrum: { bands: number[]; volume: number }
+  onAudio: (id: number, enabled: boolean) => void
   levels: Record<number, number>
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
@@ -901,6 +958,9 @@ function NestedFrame({
                 pads={pads}
                 onPad={onPad}
                 onPreset={onPreset}
+                audio={audio}
+                spectrum={spectrum}
+                onAudio={onAudio}
                 levels={levels}
                 onLevel={onLevel}
                 onSpeed={onSpeed}

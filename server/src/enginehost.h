@@ -25,6 +25,7 @@
 
 #include "workspaceloader.h"
 #include "consolelayout.h"
+#include "audiotriggers.h"
 #include "levelsource.h"
 #include "vcpatch.h"
 
@@ -148,6 +149,9 @@ public:
     /** Writes the Virtual Console's level sliders onto the universes. */
     LevelSource *levels() const { return m_levels; }
 
+    /** Drives the console from what the microphone hears. */
+    AudioTriggers *audio() const { return m_triggers; }
+
     /** Fixture manufacturers in the library. */
     int manufacturerCount() const { return m_manufacturers; }
     QString fixtureLibraryPath() const { return m_fixturePath; }
@@ -228,6 +232,7 @@ private:
 
     Doc *m_doc = nullptr;
     LevelSource *m_levels = nullptr;
+    AudioTriggers *m_triggers = nullptr;
     bool m_running = false;
 
     int m_manufacturers = 0;

@@ -20,6 +20,13 @@ export interface LiveHandlers {
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
   onChanged?: (what: string[]) => void
+  /** A new spectrum from the microphone, 0..255 per band. */
+  onSpectrum?: (bands: number[], volume: number) => void
+  /** An audio triggers widget was switched on or off -- by us or by anyone. */
+  onAudioTriggers?: (
+    id: number,
+    state: { enabled: boolean; capturing: boolean; unavailable?: string },
+  ) => void
   onUniverse?: (universe: number, channels: Uint8Array) => void
 }
 
@@ -76,6 +83,16 @@ export class Live {
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)
           break
+        case 'spectrum':
+          this.handlers.onSpectrum?.(message.bands, message.volume)
+          break
+        case 'audiotriggers':
+          this.handlers.onAudioTriggers?.(message.id, {
+            enabled: message.enabled,
+            capturing: message.capturing,
+            unavailable: message.unavailable,
+          })
+          break
         case 'matrix':
           // Nothing to mirror locally: the change lands in the engine, and the
           // matrix's own output is what the operator watches.
@@ -113,6 +130,12 @@ export class Live {
 
   setSlider(id: number, value: number): void {
     this.send({ type: 'slider', id, value })
+  }
+
+  /** Switch an audio triggers widget on or off. The daemon holds the
+   *  microphone only while at least one is on. */
+  setAudioTriggers(id: number, enabled: boolean): void {
+    this.send({ type: 'audiotriggers', id, enabled })
   }
 
   /** Apply one of a matrix widget's presets. Addressed by widget, because the

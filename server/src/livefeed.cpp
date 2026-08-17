@@ -374,6 +374,41 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         return;
     }
 
+    if (type == QStringLiteral("audiotriggers"))
+    {
+        const quint32 widgetId = quint32(message.value("id").toInt(-1));
+        const bool enabled = message.value("enabled").toBool();
+
+        if (m_engine->audio()->setEnabled(widgetId, enabled) == false)
+        {
+            QJsonObject reply;
+            reply["type"] = "error";
+            reply["error"] = QStringLiteral("No audio triggers widget with id %1").arg(widgetId);
+            sendJson(socket, reply);
+            return;
+        }
+
+        /* Whether it came up is worth saying: on a machine with no input the
+           switch would otherwise look on while nothing listens. */
+        QJsonObject update;
+        update["type"] = "audiotriggers";
+        update["id"] = qint64(widgetId);
+        update["enabled"] = m_engine->audio()->isEnabled(widgetId);
+        update["capturing"] = m_engine->audio()->isCapturing();
+        if (m_engine->audio()->unavailableReason().isEmpty() == false)
+            update["unavailable"] = m_engine->audio()->unavailableReason();
+
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(update).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+        return;
+    }
+
     if (type == QStringLiteral("matrix"))
     {
         /* Addressed by widget, not by function: the preset belongs to the
@@ -653,6 +688,34 @@ void LiveFeed::flush()
         {
             m_chaserSteps.insert(function->id(), step);
             m_functionsDirty = true;
+        }
+    }
+
+    /* The spectrum, at the flush rate rather than the capture's. The capture
+       produces frames faster than anyone can watch, and the bars are drawn for
+       a person. */
+    if (m_engine->audio()->isCapturing() && m_clients.isEmpty() == false)
+    {
+        const QVector<uchar> spectrum = m_engine->audio()->spectrum();
+        if (spectrum.isEmpty() == false)
+        {
+            QJsonArray bands;
+            for (uchar band : spectrum)
+                bands.append(int(band));
+
+            QJsonObject message;
+            message["type"] = "spectrum";
+            message["bands"] = bands;
+            message["volume"] = int(m_engine->audio()->volume());
+
+            const QString payload =
+                QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+
+            for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+            {
+                if (it.value().authenticated)
+                    it.key()->sendTextMessage(payload);
+            }
         }
     }
 

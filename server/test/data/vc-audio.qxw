@@ -1,0 +1,54 @@
+<!DOCTYPE Workspace>
+<!--
+  An audio triggers widget with one bar of each kind that does something.
+
+  A bar holds DMX channels at its level, or starts a function above one
+  threshold and stops it below another, or drives another widget. The two
+  thresholds are not one: a single crossing point makes a function stutter on
+  and off around it, which on a lamp is a strobe nobody asked for.
+
+  Bar 0 is left unassigned on purpose. QLC+ writes the widget out only when at
+  least one bar is assigned, but the unassigned ones are still there, and a
+  reader that treated type 0 as a kind would drive channel nothing.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>0</ID>
+   <Name>Par</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Function ID="0" Type="Scene" Name="Golpe">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,255,1,255,2,255</FixtureVal>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <AudioTriggers Caption="Espectro" ID="1" BarsNumber="8">
+    <WindowState Visible="True" X="10" Y="10" Width="400" Height="300"/>
+    <VolumeBar Name="Volumen" Type="1" MinThreshold="0" MaxThreshold="255" Divisor="1" Index="0">
+     <DMXChannels>0,0</DMXChannels>
+    </VolumeBar>
+    <SpectrumBar Name="Sin asignar" Type="0" MinThreshold="0" MaxThreshold="255" Divisor="1" Index="0"/>
+    <SpectrumBar Name="Graves" Type="1" MinThreshold="0" MaxThreshold="255" Divisor="1" Index="1">
+     <DMXChannels>0,1</DMXChannels>
+    </SpectrumBar>
+    <SpectrumBar Name="Agudos" Type="2" MinThreshold="40" MaxThreshold="200" Divisor="1" Index="2" FunctionID="0"/>
+   </AudioTriggers>
+  </Frame>
+ </VirtualConsole>
+</Workspace>

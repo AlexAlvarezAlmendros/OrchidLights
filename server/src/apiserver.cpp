@@ -34,6 +34,7 @@
 #include "livefeed.h"
 #include "virtualconsole.h"
 #include "consolelayout.h"
+#include "audiotriggers.h"
 #include "docwriter.h"
 #include "rgbalgorithm.h"
 #include "qlcfixturedefcache.h"
@@ -1080,6 +1081,53 @@ void ApiServer::registerRoutes()
 
         QJsonObject response;
         response["removed"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* The audio inputs this machine offers, and the one the capture uses.
+     *
+     * Worth a route of its own, because the wrong input is silent rather than
+     * broken: a widget listening to a headphones jack with nothing plugged in
+     * looks exactly like a widget that does not work, and an operator can only
+     * tell the two apart by being shown the list. */
+    m_server->route("/api/v1/audio", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray inputs;
+        for (const QString &name : AudioTriggers::availableInputs())
+            inputs.append(name);
+
+        QJsonObject body;
+        body["inputs"] = inputs;
+        body["selected"] = AudioTriggers::selectedInput();
+        body["capturing"] = m_engine->audio()->isCapturing();
+        if (m_engine->audio()->unavailableReason().isEmpty() == false)
+            body["unavailable"] = m_engine->audio()->unavailableReason();
+
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/audio", QHttpServerRequest::Method::Put,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const QString input = body.value("input").toString();
+
+        if (m_engine->audio()->selectInput(input) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("No audio input called \"%1\". Available: %2")
+                                 .arg(input, AudioTriggers::availableInputs()
+                                                 .join(QStringLiteral(", "))));
+        }
+
+        QJsonObject response;
+        response["selected"] = AudioTriggers::selectedInput();
+        response["capturing"] = m_engine->audio()->isCapturing();
         return QHttpServerResponse(response);
     });
 

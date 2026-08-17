@@ -3,6 +3,7 @@ set(module_name "orchidlightsd")
 add_executable(${module_name}
     main.cpp
     apiauth.cpp apiauth.h
+    audiotriggers.cpp audiotriggers.h
     apiserver.cpp apiserver.h
     consolelayout.cpp consolelayout.h
     docwriter.cpp docwriter.h
@@ -20,6 +21,7 @@ add_executable(${module_name}
 
 target_include_directories(${module_name} PRIVATE
     ../../engine/src
+    ../../engine/audio/src
 )
 
 target_link_libraries(${module_name} PRIVATE
@@ -28,6 +30,7 @@ target_link_libraries(${module_name} PRIVATE
     Qt${QT_MAJOR_VERSION}::Qml
     Qt${QT_MAJOR_VERSION}::HttpServer
     Qt${QT_MAJOR_VERSION}::WebSockets
+    Qt${QT_MAJOR_VERSION}::Multimedia
     qlcplusengine
 )
 
