@@ -36,6 +36,15 @@ export interface VcWidget {
   geometry: Geometry
   background?: string
   foreground?: string
+  /** QFont::toString(), as the file holds it. Sent back unchanged so the
+   *  fourteen fields nobody edits survive the round trip. */
+  font?: string
+  fontFamily?: string
+  fontSize?: number
+  frameStyle?: string
+  /** The external control bound to this widget. The universe is an *input*
+   *  universe, a different numbering from the DMX ones. */
+  input?: { universe: number; channel: number }
   page?: number
 
   /** Audio triggers: how many bands the widget was built for, and what each

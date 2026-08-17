@@ -66,6 +66,18 @@ struct VcWidget
     QString background;  //!< "#rrggbb", empty when the widget has no colour set
     QString foreground;
 
+    /** QFont::toString(), empty when the widget uses the default. */
+    QString font;
+    /** "None", "Sunken" or "Raised", empty when unset. */
+    QString frameStyle;
+
+    /** The external control bound to this widget: a MIDI note, an OSC message,
+     *  a fader on a wing. The universe is an *input* universe, which is a
+     *  different numbering from the DMX universes the fixtures live in. */
+    bool hasInput = false;
+    quint32 inputUniverse = 0;
+    quint32 inputChannel = 0;
+
     /** Function a button drives, or the one a playback slider rides. */
     bool hasFunction = false;
     quint32 functionId = 0;

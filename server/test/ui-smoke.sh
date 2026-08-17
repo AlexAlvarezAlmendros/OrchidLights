@@ -97,13 +97,31 @@ def index(node, path='', out=None):
 
 before, after = index(console(sys.argv[1])), index(console(sys.argv[2]))
 
-assert set(before) == set(after), (
-    'the console gained or lost nodes: '
-    f'{sorted(set(before) ^ set(after))[:5]}')
+# The run paints one widget and puts it back to the default, and "the default"
+# is written as the word Default -- which is what QLC+ itself writes, and what
+# it reads as "no colour chosen". So a widget that arrived without an
+# <Appearance> ends with one that says nothing.
+#
+# Allowed, but only in that direction: an Appearance node that *disappeared* is
+# a colour somebody lost, and that stays a failure.
+appearance = {k for k in (set(after) - set(before)) if '/Appearance#' in k}
+
+assert not (set(before) - set(after)), (
+    'the console lost nodes: '
+    f'{sorted(set(before) - set(after))[:5]}')
+assert not (set(after) - set(before) - appearance), (
+    'the console gained nodes nobody asked for: '
+    f'{sorted(set(after) - set(before) - appearance)[:5]}')
 
 assigned = 0
-for key in sorted(before):
+for key in sorted(set(before) & set(after)):
     (attrs_a, text_a), (attrs_b, text_b) = before[key], after[key]
+
+    # Same reason: an Appearance child that was there and is now the word
+    # Default is a colour the run reset on purpose.
+    if '/Appearance#' in key and text_b == 'Default':
+        continue
+
     assert text_a == text_b, f'{key}: text changed, {text_a!r} -> {text_b!r}'
 
     changed = {k for k in set(attrs_a) | set(attrs_b) if attrs_a.get(k) != attrs_b.get(k)}
@@ -114,7 +132,8 @@ for key in sorted(before):
     assert not changed, f'{key}: changed {changed}'
 
 print(f'console unchanged across the round trip '
-      f'({len(before)} nodes, {assigned} given an id)')
+      f'({len(before)} nodes, {assigned} given an id, '
+      f'{len(appearance)} appearance nodes the run reset)')
 PY
 
 echo "UI smoke test passed."

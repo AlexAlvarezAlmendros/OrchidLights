@@ -1317,3 +1317,29 @@ button.linkish.left {
 .tray-item {
   border-width: 2px;
 }
+
+/* The two panels at the bottom of the widget editor, folded away by default:
+   an operator opens this to rename a button far more often than to change its
+   font. */
+.appearance,
+.external-input {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.4rem 0.6rem;
+}
+
+.appearance summary,
+.external-input summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.appearance input[type="color"] {
+  min-height: 2.2rem;
+  padding: 0.1rem;
+}
+
+.external-input .fields {
+  gap: 0.4rem;
+}

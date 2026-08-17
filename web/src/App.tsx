@@ -68,6 +68,13 @@ export function App() {
      the plan is the one screen that needs them, so nothing else subscribes. */
   const [frames, setFrames] = useState<Record<number, Uint8Array>>({})
   const [planError, setPlanError] = useState<string | null>(null)
+  /* The last external control the daemon saw. Kept so the widget editor can
+     learn a binding by watching for the next thing the operator touches. */
+  const [lastInput, setLastInput] = useState<{
+    universe: number
+    channel: number
+    value: number
+  } | null>(null)
   const [mode, setMode] = useState<Mode>('run')
   const [layout, setLayout] = useState<LayoutRows | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
@@ -100,6 +107,7 @@ export function App() {
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
       onChannelGroup: (id, value) => setGroupLevels((current) => ({ ...current, [id]: value })),
+      onInput: (universe, channel, value) => setLastInput({ universe, channel, value }),
       onUniverse: (universe, channels) =>
         setFrames((current) => ({ ...current, [universe]: channels })),
       onShow: (id, elapsed, running) =>
@@ -607,6 +615,7 @@ export function App() {
               widget={selectedWidget}
               functions={functions}
               fixtures={fixtures}
+              learning={lastInput}
               onApply={editWidget}
               onDelete={deleteWidget}
               onClose={() => setSelected(null)}

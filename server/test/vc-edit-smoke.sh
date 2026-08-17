@@ -130,6 +130,93 @@ assert found[0]['geometry'] == {'x': 700, 'y': 10, 'width': 120, 'height': 50}, 
     || fail "a label was accepted as a parent frame"
 
 # ---------------------------------------------------------------------------
+# How a widget looks, and what moves it from outside.
+#
+# Cosmetic on a desk is not decoration: a colour bank where every button is grey
+# is a colour bank nobody can use in the dark. And a binding to a MIDI fader is
+# the difference between a console you drive with a mouse and one you drive with
+# your hands.
+# ---------------------------------------------------------------------------
+
+api PATCH /vc/widgets/3 -H 'Content-Type: application/json' \
+    -d '{"background":"#ff8800","foreground":"#ffffff","font":"Roboto Condensed,16","frameStyle":"Sunken","input":{"universe":1,"channel":47}}' \
+    | python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+assert w['background'] == '#ff8800', w
+assert w['foreground'] == '#ffffff', w
+assert w['frameStyle'] == 'Sunken', w
+assert w['input'] == {'universe': 1, 'channel': 47}, w
+
+# The font goes in as a family and a size and comes back as QFont::toString(),
+# because that is what the file holds and what the desktop reads. Sending the
+# family alone would be a font with no size, no weight and no style: something
+# nobody chose.
+assert w['fontFamily'] == 'Roboto Condensed', w
+assert w['fontSize'] == 16, w
+assert w['font'].startswith('Roboto Condensed,16,'), w
+assert w['font'].count(',') == 15, ('not a QFont string', w['font'])
+
+# And the patch touched nothing else.
+assert w['caption'] == 'Escenario Izquierda', w
+assert w['geometry']['x'] == 460, w
+" || fail "PATCH appearance and input"
+
+[ "$(code PATCH /vc/widgets/3 -d '{"background":"rojo"}')" = "400" ] \
+    || fail "a colour that is not a colour was accepted"
+[ "$(code PATCH /vc/widgets/3 -d '{"frameStyle":"Fancy"}')" = "400" ] \
+    || fail "an invented frame style was accepted"
+[ "$(code PATCH /vc/widgets/3 -d '{"input":{"universe":-1,"channel":0}}')" = "400" ] \
+    || fail "a negative input universe was accepted"
+[ "$(code PATCH /vc/widgets/3 -d '{"input":7}')" = "400" ] \
+    || fail "an input that is not an object was accepted"
+
+# A refused patch leaves the widget exactly as it was.
+api GET /vc | python3 -c "
+import json, sys
+def walk(w):
+    yield w
+    for c in w.get('children', []):
+        yield from walk(c)
+label = [w for w in walk(json.load(sys.stdin)) if w.get('id') == 3][0]
+assert label['background'] == '#ff8800', ('a refused patch changed the colour', label)
+assert label['frameStyle'] == 'Sunken', label
+" || fail "a refused appearance patch changed something"
+
+# Unbinding removes the element rather than blanking it: an <Input> with no
+# attributes is read by QLC+ as universe 0, channel 0 -- a binding to something
+# real, and to the wrong thing.
+api PATCH /vc/widgets/3 -H 'Content-Type: application/json' -d '{"input":null}' \
+    | python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+assert 'input' not in w, ('the binding is still there', w)
+" || fail "unbinding the input"
+
+# And a colour put back to the default takes its element with it rather than
+# writing the word "Default" into one. The desktop reads the two identically
+# (vcwidget.cpp:872), so removing it is what makes a widget painted and then
+# unpainted leave the file exactly as it was found.
+api PATCH /vc/widgets/5 -H 'Content-Type: application/json' -d '{"background":"#123456"}' \
+    > /dev/null || fail "painting the cue list"
+api PATCH /vc/widgets/5 -H 'Content-Type: application/json' \
+    -d '{"background":null,"foreground":null,"font":null}' \
+    | python3 -c "
+import json, sys
+w = json.load(sys.stdin)
+assert 'background' not in w, ('the colour is still there', w)
+" || fail "resetting the appearance"
+
+# Nothing has arrived on an input universe, and the daemon says so rather than
+# reporting a control nobody touched.
+api GET /input/last | python3 -c "
+import json, sys
+body = json.load(sys.stdin)
+assert body['seen'] is False, body
+assert 'note' in body, ('and says why', body)
+" || fail "GET /input/last"
+
+# ---------------------------------------------------------------------------
 # Undo and redo, which is what makes deleting a widget survivable.
 # ---------------------------------------------------------------------------
 
@@ -319,7 +406,7 @@ def index(node, path='', out=None):
         index(child, here, out)
     return out
 
-def compare(before_path, after_path, expected_gone, expected_changed):
+def compare(before_path, after_path, expected_gone, expected_changed, expected_added=frozenset()):
     before, after = index(console(before_path)), index(console(after_path))
 
     gone = set(before) - set(after)
@@ -327,7 +414,8 @@ def compare(before_path, after_path, expected_gone, expected_changed):
         f'removals differ by: {gone ^ expected_gone}'
 
     added = set(after) - set(before)
-    assert not added, f'the console grew nodes nobody asked for: {added}'
+    assert added == set(expected_added), \
+        f'the console grew nodes nobody asked for: {added ^ set(expected_added)}'
 
     for key in sorted(set(before) & set(after)):
         (attrs_a, text_a), (attrs_b, text_b) = before[key], after[key]
@@ -351,12 +439,32 @@ FRAME = '/VirtualConsole#1/Frame[0]#1'
 # The add and the delete cancelled out, so the only removals left are the two
 # level channels that pointed at the deleted fixture. Everything else -- the
 # XY pad's <Fixture ID="3">, the slider's limits, the frame -- stands still.
+# Except the appearance, which this run asked for on the Label. The <Input> it
+# also set was unbound again, and unbinding has to remove the element rather
+# than blank it: an <Input> with no attributes reads in QLC+ as universe 0,
+# channel 0, which is a binding to something real and to the wrong thing.
+APPEARANCE = f'{FRAME}/Label[3]#1/Appearance#1'
+CUELIST_APPEARANCE = f'{FRAME}/CueList[5]#1/Appearance#1'
+
 nodes, removed = compare(source, patched, {
     f'{FRAME}/Slider[1]#1/Level#1/Channel#1',
     f'{FRAME}/Slider[1]#1/Level#1/Channel#2',
 }, {
     f'{FRAME}/Label[3]#1': {'Caption'},
     f'{FRAME}/Label[3]#1/WindowState#1': {'X', 'Width'},
+}, {
+    APPEARANCE,
+    f'{APPEARANCE}/BackgroundColor#1',
+    f'{APPEARANCE}/ForegroundColor#1',
+    f'{APPEARANCE}/Font#1',
+    f'{APPEARANCE}/FrameStyle#1',
+    # The cue list was painted and put back to the default, and "the default" is
+    # written as the word Default -- which is what QLC+ writes and reads as "no
+    # colour chosen". The elements stay; what they say is nothing.
+    CUELIST_APPEARANCE,
+    f'{CUELIST_APPEARANCE}/BackgroundColor#1',
+    f'{CUELIST_APPEARANCE}/ForegroundColor#1',
+    f'{CUELIST_APPEARANCE}/Font#1',
 })
 print(f'console: {nodes} nodes, {removed} removed, 3 attributes changed')
 
@@ -365,6 +473,11 @@ print(f'console: {nodes} nodes, {removed} removed, 3 attributes changed')
 _, removed = compare(patched, deleted, {
     f'{FRAME}/Label[3]#1',
     f'{FRAME}/Label[3]#1/WindowState#1',
+    APPEARANCE,
+    f'{APPEARANCE}/BackgroundColor#1',
+    f'{APPEARANCE}/ForegroundColor#1',
+    f'{APPEARANCE}/Font#1',
+    f'{APPEARANCE}/FrameStyle#1',
 }, {})
 print(f'delete: {removed} nodes removed, XY pad fixture 3 untouched')
 PY

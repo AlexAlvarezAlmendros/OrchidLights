@@ -125,9 +125,48 @@ namespace
                         widget.background = colourFromArgb(reader.readElementText());
                     else if (reader.name() == QStringLiteral("ForegroundColor"))
                         widget.foreground = colourFromArgb(reader.readElementText());
+                    else if (reader.name() == QStringLiteral("Font"))
+                    {
+                        /* QFont::toString(), which is a comma-separated list
+                           starting with the family and the point size. Reported
+                           as those two rather than as the whole string: the
+                           other fourteen fields are QFont internals that mean
+                           nothing to an operator and less to a browser. */
+                        const QString font = reader.readElementText().trimmed();
+                        if (font.isEmpty() == false && font != QStringLiteral("Default"))
+                            widget.font = font;
+                    }
+                    else if (reader.name() == QStringLiteral("FrameStyle"))
+                    {
+                        const QString style = reader.readElementText().trimmed();
+                        if (style.isEmpty() == false)
+                            widget.frameStyle = style;
+                    }
                     else
                         reader.skipCurrentElement();
                 }
+            }
+            else if (name == QStringLiteral("Input"))
+            {
+                /* What moves this widget from outside: a MIDI note, an OSC
+                   message, a fader on a wing. The universe here is an *input*
+                   universe, which has nothing to do with the DMX universes the
+                   fixtures live in -- same word, different numbering, and
+                   confusing them puts a widget on a control nobody can find. */
+                const QXmlStreamAttributes attributes = reader.attributes();
+                bool universeOk = false, channelOk = false;
+                const uint universe =
+                    attributes.value(QStringLiteral("Universe")).toUInt(&universeOk);
+                const uint channel =
+                    attributes.value(QStringLiteral("Channel")).toUInt(&channelOk);
+
+                if (universeOk && channelOk)
+                {
+                    widget.hasInput = true;
+                    widget.inputUniverse = quint32(universe);
+                    widget.inputChannel = quint32(channel);
+                }
+                reader.skipCurrentElement();
             }
             else if (name == QStringLiteral("Function"))
             {

@@ -224,6 +224,14 @@ export interface WidgetPatch {
   levelChannels?: { fixture: number; channel: number }[]
   clockType?: string
   clockTime?: number
+  /** null puts a colour or a font back to the desk's default, which is a thing
+   *  an operator asks for and which an empty string does not say. */
+  background?: string | null
+  foreground?: string | null
+  font?: string | null
+  frameStyle?: string
+  /** null unbinds the external control. */
+  input?: { universe: number; channel: number } | null
 }
 
 export interface Status {
