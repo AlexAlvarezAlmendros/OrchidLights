@@ -1343,3 +1343,35 @@ button.linkish.left {
 .external-input .fields {
   gap: 0.4rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Operator mode: the console and nothing else.
+
+   For the phone taped to a truss. Everything that edits is gone from the
+   markup, not hidden with a class -- a control that is only invisible is still
+   there for a tab key and a stray tap.
+   ------------------------------------------------------------------------- */
+.app[data-operator="true"] .topbar {
+  /* Smaller, because in this mode the bar is a status line rather than a place
+     to work. Every pixel it gives up goes to the console. */
+  padding: 0.25rem 0.5rem;
+}
+
+/* Press and hold to leave. The fill is the hold. */
+.unlock {
+  position: relative;
+  overflow: hidden;
+  border-color: var(--accent);
+}
+
+.unlock::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  transform: scaleX(var(--held, 0));
+  background: var(--accent);
+  opacity: 0.35;
+  pointer-events: none;
+  transition: transform 60ms linear;
+}

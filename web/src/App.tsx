@@ -82,6 +82,15 @@ export function App() {
   const [selected, setSelected] = useState<number | null>(null)
   const [fixtures, setFixtures] = useState<FixtureState[]>([])
   const [view, setView] = useState<View>('console')
+  /* Operator mode: the console and nothing else.
+   *
+   * Sticky, because the phone this is for is taped to a truss and gets
+   * reopened by somebody who did not put it there. It is a guard against a
+   * sleeve on a screen, not a lock -- anybody who wants out gets out, and
+   * saying otherwise would be the kind of claim this codebase does not make. */
+  const [operator, setOperator] = useState(
+    () => window.localStorage.getItem('orchid.operator') === 'yes',
+  )
   const [pads, setPads] = useState<Record<number, { x: number; y: number }>>({})
   /** Bumped whenever the project changed under us, so the screens that keep
    *  their own state know to re-read it. */
@@ -405,8 +414,21 @@ export function App() {
     [current, refresh],
   )
 
+  const enterOperator = useCallback(() => {
+    setOperator(true)
+    setView('console')
+    setMode('run')
+    setSelected(null)
+    window.localStorage.setItem('orchid.operator', 'yes')
+  }, [])
+
+  const leaveOperator = useCallback(() => {
+    setOperator(false)
+    window.localStorage.removeItem('orchid.operator')
+  }, [])
+
   return (
-    <div className="app">
+    <div className="app" data-operator={operator}>
       <header className="topbar">
         <span className="brand">OrchidLights</span>
         <span className="chip" data-state={connection}>
@@ -425,27 +447,38 @@ export function App() {
         >
           {theme === 'stage' ? '🌙' : '☀'}
         </button>
-        {(['console', 'functions', 'setup', 'plan'] as const).map((target) => (
-          <button
-            key={target}
-            type="button"
-            aria-pressed={view === target}
-            onClick={() => {
-              setView(target)
-              setMode('run')
-              setSelected(null)
-            }}
-          >
-            {target === 'console'
-              ? 'Consola'
-              : target === 'functions'
-                ? 'Funciones'
-                : target === 'setup'
-                  ? 'Patch'
-                  : 'Planta'}
-          </button>
-        ))}
-        {view === 'console' &&
+        {operator ? (
+          <Unlock onUnlock={leaveOperator} />
+        ) : (
+          <>
+            <button type="button" onClick={enterOperator} title="Solo la consola, sin edición">
+              Operador
+            </button>
+          </>
+        )}
+        {!operator &&
+          (['console', 'functions', 'setup', 'plan'] as const).map((target) => (
+            <button
+              key={target}
+              type="button"
+              aria-pressed={view === target}
+              onClick={() => {
+                setView(target)
+                setMode('run')
+                setSelected(null)
+              }}
+            >
+              {target === 'console'
+                ? 'Consola'
+                : target === 'functions'
+                  ? 'Funciones'
+                  : target === 'setup'
+                    ? 'Patch'
+                    : 'Planta'}
+            </button>
+          ))}
+        {!operator &&
+          view === 'console' &&
           vc &&
           /* One control at a time. Showing "Ordenar" beside "Listo" made it
              read as two separate states, when there is only ever one. */
@@ -1190,5 +1223,62 @@ function FunctionList({
         </button>
       ))}
     </div>
+  )
+}
+
+/**
+ * Leaving operator mode: press and hold.
+ *
+ * A tap is what a sleeve does. A second of deliberate pressure is not, and it
+ * needs no dialog to interrupt a show. This is a guard against accidents and
+ * says so; it is not a lock, and calling it one would be a claim this codebase
+ * has no business making.
+ */
+function Unlock({ onUnlock }: { onUnlock: () => void }) {
+  const [held, setHeld] = useState(0)
+  const timer = useRef<number | null>(null)
+
+  const start = () => {
+    if (timer.current !== null) return
+    const began = performance.now()
+    timer.current = window.setInterval(() => {
+      const held = Math.min(1, (performance.now() - began) / 1000)
+      setHeld(held)
+      if (held >= 1) {
+        stop()
+        onUnlock()
+      }
+    }, 50)
+  }
+
+  const stop = () => {
+    if (timer.current !== null) window.clearInterval(timer.current)
+    timer.current = null
+    setHeld(0)
+  }
+
+  /* Clearing the interval directly rather than through stop(): the cleanup
+     must not depend on a function that is rebuilt on every render, and there is
+     no state to reset on the way out of a component that is going away. */
+  useEffect(
+    () => () => {
+      if (timer.current !== null) window.clearInterval(timer.current)
+    },
+    [],
+  )
+
+  return (
+    <button
+      type="button"
+      className="unlock"
+      style={{ '--held': held } as React.CSSProperties}
+      title="Mantén pulsado para salir del modo operador"
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+    >
+      {held > 0 ? 'Suelta para cancelar…' : 'Operador 🔒'}
+    </button>
   )
 }
