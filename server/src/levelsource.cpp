@@ -89,6 +89,11 @@ void LevelSource::defineSubmaster(quint32 sliderId, int low, int high, uchar ini
     m_submastersDirty = true;
 }
 
+void LevelSource::defineChannelGroup(quint32 groupId, const QList<Channel> &channels)
+{
+    defineSlider(channelGroupSlider(groupId), channels);
+}
+
 void LevelSource::defineButton(quint32 widgetId, quint32 functionId, const Scope &submasters)
 {
     QMutexLocker locker(&m_mutex);

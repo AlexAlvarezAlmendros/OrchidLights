@@ -31,6 +31,7 @@
 #include "qlcchannel.h"
 #include "rgbalgorithm.h"
 #include "fixturegroup.h"
+#include "channelsgroup.h"
 #include "collection.h"
 #include "rgbmatrix.h"
 #include "efxfixture.h"
@@ -366,6 +367,83 @@ QJsonArray JsonView::universes(const Doc *doc)
     const QList<Universe *> list = doc->inputOutputMap()->universes();
     for (int i = 0; i < list.count(); i++)
         array.append(universe(list.at(i), i));
+
+    return array;
+}
+
+QJsonObject JsonView::channelGroup(const Doc *doc, quint32 groupId, const LevelSource *levels)
+{
+    QJsonObject json;
+
+    const ChannelsGroup *group = doc->channelsGroup(groupId);
+    if (group == nullptr)
+        return json;
+
+    json["id"] = qint64(group->id());
+    json["name"] = group->name();
+
+    QJsonArray channels;
+    int missing = 0;
+
+    for (const SceneValue &value : group->getChannels())
+    {
+        QJsonObject entry;
+        entry["fixture"] = qint64(value.fxi);
+        entry["channel"] = qint64(value.channel);
+
+        const Fixture *fixture = doc->fixture(value.fxi);
+        const QLCChannel *channel = fixture != nullptr ? fixture->channel(value.channel) : nullptr;
+
+        /* A channel whose fixture is gone is reported as it is stored, marked.
+           Silently dropping it would make a group look smaller than it is and
+           hide the reason a fader stopped doing half of what it did. */
+        if (fixture == nullptr)
+        {
+            entry["missing"] = true;
+            missing++;
+        }
+        else
+        {
+            entry["fixtureName"] = fixture->name();
+            entry["address"] = qint64(fixture->universeAddress() + value.channel);
+            entry["universe"] = qint64(fixture->universe()) + 1;
+            if (channel != nullptr)
+            {
+                entry["name"] = channel->name();
+                entry["group"] = QLCChannel::groupToString(channel->group());
+            }
+        }
+
+        channels.append(entry);
+    }
+
+    json["channels"] = channels;
+    if (missing > 0)
+        json["missing"] = missing;
+
+    if (levels != nullptr)
+    {
+        const quint32 sliderId = LevelSource::channelGroupSlider(group->id());
+        json["value"] = int(levels->value(sliderId));
+
+        /* A group whose channels have all lost their fixtures still loads, and
+           its fader still moves, and nothing happens. Say so rather than
+           drawing a control that lies. */
+        json["controllable"] = levels->knows(sliderId);
+    }
+
+    return json;
+}
+
+QJsonArray JsonView::channelGroups(const Doc *doc, const LevelSource *levels)
+{
+    QJsonArray array;
+
+    for (const ChannelsGroup *group : doc->channelsGroups())
+    {
+        if (group != nullptr)
+            array.append(channelGroup(doc, group->id(), levels));
+    }
 
     return array;
 }

@@ -212,6 +212,20 @@ namespace DocWriter
                            quint32 &groupId);
     Result removeFixtureGroup(Doc *doc, quint32 groupId);
     Result setFixtureGroupMembers(Doc *doc, quint32 groupId, const QList<quint32> &fixtureIds);
+
+    /**
+     * Channels groups: a named handful of individual channels, moved together.
+     *
+     * Not a fixture group. A fixture group gathers whole fixtures so an effect
+     * can run across them; a channels group gathers the dimmer of one lamp, the
+     * strobe of another and the fog machine's fan, so one fader moves all
+     * three. Different concept, different list in the file, different id space.
+     */
+    Result addChannelsGroup(Doc *doc, const QString &name,
+                            const QList<QPair<quint32, quint32>> &channels, quint32 &groupId);
+    Result removeChannelsGroup(Doc *doc, quint32 groupId);
+    Result setChannelsGroup(Doc *doc, quint32 groupId, const QString *name,
+                            const QList<QPair<quint32, quint32>> *channels);
 }
 
 #endif // DOCWRITER_H

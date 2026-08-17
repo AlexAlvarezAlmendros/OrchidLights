@@ -41,6 +41,7 @@
 #include "qlcfixturemode.h"
 #include "qlcfixturedef.h"
 #include "fixturegroup.h"
+#include "channelsgroup.h"
 #include "grouphead.h"
 #include "qlcpoint.h"
 #include "fixture.h"
@@ -616,6 +617,132 @@ DocWriter::Result DocWriter::setFixtureGroupMembers(Doc *doc, quint32 groupId,
     return Result::success();
 }
 
+/*****************************************************************************
+ * Channels groups
+ *****************************************************************************/
+
+namespace
+{
+    /**
+     * Check a list of channels before it reaches the engine.
+     *
+     * ChannelsGroup::addChannel takes any channel number at all and stores it,
+     * and the desk then writes it at the fixture's address plus that offset --
+     * so channel 8 of a 4-channel dimmer is the second channel of whatever is
+     * patched next to it. A fader that moves a lamp nobody named is worse than
+     * one that refuses to be built.
+     */
+    DocWriter::Result checkChannels(Doc *doc, const QList<QPair<quint32, quint32>> &channels)
+    {
+        if (channels.isEmpty())
+        {
+            return DocWriter::Result::failure(
+                QStringLiteral("A channels group with no channels is a fader that does nothing"));
+        }
+
+        QSet<QPair<quint32, quint32>> seen;
+
+        for (const auto &entry : channels)
+        {
+            Fixture *fixture = doc->fixture(entry.first);
+            if (fixture == nullptr)
+            {
+                return DocWriter::Result::failure(
+                    QStringLiteral("No fixture with id %1").arg(entry.first));
+            }
+
+            if (entry.second >= fixture->channels())
+            {
+                return DocWriter::Result::failure(
+                    QStringLiteral("\"%1\" has %2 channels, so it has no channel %3")
+                        .arg(fixture->name()).arg(fixture->channels()).arg(entry.second));
+            }
+
+            if (seen.contains(entry))
+            {
+                return DocWriter::Result::failure(
+                    QStringLiteral("Channel %1 of \"%2\" is in the group twice")
+                        .arg(entry.second).arg(fixture->name()));
+            }
+            seen.insert(entry);
+        }
+
+        return DocWriter::Result::success();
+    }
+}
+
+DocWriter::Result DocWriter::addChannelsGroup(Doc *doc, const QString &name,
+                                              const QList<QPair<quint32, quint32>> &channels,
+                                              quint32 &groupId)
+{
+    if (name.trimmed().isEmpty())
+        return Result::failure(QStringLiteral("A channels group needs a name"));
+
+    const Result checked = checkChannels(doc, channels);
+    if (checked.ok == false)
+        return checked;
+
+    ChannelsGroup *group = new ChannelsGroup(doc);
+    group->setName(name.trimmed());
+    for (const auto &entry : channels)
+        group->addChannel(entry.first, entry.second);
+
+    if (doc->addChannelsGroup(group) == false)
+    {
+        delete group;
+        return Result::failure(QStringLiteral("The engine refused the group"));
+    }
+
+    groupId = group->id();
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::removeChannelsGroup(Doc *doc, quint32 groupId)
+{
+    if (doc->channelsGroup(groupId) == nullptr)
+        return Result::failure(QStringLiteral("No channels group with id %1").arg(groupId));
+
+    if (doc->deleteChannelsGroup(groupId) == false)
+        return Result::failure(QStringLiteral("The engine refused to delete the group"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setChannelsGroup(Doc *doc, quint32 groupId, const QString *name,
+                                              const QList<QPair<quint32, quint32>> *channels)
+{
+    ChannelsGroup *group = doc->channelsGroup(groupId);
+    if (group == nullptr)
+        return Result::failure(QStringLiteral("No channels group with id %1").arg(groupId));
+
+    if (name != nullptr && name->trimmed().isEmpty())
+        return Result::failure(QStringLiteral("A channels group needs a name"));
+
+    /* Everything validated before anything is touched: resetChannels() throws
+       the old list away, and a group left empty by a rejected edit is a fader
+       the operator did not ask to lose. */
+    if (channels != nullptr)
+    {
+        const Result checked = checkChannels(doc, *channels);
+        if (checked.ok == false)
+            return checked;
+    }
+
+    if (name != nullptr)
+        group->setName(name->trimmed());
+
+    if (channels != nullptr)
+    {
+        group->resetChannels();
+        for (const auto &entry : *channels)
+            group->addChannel(entry.first, entry.second);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
 
 /*****************************************************************************
  * Functions

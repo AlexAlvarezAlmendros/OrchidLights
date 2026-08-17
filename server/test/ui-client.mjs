@@ -425,6 +425,75 @@ try {
   check('fixture groups can be built from the browser', grouped === 'ok', grouped)
   await screenshot('07-fixtures')
 
+  /* Channels groups, which are a different thing with a similar name: one
+     fader over channels picked one at a time. Two selects rather than one --
+     fixture, then channel -- because a rig of thirty movers is nine hundred
+     channels, and the second one is filled in from the fixture definition
+     after a round trip. That asynchrony is the part worth driving in a real
+     browser rather than asserting over HTTP. */
+  const channelGrouped = await evaluate(`(async () => {
+    const tab = [...document.querySelectorAll('.tabs button')].find(b => b.textContent.startsWith('Canales'))
+    if (!tab) return 'no channels tab'
+    tab.click()
+    await new Promise(r => setTimeout(r, 700))
+
+    const cards = () => [...document.querySelectorAll('.setup article.card')]
+    const before = cards().length
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    const input = document.querySelector('.setup .card input')
+    setter.call(input, 'Canales de prueba')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 100))
+
+    const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    const pick = async (select, index) => {
+      selectSetter.call(select, select.options[index].value)
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise(r => setTimeout(r, 900))
+    }
+
+    const fixturePicker = [...document.querySelectorAll('.setup .card select')]
+      .find(s => s.options[0]?.textContent.startsWith('Crear con este canal'))
+    if (!fixturePicker || fixturePicker.options.length < 2) return 'no fixture picker'
+    await pick(fixturePicker, 1)
+
+    /* The channel select only exists once a fixture is chosen, and is empty
+       until its channel list has arrived. */
+    const channelPicker = [...document.querySelectorAll('.setup .card select')]
+      .find(s => s.getAttribute('aria-label') === 'Canal')
+    if (!channelPicker) return 'the channel picker never appeared'
+    if (channelPicker.options.length < 2) return 'the channel picker stayed empty'
+    if (!/^1\./.test(channelPicker.options[1].textContent)) {
+      return 'the channels are not named: ' + channelPicker.options[1].textContent
+    }
+    await pick(channelPicker, 1)
+    await new Promise(r => setTimeout(r, 800))
+
+    if (cards().length !== before + 1) return 'the group did not appear'
+
+    const mine = cards()[cards().length - 1]
+    const fader = mine.querySelector('.group-fader input[type=range]')
+    if (!fader) return 'the group has no fader'
+    if (fader.disabled) return 'the fader is disabled on a group that should work'
+    if (mine.querySelectorAll('.channels li').length !== 1) return 'the channel is not listed'
+
+    /* Moving it. What reaches the rig is asserted over DMX elsewhere; here the
+       question is only whether the control is wired to anything at all. */
+    setter.call(fader, '200')
+    fader.dispatchEvent(new Event('input', { bubbles: true }))
+    fader.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 500))
+    const shown = mine.querySelector('.fader-value')?.textContent ?? ''
+    if (!shown.startsWith('78')) return 'the fader did not move: ' + shown
+
+    ;[...mine.querySelectorAll('button')].find(b => b.textContent.trim() === 'Eliminar').click()
+    await new Promise(r => setTimeout(r, 1200))
+
+    return cards().length === before ? 'ok' : 'the group did not go away'
+  })()`)
+  check('channels groups can be built from the browser', channelGrouped === 'ok', channelGrouped)
+
   /* Two people on the same show. An edit made anywhere else has to arrive
      here, or the second phone is quietly showing a console that no longer
      exists -- and the first anyone finds out is mid-cue. */

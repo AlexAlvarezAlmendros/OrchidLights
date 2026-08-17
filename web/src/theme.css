@@ -432,6 +432,35 @@ button.danger {
   margin-top: 0.4rem;
 }
 
+/* A channels group's own fader, on the patch screen. Full width because it is
+   the point of the card, not an afterthought below the channel list. */
+.group-fader {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0;
+}
+
+.group-fader input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.group-fader input[type="range"]:disabled {
+  opacity: 0.4;
+}
+
+.channels li small {
+  color: var(--text-dim);
+  margin-left: 0.4rem;
+}
+
+.channels li em {
+  color: var(--danger);
+  font-style: normal;
+}
+
 .channel-add select {
   flex: 1;
   min-width: 0;

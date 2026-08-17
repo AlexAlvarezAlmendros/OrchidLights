@@ -95,6 +95,23 @@ public:
      */
     void defineSubmaster(quint32 sliderId, int low, int high, uchar initial);
 
+    /**
+     * A channels group, held at a level exactly as a level slider is.
+     *
+     * Groups belong to the document rather than to the console: they exist
+     * whether or not any widget mentions them, and QLC+ drives them from the
+     * Simple Desk. So they carry no submaster scope -- there is no frame above
+     * a thing that is not in the console at all.
+     *
+     * Registered through a separate id because group ids come from Doc and
+     * widget ids come from the console, and both start at 0: without this, a
+     * group with id 3 would drive widget 3's channels.
+     */
+    void defineChannelGroup(quint32 groupId, const QList<Channel> &channels);
+
+    /** The slider id a channels group is held under. */
+    static quint32 channelGroupSlider(quint32 groupId) { return 0xFE000000u | (groupId & 0xFFFFFFu); }
+
     /** A button, so a function it starts can be scaled by the submasters above
      *  it in the same way a fader is. */
     void defineButton(quint32 widgetId, quint32 functionId, const Scope &submasters);

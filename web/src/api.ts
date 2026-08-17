@@ -61,6 +61,39 @@ export interface FixtureGroup {
   fixtures: number[]
 }
 
+/**
+ * A channels group: one fader over a handful of channels picked by hand.
+ *
+ * Not a fixture group. A fixture group gathers whole fixtures so an effect can
+ * run across them; this gathers the dimmer of one lamp and the strobe of
+ * another so one fader moves both. Different id space, too: a channels group
+ * and a console widget can both be number 3 and have nothing to do with each
+ * other.
+ */
+export interface ChannelGroup {
+  id: number
+  name: string
+  channels: ChannelRef[]
+  value: number
+  /** False when nothing it names still exists. The fader would move and no
+   *  light would. */
+  controllable: boolean
+  /** How many of its channels have lost their fixture. */
+  missing?: number
+}
+
+export interface ChannelRef {
+  fixture: number
+  channel: number
+  /** Absent when the fixture is gone; the pair is still reported. */
+  fixtureName?: string
+  name?: string
+  group?: string
+  address?: number
+  universe?: number
+  missing?: boolean
+}
+
 export interface FixtureState {
   id: number
   name: string
@@ -220,6 +253,25 @@ export const api = {
       body: JSON.stringify(patch),
     }),
   removeGroup: (id: number) => json<unknown>(`/api/v1/fixture-groups/${id}`, { method: 'DELETE' }),
+
+  channelGroups: () => json<ChannelGroup[]>('/api/v1/channel-groups'),
+  addChannelGroup: (name: string, channels: { fixture: number; channel: number }[]) =>
+    json<{ id: number }>('/api/v1/channel-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, channels }),
+    }),
+  patchChannelGroup: (
+    id: number,
+    patch: { name?: string; channels?: { fixture: number; channel: number }[] },
+  ) =>
+    json<ChannelGroup>(`/api/v1/channel-groups/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  removeChannelGroup: (id: number) =>
+    json<unknown>(`/api/v1/channel-groups/${id}`, { method: 'DELETE' }),
 
   setMembers: (id: number, members: number[]) =>
     json<unknown>(`/api/v1/functions/${id}/members`, {

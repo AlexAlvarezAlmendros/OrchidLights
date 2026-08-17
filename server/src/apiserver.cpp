@@ -86,6 +86,44 @@ namespace
         return nullptr;
     }
 
+    /**
+     * Read a channels group's channel list out of a request body.
+     *
+     * Objects rather than a flat list of numbers, even though QLC+ stores the
+     * pairs flattened in the file: a list of eight numbers that is really four
+     * pairs is a body where dropping one element silently shifts every fixture
+     * onto the wrong channel.
+     */
+    bool readChannels(const QJsonValue &value, QList<QPair<quint32, quint32>> &channels,
+                      QString &error)
+    {
+        if (value.isArray() == false)
+        {
+            error = QStringLiteral("Send a \"channels\" array of "
+                                   "{\"fixture\": id, \"channel\": n} objects");
+            return false;
+        }
+
+        for (const QJsonValue &entry : value.toArray())
+        {
+            const QJsonObject object = entry.toObject();
+            const QJsonValue fixture = object.value("fixture");
+            const QJsonValue channel = object.value("channel");
+
+            if (fixture.isDouble() == false || channel.isDouble() == false
+                || fixture.toInt(-1) < 0 || channel.toInt(-1) < 0)
+            {
+                error = QStringLiteral("Every channel needs a non-negative "
+                                       "\"fixture\" and \"channel\"");
+                return false;
+            }
+
+            channels.append(qMakePair(quint32(fixture.toInt()), quint32(channel.toInt())));
+        }
+
+        return true;
+    }
+
     /** A command was queued on the engine. Deliberately carries no state: see
         the note on the function routes. */
     QJsonObject acknowledge(const Function *function, const QString &requested)
@@ -1129,6 +1167,104 @@ void ApiServer::registerRoutes()
         const DocWriter::Result result = DocWriter::removeFixtureGroup(doc, id);
         if (result.ok == false)
             return jsonError(StatusCode::NotFound, result.error);
+
+        QJsonObject response;
+        response["removed"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* Channels groups: one fader over a handful of channels picked by hand.
+     *
+     * Not fixture groups. A fixture group gathers whole fixtures so an effect
+     * can run across them; a channels group gathers the dimmer of one lamp, the
+     * strobe of another and the fog machine's fan, so one fader moves all
+     * three. QLC+ keeps them in the Simple Desk, which is why they were the
+     * last thing here with no way in from a browser. */
+    m_server->route("/api/v1/channel-groups", QHttpServerRequest::Method::Get,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        return QHttpServerResponse(JsonView::channelGroups(doc, m_engine->levels()));
+    });
+
+    m_server->route("/api/v1/channel-groups", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        QList<QPair<quint32, quint32>> channels;
+        QString reason;
+        if (readChannels(body.value("channels"), channels, reason) == false)
+            return jsonError(StatusCode::BadRequest, reason);
+
+        quint32 groupId = 0;
+        QString error;
+        if (m_engine->addChannelGroup(body.value("name").toString(), channels, groupId, error)
+            == false)
+        {
+            return jsonError(StatusCode::BadRequest, error);
+        }
+
+        QJsonObject response;
+        response["id"] = qint64(groupId);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/channel-groups/<arg>", QHttpServerRequest::Method::Patch,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Group id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        const bool renaming = body.contains("name");
+        const bool rechannelling = body.contains("channels");
+        if (renaming == false && rechannelling == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send a \"name\", a \"channels\" array, or both"));
+        }
+
+        QList<QPair<quint32, quint32>> channels;
+        if (rechannelling)
+        {
+            QString reason;
+            if (readChannels(body.value("channels"), channels, reason) == false)
+                return jsonError(StatusCode::BadRequest, reason);
+        }
+
+        const QString name = body.value("name").toString();
+        QString error;
+        if (m_engine->updateChannelGroup(id, renaming ? &name : nullptr,
+                                         rechannelling ? &channels : nullptr, error) == false)
+        {
+            return jsonError(StatusCode::BadRequest, error);
+        }
+
+        return QHttpServerResponse(JsonView::channelGroup(doc, id, m_engine->levels()));
+    });
+
+    m_server->route("/api/v1/channel-groups/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Group id must be a number"));
+
+        QString error;
+        if (m_engine->removeChannelGroup(id, error) == false)
+            return jsonError(StatusCode::NotFound, error);
 
         QJsonObject response;
         response["removed"] = qint64(id);

@@ -55,6 +55,9 @@ export function App() {
   )
   const [error, setError] = useState<string | null>(null)
   const [levels, setLevels] = useState<Record<number, number>>({})
+  /* Channels groups, kept apart from the console's faders on purpose: a group
+     and a widget can both be number 3 and have nothing to do with each other. */
+  const [groupLevels, setGroupLevels] = useState<Record<number, number>>({})
   const [mode, setMode] = useState<Mode>('run')
   const [layout, setLayout] = useState<LayoutRows | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
@@ -86,6 +89,7 @@ export function App() {
       onFunctions: setFunctions,
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
+      onChannelGroup: (id, value) => setGroupLevels((current) => ({ ...current, [id]: value })),
       onPad: (id, x, y) => setPads((current) => ({ ...current, [id]: { x, y } })),
       onSpectrum: (bands, volume) => setSpectrum({ bands, volume }),
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
@@ -202,6 +206,13 @@ export function App() {
     // catches up on its next tick.
     setPads((current) => ({ ...current, [id]: { x, y } }))
     live.current?.setPad(id, x, y)
+  }, [])
+
+  /* A channels group's fader. Its own map because group ids and widget ids are
+     different id spaces: both start at 0 and mean different things. */
+  const setGroupLevel = useCallback((id: number, value: number) => {
+    setGroupLevels((current) => ({ ...current, [id]: value }))
+    live.current?.setChannelGroup(id, value)
   }, [])
 
   const setLevel = useCallback((id: number, value: number) => {
@@ -486,7 +497,12 @@ export function App() {
         <main className="console">
           {/* The patch changes what the console is pointing at, so a fixture
               added or removed here has to reach the widget editor too. */}
-          <Setup revision={revision} onChanged={reloadFixtures} />
+          <Setup
+            revision={revision}
+            levels={groupLevels}
+            onLevel={setGroupLevel}
+            onChanged={reloadFixtures}
+          />
         </main>
       ) : view === 'functions' ? (
         <main className="console">

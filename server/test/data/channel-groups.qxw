@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Workspace>
+<!--
+  Two channels groups, and a console that could be confused for them.
+
+  A channels group is not a fixture group. It gathers individual channels (the
+  dimmer of one lamp, the strobe of another) so that one fader moves all of
+  them, and it belongs to the document rather than to the Virtual Console.
+  That distinction is what this file is built to catch:
+
+  * The group ids here are 0 and 1, and the console has widgets 0 and 1 too.
+    They are different id spaces, so a group must never drive a widget's
+    channels, nor a widget a group's.
+
+  * Widget 1 is a submaster over the whole console. A channels group is not in
+    the console at all, so nothing about it may be scaled by that submaster.
+    The group's channels are all Intensity ones, so a design that scaled them
+    would show on the wire instead of hiding.
+
+  "Barra", at address 101, is clear of the two MAC500s the console faders
+  hold. Group 2 is on the MAC500 instead, and on purpose: its channels are a
+  gobo wheel and a gobo index, which are not Intensity channels. An Intensity
+  channel falls back to zero on its own every tick, so it cannot tell whether
+  a control that goes away lets go of what it was holding. A gobo channel
+  stays exactly where it was left, and can.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0 GIT</Version>
+  <Author>poio</Author>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <BeatGenerator BeatType="Internal" BPM="120"/>
+   <NetworkServer Type="Native" AutoStart="False" Name="" Password=""/>
+   <Universe Name="Universe 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Martin</Manufacturer>
+   <Model>MAC500</Model>
+   <Mode>DMX1</Mode>
+   <ID>0</ID>
+   <Name>Spot</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Martin</Manufacturer>
+   <Model>MAC500</Model>
+   <Mode>DMX1</Mode>
+   <ID>1</ID>
+   <Name>Spot anidado</Name>
+   <Universe>0</Universe>
+   <Address>12</Address>
+   <Channels>12</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGBW</Model>
+   <Mode>RGBW</Mode>
+   <ID>2</ID>
+   <Name>Barra</Name>
+   <Universe>0</Universe>
+   <Address>100</Address>
+   <Channels>4</Channels>
+  </Fixture>
+  <ChannelsGroup ID="0" Name="Blancos" Value="0">2,0,2,3</ChannelsGroup>
+  <ChannelsGroup ID="1" Name="Verde" Value="0">2,1</ChannelsGroup>
+  <ChannelsGroup ID="2" Name="Gobos" Value="0">0,4,0,5</ChannelsGroup>
+  <Function ID="0" Type="Scene" Name="Playback">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">1,255</FixtureVal>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <Slider Caption="Master" ID="1" WidgetStyle="Slider" InvertedAppearance="false">
+    <WindowState Visible="True" X="10" Y="10" Width="60" Height="200"/>
+    <SliderMode ValueDisplayStyle="Exact">Submaster</SliderMode>
+    <Level LowLimit="0" HighLimit="255" Value="255"/>
+   </Slider>
+   <Slider Caption="Spot" ID="2" WidgetStyle="Slider" InvertedAppearance="false">
+    <WindowState Visible="True" X="80" Y="10" Width="60" Height="200"/>
+    <SliderMode ValueDisplayStyle="Exact">Level</SliderMode>
+    <Level LowLimit="0" HighLimit="255" Value="0">
+     <Channel Fixture="0">1</Channel>
+     <Channel Fixture="0">2</Channel>
+    </Level>
+   </Slider>
+   <Button Caption="Escena" ID="10">
+    <WindowState Visible="True" X="80" Y="220" Width="100" Height="50"/>
+    <Function ID="0"/>
+    <Action>Toggle</Action>
+   </Button>
+   <XYPad Caption="Cabeza" ID="3">
+    <WindowState Visible="True" X="150" Y="10" Width="200" Height="200"/>
+    <Fixture ID="0" Head="0">
+     <Axis ID="X" LowLimit="0" HighLimit="1" Reverse="False"/>
+     <Axis ID="Y" LowLimit="0" HighLimit="1" Reverse="False"/>
+    </Fixture>
+    <Pan Position="0"/>
+    <Tilt Position="0"/>
+   </XYPad>
+   <Frame Caption="Anidado" ID="4">
+    <WindowState Visible="True" X="360" Y="10" Width="300" Height="200"/>
+    <Slider Caption="Sub anidado" ID="5" WidgetStyle="Slider" InvertedAppearance="false">
+     <WindowState Visible="True" X="370" Y="20" Width="60" Height="180"/>
+     <SliderMode ValueDisplayStyle="Exact">Submaster</SliderMode>
+     <Level LowLimit="0" HighLimit="255" Value="255"/>
+    </Slider>
+    <Slider Caption="Spot anidado" ID="6" WidgetStyle="Slider" InvertedAppearance="false">
+     <WindowState Visible="True" X="440" Y="20" Width="60" Height="180"/>
+     <SliderMode ValueDisplayStyle="Exact">Level</SliderMode>
+     <Level LowLimit="0" HighLimit="255" Value="0">
+      <Channel Fixture="1">1</Channel>
+     </Level>
+    </Slider>
+   </Frame>
+   <Frame Caption="Sin nada que escalar" ID="7">
+    <WindowState Visible="True" X="700" Y="10" Width="300" Height="200"/>
+    <Slider Caption="Sub vacio" ID="8" WidgetStyle="Slider" InvertedAppearance="false">
+     <WindowState Visible="True" X="710" Y="20" Width="60" Height="180"/>
+     <SliderMode ValueDisplayStyle="Exact">Submaster</SliderMode>
+     <Level LowLimit="0" HighLimit="255" Value="255"/>
+    </Slider>
+    <Label Caption="Solo una etiqueta" ID="9">
+     <WindowState Visible="True" X="780" Y="20" Width="200" Height="40"/>
+    </Label>
+   </Frame>
+  </Frame>
+ </VirtualConsole>
+</Workspace>

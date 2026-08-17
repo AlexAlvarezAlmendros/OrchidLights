@@ -75,6 +75,18 @@ namespace JsonView
      */
     QJsonObject vcWidget(const VcWidget &widget, const Doc *doc = nullptr,
                          const LevelSource *levels = nullptr);
+
+    /**
+     * Channels groups, with each channel named.
+     *
+     * The names are the point. A group stored as "fixture 2, channel 5" is
+     * unreadable and unverifiable; "Cabeza L · Gobo" is a group an operator can
+     * see is the one they meant. `levels` supplies where the fader is sitting,
+     * so a client that joins mid-show does not draw every group at zero.
+     */
+    QJsonObject channelGroup(const Doc *doc, quint32 groupId,
+                             const LevelSource *levels = nullptr);
+    QJsonArray channelGroups(const Doc *doc, const LevelSource *levels = nullptr);
 }
 
 #endif // JSONVIEW_H

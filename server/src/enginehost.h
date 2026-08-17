@@ -212,6 +212,22 @@ public:
     int forgetFixture(quint32 fixtureId);
 
     /**
+     * Channels groups: the document's own faders, edited from here rather than
+     * straight from the routes.
+     *
+     * Because a group is live. Editing one is three things in one order --
+     * take its fader back, change the document, put the new fader on the wire
+     * -- and a channel dropped from a group stays latched at whatever it was
+     * holding, with the one control that could lower it now gone. Zeroing what
+     * a group lets go of is the whole reason these do not just call DocWriter.
+     */
+    bool addChannelGroup(const QString &name, const QList<LevelSource::Channel> &channels,
+                         quint32 &groupId, QString &errorMessage);
+    bool updateChannelGroup(quint32 groupId, const QString *name,
+                            const QList<LevelSource::Channel> *channels, QString &errorMessage);
+    bool removeChannelGroup(quint32 groupId, QString &errorMessage);
+
+    /**
      * Apply one of a Matrix widget's presets to the matrix it drives.
      *
      * The preset lives in the console and the matrix lives in Doc, so this is
