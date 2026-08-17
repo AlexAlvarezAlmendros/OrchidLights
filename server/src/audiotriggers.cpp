@@ -220,6 +220,20 @@ void AudioTriggers::openCapture(int bands)
     if (bands <= 0)
         bands = 16;
 
+    /* Before anything else: a machine with no input at all.
+     *
+     * Doc hands back a capture object either way -- it is the Qt backend that
+     * fails later, quietly -- so without this check the daemon reported that it
+     * was listening on a server with no sound card, which is the exact lie this
+     * whole widget is written to avoid. CI caught it, because a runner is
+     * precisely that machine. */
+    if (availableInputs().isEmpty())
+    {
+        m_reason = QStringLiteral("This machine has no audio input");
+        m_capturing = false;
+        return;
+    }
+
     m_capture = m_doc->audioInputCapture();
     if (m_capture.isNull())
     {
