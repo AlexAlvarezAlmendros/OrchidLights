@@ -44,7 +44,17 @@ trap 'rm -rf "$WORK"' EXIT
 NAME=$(basename "$SOURCE")
 cp "$SOURCE" "$WORK/$NAME"
 
-"$DAEMON" --port "$PORT" --no-output "$WORK/$NAME" > "$WORK/daemon.log" 2>&1 &
+# Extra daemon arguments, for the one thing this test cannot otherwise reach.
+#
+# An uninstalled build scatters the audio decoders into a directory each, so the
+# daemon finds none and the audio panel can only ever be checked saying "this
+# machine cannot play". Pointing it at a gathered plugin directory exercises the
+# other half. CI leaves this unset -- a runner has no sound server either way --
+# so the branch is covered by hand and by audioplay-smoke.sh.
+read -r -a EXTRA <<< "${ORCHID_TEST_ARGS:-}"
+
+"$DAEMON" --port "$PORT" --no-output "${EXTRA[@]+"${EXTRA[@]}"}" "$WORK/$NAME" \
+    > "$WORK/daemon.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
 

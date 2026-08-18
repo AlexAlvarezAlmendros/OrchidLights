@@ -88,6 +88,12 @@ jobs:
           check '^  ArtNet$'                                  "the ArtNet plugin is missing"
           check '^  DMX USB$'                                 "the DMX USB plugin is missing"
 
+          # An Audio function needs a decoder to read its file. The runner has
+          # no sound server, so the outputs are legitimately zero here -- the
+          # formats are not, and zero of them means the decoder did not install
+          # or was not found.
+          check '^Audio: [1-9][0-9]* formats'                 "no audio decoder was found"
+
       - name: The install ships our desktop integration and none of QLC+'s
         run: |
           set -euo pipefail
@@ -259,6 +265,14 @@ jobs:
       - name: Smoke test - the plan names the channels that decide a lamp's colour
         run: ./server/test/plan-smoke.sh orchidlightsd server/test/data/plan.qxw
 
+      # An Audio function makes a sound, or says which of the two things it
+      # needs is missing. A runner has neither a sound server nor speakers, so
+      # what gets checked here is the honesty half: that the decoders load with
+      # --no-output (they used to be switched off by it, silently, in every test
+      # in this repository) and that the daemon reports it cannot play and why.
+      - name: Smoke test - audio functions play, or say why they cannot
+        run: ./server/test/audioplay-smoke.sh orchidlightsd server/test/data/vc-references.qxw
+
       # The property everything in F6 rests on: a Virtual Console goes through
       # the node tree and comes back identical. If this fails, editing widgets
       # stops being safe.
@@ -371,6 +385,9 @@ jobs:
           # these proves the executable-relative lookup works.
           check '^Output plugins: [1-9][0-9]* from '              "the bundled output plugins were not found"
           check '^  ArtNet$'                                      "the ArtNet plugin is missing from the bundle"
+          # Same for the audio decoder, which is found the same way and which
+          # nothing checked was in the bundle at all.
+          check '^Audio: [1-9][0-9]* formats'                     "the bundle carries no audio decoder"
 
       - name: Smoke test - the bundle carries the web interface
         env:

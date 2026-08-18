@@ -45,12 +45,36 @@ namespace
         {
             out << "Output plugins: none" << Qt::endl;
         }
+        else if (engine.loadedPlugins().isEmpty())
+        {
+            /* Told apart from "found none", because the two have different
+               fixes and only one of them is a problem. */
+            out << "Output plugins: not loaded (--no-output), from "
+                << engine.pluginPath() << Qt::endl;
+        }
         else
         {
             out << "Output plugins: " << engine.loadedPlugins().count()
                 << " from " << engine.pluginPath() << Qt::endl;
             for (const QString &name : engine.loadedPlugins())
                 out << "  " << name << Qt::endl;
+        }
+
+        /* Whether an Audio function in the project will make a sound, which
+           takes two things: a decoder that can read the file, and an output to
+           put the samples on. Reported on startup because a show discovering it
+           at the first cue is a show discovering it too late. */
+        if (engine.audioFormats().isEmpty())
+        {
+            out << "Audio: no decoder found, so no file will play" << Qt::endl;
+        }
+        else
+        {
+            out << "Audio: " << engine.audioFormats().count() << " formats, "
+                << engine.audioOutputs().count() << " outputs" << Qt::endl;
+            if (engine.audioOutputs().isEmpty())
+                out << "  nowhere to play them: this machine reports no audio output"
+                    << Qt::endl;
         }
     }
 

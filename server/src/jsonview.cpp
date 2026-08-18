@@ -353,6 +353,14 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
         const Audio *audio = qobject_cast<const Audio *>(function);
         json["source"] = audio->getSourceFileName();
         json["volume"] = audio->volume();
+
+        /* Which output it plays through, empty for the system default. A show
+           that sends its click track to a wedge and its playback to the PA
+           names them, and a name that is only in the file is a setting nobody
+           can check. */
+        if (audio->audioDevice().isEmpty() == false)
+            json["device"] = audio->audioDevice();
+
         return json;
     }
 

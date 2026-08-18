@@ -220,7 +220,16 @@ namespace DocWriter
     Result setScriptData(Doc *doc, quint32 scriptId, const QString &data);
 
     /** Audio: source file and volume. Volume < 0 leaves it alone. */
-    Result setAudioSource(Doc *doc, quint32 audioId, const QString &fileName, double volume);
+    /**
+     * Audio: the file, the volume, and which output it plays through.
+     *
+     * `device` is a device description as the machine reports it, or empty for
+     * "whatever the system default is". A show that sends its click track to
+     * the monitor wedge and its playback to the PA needs to name them, and the
+     * name is the only handle the engine offers.
+     */
+    Result setAudioSource(Doc *doc, quint32 audioId, const QString &fileName, double volume,
+                          const QString *device = nullptr);
 
     /** Video: source file or URL. */
     Result setVideoSource(Doc *doc, quint32 videoId, const QString &source);
