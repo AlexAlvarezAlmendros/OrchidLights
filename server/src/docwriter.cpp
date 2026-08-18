@@ -54,6 +54,7 @@
 #include "outputpatch.h"
 #include "universe.h"
 #include "audioplugincache.h"
+#include "audiorenderer.h"
 #include "doc.h"
 
 namespace
@@ -1654,7 +1655,7 @@ DocWriter::Result DocWriter::setScriptData(Doc *doc, quint32 scriptId, const QSt
 }
 
 DocWriter::Result DocWriter::setAudioSource(Doc *doc, quint32 audioId, const QString &fileName,
-                                            double volume)
+                                            double volume, const QString *device)
 {
     Function *function = doc->function(audioId);
     if (function == nullptr || function->type() != Function::AudioType)
@@ -1684,6 +1685,46 @@ DocWriter::Result DocWriter::setAudioSource(Doc *doc, quint32 audioId, const QSt
             return Result::failure(QStringLiteral("Volume must be between 0 and 1"));
         audio->setVolume(volume);
     }
+
+    if (device != nullptr && device->isEmpty() == false)
+    {
+        /* Checked against what this machine actually has.
+         *
+           The engine does not check: getOutputDeviceInfo falls back to the
+           default output for any name it does not recognise, so a typo, or a
+           device named on the machine the show was built on and absent on this
+           one, plays out of the wrong socket and reports nothing. On a rig that
+           is the click track in the room. */
+        bool known = false;
+        for (const AudioDeviceInfo &info : doc->audioPluginCache()->audioDevicesList())
+        {
+            if ((info.capabilities & AUDIO_CAP_OUTPUT) && info.deviceName == *device)
+            {
+                known = true;
+                break;
+            }
+        }
+
+        if (known == false)
+        {
+            QStringList names;
+            for (const AudioDeviceInfo &info : doc->audioPluginCache()->audioDevicesList())
+            {
+                if (info.capabilities & AUDIO_CAP_OUTPUT)
+                    names << info.deviceName;
+            }
+
+            return Result::failure(
+                names.isEmpty()
+                    ? QStringLiteral("This machine reports no audio outputs at all, so \"%1\" "
+                                     "cannot be one of them").arg(*device)
+                    : QStringLiteral("No audio output called \"%1\". This machine has: %2")
+                          .arg(*device, names.join(QStringLiteral(", "))));
+        }
+    }
+
+    if (device != nullptr)
+        audio->setAudioDevice(*device);
 
     doc->setModified();
     return Result::success();

@@ -131,7 +131,7 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 
 **Lección aprendida.** El primer arranque contra `17Julio.qxw` cargó los 22 fixtures y pareció correcto: direcciones bien, canales bien. Pero la librería estaba vacía y las 22 definiciones habían fallado, así que todos eran dimmers genéricos sin nombres de canal ni capacidades. El motor sólo lo dejaba caer en `qDebug`, mezclado con cientos de líneas de ruido. De ahí que el daemon ahora **falle con código 2** ante cualquier definición sin resolver: en este dominio, un error silencioso significa mandar valores al canal equivocado de una luz real.
 
-### F1 — Daemon headless + API core 🔨
+### F1 — Daemon headless + API core ✅
 
 **Motor en marcha** — hecho:
 
@@ -178,7 +178,11 @@ Tema oscuro por defecto (se trabaja a oscuras) más un modo **blackout-safe** de
 > El segundo, más grave: con el procesamiento de namespaces activado, **`xmlns` no aparece en `attributes()`** — Qt lo consume en `namespaceDeclarations()`. Al leer solo los atributos se perdía la declaración, todos los hijos salían del namespace por defecto, y las secciones "preservadas" volvían distintas de como entraron **mientras el archivo seguía abriendo perfectamente**. `Sample.qxw` no lo detectaba porque no declara `xmlns`; `17Julio.qxw` sí.
 
 **Pendiente:**
-- [ ] **Audio.** No hay backend multimedia todavía y el AppImage no empaqueta ninguno a propósito. Las funciones de audio cargan pero no suenan.
+- [x] **Audio: suena, y se mide.** Lo que decía esta línea —«cargan pero no suenan»— era verdad del AppImage y mentira de cualquier máquina con servidor de sonido, y la interfaz lo repetía como un hecho. Ahora se le pregunta al daemon y se enseña lo que conteste.
+  - **`--no-output` se llevaba el audio por delante.** Los decodificadores solo se cargaban si se habían cargado los plugins de salida, así que la bandera que dice «no toques la red DMX» dejaba además al daemon sin poder abrir un archivo de sonido — y **todas** las pruebas de este repositorio corren con ella.
+  - **Elección de salida por función** (`<Source Device="…">`, que ya existía en el motor y nadie exponía), validada contra los dispositivos reales de la máquina: `getOutputDeviceInfo` cae al dispositivo por defecto ante cualquier nombre que no reconoce, así que una salida mal escrita —o nombrada en la máquina donde se montó el show y ausente en esta— suena por el altavoz equivocado sin decir nada.
+  - **Panel de audio en Patch**, que es lo que por fin hace alcanzable el selector de entrada: existía en la API desde F6 y no lo ofrecía ninguna pantalla.
+  - La prueba **graba lo que sale**. Se crea un sink de prueba, se le manda un tono generado de amplitud conocida, y se leen las muestras: pico 20000 a volumen 1 y 5000 al 25 %. Es la misma idea que leer DMX del cable, para el único tipo de función cuya salida no es DMX. Donde no hay servidor de sonido —cualquier runner de CI— se comprueba la otra mitad: que el daemon dice que no puede sonar, y cuál de las dos cosas le falta.
 - [x] Round-trip de `.qxw`: cargar y guardar no altera las secciones que el motor no gestiona (Virtual Console, Simple Desk). `roundtrip-smoke.sh` y `xmltree-roundtrip.sh` en CI, contra los seis proyectos de la máquina.
 - [x] **Entrada del menú.** El `.desktop` ya no abre una terminal: `orchidlightsd --open` levanta el motor y abre la interfaz en el navegador. Encolado tras el bucle de eventos, porque abrirlo antes de que `listen()` acepte enseña un error de conexión en un daemon que arrancó perfectamente.
 - [x] **Criterio de éxito cumplido: el show del P62 se dispara desde `curl`/`wscat` con luz real, sin GUI.** Verificado por Art-Net: 512 bytes, 76 canales activos con el espaciado de 8 canales de los Theatre Spots.

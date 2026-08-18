@@ -47,6 +47,8 @@ export interface FunctionBody {
   data?: string // Script: the program
   source?: string // Audio and Video: the file or URL
   volume?: number
+  /** Audio: which output it plays through, absent for the system default. */
+  device?: string
 
   scene?: number // Sequence
   sceneName?: string
@@ -91,6 +93,26 @@ export interface FixtureGroup {
   id: number
   name: string
   fixtures: number[]
+}
+
+/**
+ * What this machine can do with sound, which is two separate questions: what it
+ * can listen to (the audio triggers) and what it can play through (an Audio
+ * function). Neither was reachable from the interface before.
+ */
+export interface AudioDevices {
+  inputs: string[]
+  selected: string
+  capturing: boolean
+  /** Why the capture is not running, when it asked to be. */
+  unavailable?: string
+  outputs: string[]
+  /** File extensions the loaded decoder plugins can read. */
+  formats: string[]
+  /** A decoder and an output, both present. */
+  canPlay: boolean
+  /** Which of the two is missing, in words. */
+  silentBecause?: string
 }
 
 export interface PlanState {
@@ -374,6 +396,16 @@ export const api = {
     }),
   removeShowItem: (showId: number, itemId: number) =>
     json<unknown>(`/api/v1/functions/${showId}/items/${itemId}`, { method: 'DELETE' }),
+
+  audioDevices: () => json<AudioDevices>('/api/v1/audio'),
+  /** The input the capture uses. A machine setting, not a project one: it is
+   *  written to QSettings and outlives the show that is loaded. */
+  selectAudioInput: (input: string) =>
+    json<AudioDevices>('/api/v1/audio', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input }),
+    }),
 
   plan: () => json<PlanState>('/api/v1/plan'),
   /** Millimetres against the monitor grid. X and Y only: a plan is a top view,

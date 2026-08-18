@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
+  type AudioDevices,
   type FixtureDetail,
   type FixtureState,
   type FunctionBody,
@@ -315,11 +316,7 @@ function FunctionEditor({
               }
             />
           </label>
-          {/* The decoders load, but nothing bundles a multimedia backend yet,
-              so a file that reads fine still will not play. */}
-          <p className="hint">
-            Los decodificadores cargan, pero todavía no hay backend de audio: suena en silencio.
-          </p>
+          <AudioOutput fn={fn} body={body} onApply={apply} />
         </>
       )}
       {body?.type === 'Video' && (
@@ -857,5 +854,72 @@ function Members({
         </select>
       </div>
     </div>
+  )
+}
+
+/**
+ * Which output an Audio function plays through, and whether it can play at all.
+ *
+ * The panel used to say, flatly, that audio never sounds. That was true of the
+ * AppImage and false of every machine with a sound server, which is the worst
+ * kind of message an interface can carry: one that tells somebody not to bother
+ * trying something that works. Now the daemon is asked, and what it answers is
+ * what gets shown.
+ */
+function AudioOutput({
+  fn,
+  body,
+  onApply,
+}: {
+  fn: FunctionState
+  body: FunctionBody
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [devices, setDevices] = useState<AudioDevices | null>(null)
+
+  useEffect(() => {
+    api
+      .audioDevices()
+      .then(setDevices)
+      .catch(() => setDevices(null))
+  }, [])
+
+  if (devices === null) return null
+
+  if (devices.canPlay === false) {
+    return (
+      <p className="hint">{devices.silentBecause ?? 'Este daemon no puede reproducir audio.'}</p>
+    )
+  }
+
+  return (
+    <>
+      <label className="field">
+        <span>Salida</span>
+        <select
+          value={body.device ?? ''}
+          onChange={(e) => onApply(() => api.setBody(fn.id, { device: e.target.value }))}
+        >
+          {/* Empty means the system default, which is a real choice and not the
+              absence of one: a show that says nothing follows the machine. */}
+          <option value="">La que tenga el sistema</option>
+          {devices.outputs.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {/* A device named in a show built on another machine is not here, and the
+          daemon refuses it -- but it is worth saying before somebody presses
+          play rather than after. */}
+      {body.device && !devices.outputs.includes(body.device) && (
+        <p className="hint">
+          Esta salida («{body.device}») no está en esta máquina, así que sonará por la que tenga el
+          sistema.
+        </p>
+      )}
+    </>
   )
 }

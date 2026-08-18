@@ -160,6 +160,11 @@ public:
     /** Audio formats the decoder plugins can read. */
     QStringList audioFormats() const { return m_audioFormats; }
 
+    /** Audio outputs this machine reports. Empty means an Audio function can
+     *  read its file and still make no sound, which is worth being able to
+     *  say rather than leaving somebody to work out. */
+    QStringList audioOutputs() const;
+
     /** Names of the output plugins that came up, empty when none did. */
     QStringList loadedPlugins() const { return m_loadedPlugins; }
     QString pluginPath() const { return m_pluginPath; }

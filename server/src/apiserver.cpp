@@ -35,6 +35,8 @@
 #include "virtualconsole.h"
 #include "consolelayout.h"
 #include "audiotriggers.h"
+#include "audioplugincache.h"
+#include "audiorenderer.h"
 #include "docwriter.h"
 #include "rgbalgorithm.h"
 #include "qlcfixturedefcache.h"
@@ -1032,9 +1034,15 @@ void ApiServer::registerRoutes()
             result = DocWriter::setScriptData(doc, id, body.value("data").toString());
             break;
         case Function::AudioType:
+        {
+            /* Absent leaves the device alone; an empty string is "back to the
+               system default", which is a different request. */
+            const QString device = body.value("device").toString();
             result = DocWriter::setAudioSource(doc, id, body.value("source").toString(),
-                                               body.value("volume").toDouble(-1.0));
+                                               body.value("volume").toDouble(-1.0),
+                                               body.contains("device") ? &device : nullptr);
             break;
+        }
         case Function::VideoType:
             result = DocWriter::setVideoSource(doc, id, body.value("source").toString());
             break;
@@ -1812,7 +1820,7 @@ void ApiServer::registerRoutes()
      * looks exactly like a widget that does not work, and an operator can only
      * tell the two apart by being shown the list. */
     m_server->route("/api/v1/audio", QHttpServerRequest::Method::Get,
-                    [this, denied](const QHttpServerRequest &request) {
+                    [this, doc, denied](const QHttpServerRequest &request) {
         if (denied(request))
             return unauthorized();
 
@@ -1820,12 +1828,46 @@ void ApiServer::registerRoutes()
         for (const QString &name : AudioTriggers::availableInputs())
             inputs.append(name);
 
+        /* And what it can play through, which is a separate question from what
+         * it can listen to and was not answerable at all until now.
+         *
+         * An Audio function that reads its file, reports its length and makes
+         * no sound looks identical to one that is simply not playing yet. The
+         * two things that decide it -- a decoder for the file, and an output to
+         * put the samples on -- are both answered here, so an interface can say
+         * which one is missing instead of showing a play button and hoping. */
+        QJsonArray outputs;
+        for (const AudioDeviceInfo &info : doc->audioPluginCache()->audioDevicesList())
+        {
+            if (info.capabilities & AUDIO_CAP_OUTPUT)
+                outputs.append(info.deviceName);
+        }
+
         QJsonObject body;
         body["inputs"] = inputs;
         body["selected"] = AudioTriggers::selectedInput();
         body["capturing"] = m_engine->audio()->isCapturing();
         if (m_engine->audio()->unavailableReason().isEmpty() == false)
             body["unavailable"] = m_engine->audio()->unavailableReason();
+
+        body["outputs"] = outputs;
+        body["formats"] = QJsonArray::fromStringList(m_engine->audioFormats());
+        body["canPlay"] = outputs.isEmpty() == false
+                          && m_engine->audioFormats().isEmpty() == false;
+
+        if (m_engine->audioFormats().isEmpty())
+        {
+            body["silentBecause"] = QStringLiteral(
+                "No audio decoder plugin was found, so no file can be read. They install "
+                "alongside the output plugins, under audio/.");
+        }
+        else if (outputs.isEmpty())
+        {
+            body["silentBecause"] = QStringLiteral(
+                "This machine reports no audio outputs, so there is nowhere to put the "
+                "samples. On a server that usually means no sound server is running for "
+                "this user.");
+        }
 
         return QHttpServerResponse(body);
     });

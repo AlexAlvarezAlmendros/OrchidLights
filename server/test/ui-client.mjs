@@ -332,6 +332,20 @@ try {
         problems.push(type + ': no "' + expect + '" field')
       }
 
+      /* An Audio function has to say where it will play. Either it offers the
+         outputs, or it says why there are none -- what it must not do is show a
+         file field and a volume slider and leave the rest to hope. */
+      if (type === 'Audio') {
+        const devices = await (await fetch('/api/v1/audio')).json()
+        const offered = [...panel.querySelectorAll('select')]
+          .some(s => [...s.options].some(o => devices.outputs.includes(o.value)))
+
+        if (devices.canPlay && !offered) problems.push('Audio: no output picker')
+        if (!devices.canPlay && !panel.textContent.includes(devices.silentBecause.slice(0, 20))) {
+          problems.push('Audio: cannot play and does not say why')
+        }
+      }
+
       ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Eliminar función').click()
       await new Promise(r => setTimeout(r, 1200))
     }
@@ -637,6 +651,58 @@ try {
     return 'ok'
   })()`)
   check('a show timeline can be dragged in the browser', timeline === 'none' || timeline === 'ok', timeline)
+
+  /* Audio: what this machine can listen to and play through.
+   *
+   * The panel used to say flatly that audio never sounds -- true of the
+   * AppImage and false of any machine with a sound server, which is the worst
+   * kind of message an interface can carry. Now it asks the daemon, so the test
+   * asks the daemon too and checks the screen agrees with it. */
+  await click('Patch')
+  await sleep(900)
+
+  const sound = await evaluate(`(async () => {
+    const tab = [...document.querySelectorAll('.tabs button')].find(b => b.textContent.trim() === 'Audio')
+    if (!tab) return 'no audio tab'
+    tab.click()
+    await new Promise(r => setTimeout(r, 900))
+
+    const cards = [...document.querySelectorAll('.setup article.card')]
+    if (cards.length < 2) return 'expected an input card and an output card, got ' + cards.length
+
+    const devices = await (await fetch('/api/v1/audio')).json()
+    const shown = document.querySelector('.setup').textContent
+
+    /* The chip is compared exactly, not by substring: "no puede sonar"
+       contains "puede sonar", so a panel wired to say the wrong thing passed a
+       looser check. */
+    const chips = [...document.querySelectorAll('.setup .chip')].map(c => c.textContent.trim())
+    const expected = devices.canPlay ? 'puede sonar' : 'no puede sonar'
+    if (!chips.includes(expected)) {
+      return 'the daemon says ' + expected + ' and the chips say ' + chips.join('/')
+    }
+
+    if (devices.canPlay) {
+      for (const out of devices.outputs) {
+        if (!shown.includes(out)) return 'output missing from the screen: ' + out
+      }
+    } else {
+      if (!devices.silentBecause) return 'the daemon does not say why it cannot play'
+      if (!shown.includes(devices.silentBecause.slice(0, 30))) return 'the reason is not on the screen'
+    }
+
+    /* The input picker: it exists in the API and nothing offered it until now.
+       A control that is not there is not a control. */
+    const picker = [...document.querySelectorAll('.setup select')]
+      .find(s => [...s.options].some(o => o.value === devices.selected))
+    if (devices.inputs.length > 0 && !picker) return 'no input picker for ' + devices.inputs.length + ' inputs'
+    if (devices.inputs.length === 0 && !shown.includes('ninguna entrada')) {
+      return 'no inputs and the screen does not say so'
+    }
+
+    return 'ok'
+  })()`)
+  check('the audio panel says what the daemon says', sound === 'ok', sound)
 
   /* The plan. The one assertion worth the whole screen: light a lamp and see
      the marker turn that colour, then put it out and see it go dark. Everything

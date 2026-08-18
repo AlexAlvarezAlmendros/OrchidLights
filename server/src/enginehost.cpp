@@ -39,6 +39,7 @@
 #include "ioplugincache.h"
 #include "qlcioplugin.h"
 #include "audioplugincache.h"
+#include "audiorenderer.h"
 #include "inputoutputmap.h"
 #include "mastertimer.h"
 #include "channelsgroup.h"
@@ -99,27 +100,32 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
         m_doc->rgbScriptsCache()->load(QDir(scripts));
     m_doc->rgbScriptsCache()->load(RGBScriptsCache::userScriptsDirectory());
 
+    /* Where the plugins live. Resolved even when the output is disabled,
+       because the audio decoders are installed under the same directory and
+       --no-output is a statement about the DMX network, not about a sound
+       file. */
+    m_pluginPath = InstallPaths::ioPlugins(options.pluginDirectory);
+
     /* Output plugins. Skipping them keeps the engine fully functional but
        silent on the wire. */
-    if (options.noOutput == false)
+    if (options.noOutput == false && m_pluginPath.isEmpty() == false)
     {
-        m_pluginPath = InstallPaths::ioPlugins(options.pluginDirectory);
-        if (m_pluginPath.isEmpty() == false)
-        {
-            m_doc->ioPluginCache()->load(QDir(m_pluginPath));
+        m_doc->ioPluginCache()->load(QDir(m_pluginPath));
 
-            const QList<QLCIOPlugin *> plugins = m_doc->ioPluginCache()->plugins();
-            for (QLCIOPlugin *plugin : plugins)
-                m_loadedPlugins << plugin->name();
-        }
+        const QList<QLCIOPlugin *> plugins = m_doc->ioPluginCache()->plugins();
+        for (QLCIOPlugin *plugin : plugins)
+            m_loadedPlugins << plugin->name();
     }
 
-    /* Audio decoders. They install alongside the output plugins, so the same
-       resolution finds them.
+    /* Audio decoders, which install alongside the output plugins.
      *
-     * These decode files; playing the result still needs a Qt multimedia
-       backend, which the AppImage does not bundle yet. An Audio function in a
-       project therefore loads and reports its formats but stays silent there. */
+     * Loading the cache is also what fills its list of output devices, so a
+       daemon that never got here cannot even say what it would play through.
+       That used to be tied to --no-output, which meant every test in this
+       repository ran with audio quietly switched off, and an operator who
+       started the daemon with the network disabled -- the obvious thing to do
+       while building a show -- got an Audio function that read its file, showed
+       its length, and played nothing. */
     if (m_pluginPath.isEmpty() == false)
     {
         const QString audioPath = QDir(m_pluginPath).absoluteFilePath(QStringLiteral("audio"));
@@ -171,6 +177,22 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
     m_running = true;
 
     return true;
+}
+
+QStringList EngineHost::audioOutputs() const
+{
+    QStringList names;
+
+    if (m_doc == nullptr)
+        return names;
+
+    for (const AudioDeviceInfo &info : m_doc->audioPluginCache()->audioDevicesList())
+    {
+        if (info.capabilities & AUDIO_CAP_OUTPUT)
+            names << info.deviceName;
+    }
+
+    return names;
 }
 
 void EngineHost::teachSliders()
