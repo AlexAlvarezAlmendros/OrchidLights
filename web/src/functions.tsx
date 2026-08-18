@@ -399,7 +399,13 @@ function TextBody({
 }) {
   const [draft, setDraft] = useState(value)
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the source changes
+  /* The box holds a draft until it is committed, so it has to be resynced when
+     the value behind it changes: somebody else editing the same function, or
+     this one being pointed at another.
+   *
+     No suppression here, unlike the effects that deliberately leave a
+     dependency out -- `value` is the only one, and a comment claiming to
+     silence a rule that never fires is a comment that stops meaning anything. */
   useEffect(() => setDraft(value), [value])
 
   const commit = () => draft !== value && onApply(draft)
