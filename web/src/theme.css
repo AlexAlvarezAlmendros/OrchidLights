@@ -1719,3 +1719,76 @@ button.linkish.left {
 .widget.arranging[data-selected="true"] {
   box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgb(0 0 0 / 35%);
 }
+
+/* ---------------------------------------------------------------------------
+   The plan as a place to work: choose lamps, then act on them.
+   ------------------------------------------------------------------------- */
+
+/* Chosen is a ring outside the lamp, so it survives whatever colour the lamp
+   is currently putting out -- including white, which any highlight drawn
+   inside it would disappear into. */
+.lamp[data-chosen="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.lamp[data-chosen="true"][data-dark="true"] {
+  border-style: solid;
+}
+
+.selection {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 720px;
+}
+
+.selection-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.selection-head strong {
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.selection-head button {
+  min-height: 38px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.selection input[type="range"] {
+  accent-color: var(--accent);
+  height: 32px;
+  touch-action: none;
+}
+
+.swatches {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  flex: 1 1 3rem;
+  min-width: 3rem;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 0;
+}
+
+.swatch:disabled {
+  opacity: 0.3;
+}
+
+.swatch:hover:not(:disabled) {
+  border-color: var(--text);
+}

@@ -820,6 +820,126 @@ try {
   })()`)
   check('the plan shows what each lamp is doing', litUp === 'none' || litUp === 'ok', litUp)
 
+  /* And the plan as a place to work: choose lamps, act on them, read the wire.
+   *
+     This is the assertion the whole direction rests on. A colour picker over a
+     drawing of a rig is a toy; the same picker that moves DMX is a desk. The
+     only way to tell them apart from outside is to look at the wire. */
+  const worked = await evaluate(`(async () => {
+    const plan = await (await fetch('/api/v1/plan')).json()
+    const bar = plan.fixtures.find(f => f.roles.red !== undefined)
+    if (!bar) return 'none'          // nothing here mixes colour
+
+    /* A channel with a curve on it does not put out what was asked for -- an
+       inverted red at 255 is 0 on the wire -- and the plan drawing that is the
+       plan being right. The numbers below only mean anything without one. */
+    const detail = await (await fetch('/api/v1/fixtures/' + bar.id)).json()
+    if (detail.channelList.some(c => c.modifier)) return 'none'
+
+    /* Place it and then make the screen re-read the plan, rather than depending
+       on whatever the block before left behind. */
+    await fetch('/api/v1/plan/fixtures/' + bar.id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ x: 2000, y: 2000 }),
+    })
+
+    const rail = (name) => [...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === name)
+    if (!rail('Patch')) {
+      return 'no rail here; items: '
+        + [...document.querySelectorAll('.rail-item')].map(b => JSON.stringify(b.textContent)).join(',')
+        + ' operator: ' + document.querySelector('.app')?.getAttribute('data-operator')
+    }
+    rail('Patch').click()
+    await new Promise(r => setTimeout(r, 700))
+    rail('Planta').click()
+    await new Promise(r => setTimeout(r, 1200))
+
+    const find = () => document.querySelector('.lamp[data-fixture="' + bar.id + '"]')
+    const lamp = find()
+    if (!lamp) return 'the lamp is not on the stage'
+
+    const box = lamp.getBoundingClientRect()
+    const tap = (type, x, y) => lamp.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, pointerId: 7, clientX: x, clientY: y,
+    }))
+
+    /* A tap chooses; it must not move the lamp. */
+    const before = lamp.style.left
+    tap('pointerdown', box.left + box.width / 2, box.top + box.height / 2)
+    tap('pointerup', box.left + box.width / 2, box.top + box.height / 2)
+    await new Promise(r => setTimeout(r, 500))
+
+    const chosen = find()
+    if (!chosen) {
+      return 'the lamp went away after the tap; on stage: '
+        + [...document.querySelectorAll('.lamp')].map(l => l.dataset.fixture).join(',')
+        + ' tray: ' + [...document.querySelectorAll('.tray-item')].map(t => t.textContent.trim()).join(',')
+    }
+    if (chosen.getAttribute('data-chosen') !== 'true') return 'the tap did not choose it'
+    if (chosen.style.left !== before) return 'the tap moved it'
+
+    const panel = document.querySelector('.selection')
+    if (!panel) return 'no panel for the chosen lamp'
+    if (!panel.textContent.includes(bar.name)) return 'the panel does not name it'
+
+    /* Full intensity first, or a colour would be scaled to nothing. */
+    const level = panel.querySelector('input[type=range]')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    setter.call(level, '255')
+    level.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 700))
+
+    /* Then a colour, and the wire has to carry it. */
+    const swatches = [...panel.querySelectorAll('.swatch')]
+    const red = swatches.find(sw => sw.getAttribute('aria-label') === 'Poner #ff2d2d')
+    if (!red) return 'no red swatch'
+    red.click()
+    await new Promise(r => setTimeout(r, 900))
+
+    const live = await (await fetch('/api/v1/live')).json()
+    const held = new Map(live.values.filter(v => v.fixture === bar.id).map(v => [v.channel, v.value]))
+    if (held.get(bar.roles.red) !== 0xff) return 'red is not held: ' + JSON.stringify(live.values)
+    if (held.get(bar.roles.green) !== 0x2d) return 'green is wrong: ' + held.get(bar.roles.green)
+    if (bar.roles.white !== undefined && held.get(bar.roles.white) !== 0) {
+      return 'the white was left up, so that is pink'
+    }
+
+    /* And the lamp on screen agrees, which is the loop closing: the same roles
+       that resolved the colour into channels read it back off the frame. */
+    let painted = ''
+    for (let i = 0; i < 25; i++) {
+      await new Promise(r => setTimeout(r, 120))
+      painted = document.querySelector('.lamp[data-fixture="' + bar.id + '"]').style.background
+      /* split/join rather than a regex: inside this template literal a
+         backslash-s collapses to the letter s, so /\s/ strips letters and
+         nothing else. It has cost two assertions already. */
+      if (painted.split(' ').join('') === 'rgb(255,45,45)') break
+    }
+    if (painted.split(' ').join('') !== 'rgb(255,45,45)') {
+      return 'the lamp does not show what it is putting out: ' + painted
+    }
+
+    /* Letting go puts the channels down rather than leaving them latched. */
+    ;[...panel.querySelectorAll('button')].find(b => b.textContent.trim() === 'Soltar').click()
+    await new Promise(r => setTimeout(r, 900))
+    const after = await (await fetch('/api/v1/live')).json()
+    if (after.values.length !== 0) return 'letting go held on to ' + after.values.length
+
+    /* Tapping again lets the lamp go. */
+    const still = document.querySelector('.lamp[data-fixture="' + bar.id + '"]')
+    const b2 = still.getBoundingClientRect()
+    still.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 8, clientX: b2.left + 4, clientY: b2.top + 4 }))
+    still.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 8, clientX: b2.left + 4, clientY: b2.top + 4 }))
+    await new Promise(r => setTimeout(r, 500))
+    if (document.querySelector('.selection')) return 'tapping it again did not let it go'
+
+    await fetch('/api/v1/plan/fixtures/' + bar.id, { method: 'DELETE' })
+    return 'ok'
+  })()`)
+  check('lamps can be chosen on the plan and driven from it', worked === 'none' || worked === 'ok', worked)
+
   /* The shell: where you are, and what is loaded.
    *
      The four views used to be four buttons in a row of nine, competing with

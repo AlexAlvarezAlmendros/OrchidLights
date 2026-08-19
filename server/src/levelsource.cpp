@@ -94,6 +94,59 @@ void LevelSource::defineChannelGroup(quint32 groupId, const QList<Channel> &chan
     defineSlider(channelGroupSlider(groupId), channels);
 }
 
+void LevelSource::setLiveValue(quint32 fixtureId, quint32 channel, uchar value)
+{
+    QMutexLocker locker(&m_mutex);
+
+    m_live.insert(qMakePair(fixtureId, channel), value);
+    m_liveDirty = true;
+}
+
+QList<QPair<LevelSource::Channel, uchar>> LevelSource::liveValues() const
+{
+    QMutexLocker locker(&m_mutex);
+
+    QList<QPair<Channel, uchar>> values;
+    for (auto it = m_live.constBegin(); it != m_live.constEnd(); ++it)
+        values.append(qMakePair(it.key(), it.value()));
+
+    return values;
+}
+
+void LevelSource::clearLive()
+{
+    QMutexLocker locker(&m_mutex);
+
+    m_live.clear();
+
+    /* Dismissed rather than merely forgotten, for the reason the whole of
+       forgetSliders exists: a Universe keeps its own reference to every fader
+       it hands out, so dropping ours leaves it asserting its last values for
+       the life of the document. */
+    for (auto it = m_faders.constBegin(); it != m_faders.constEnd(); ++it)
+    {
+        if (it.key().first != LIVE_OWNER)
+            continue;
+
+        Universe *universe = m_faderUniverses.value(it.key());
+        if (universe != nullptr && it.value().isNull() == false)
+            m_dismissed.append(qMakePair(universe, it.value()));
+    }
+
+    for (auto it = m_faders.begin(); it != m_faders.end();)
+    {
+        if (it.key().first == LIVE_OWNER)
+        {
+            m_faderUniverses.remove(it.key());
+            it = m_faders.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void LevelSource::defineButton(quint32 widgetId, quint32 functionId, const Scope &submasters)
 {
     QMutexLocker locker(&m_mutex);
@@ -206,6 +259,11 @@ bool LevelSource::knowsPad(quint32 padId) const
 
 void LevelSource::forgetEverything()
 {
+    /* The live desk goes first, and through clearLive so its faders are handed
+       back rather than stranded. A different project means the fixture ids mean
+       something else entirely, so holding channel 3 of fixture 2 across a load
+       would be holding a channel of whatever fixture 2 is now. */
+    clearLive();
     forgetSliders();
 
     QMutexLocker locker(&m_mutex);
@@ -495,6 +553,56 @@ QSharedPointer<GenericFader> LevelSource::faderFor(quint32 ownerId, quint32 univ
     return fader;
 }
 
+/**
+ * Put the live desk on the wire. Called with the mutex held, on the timer
+ * thread, with the universes claimed.
+ *
+ * Only on ticks where something changed. Unlike a fader, which holds a look
+ * because its channels stay in the fader, these are absolute values somebody
+ * typed: re-asserting them every tick would make the desk win every argument
+ * with every function forever, which is not what a simple desk is for.
+ */
+void LevelSource::writeLive(const QList<Universe *> &universes)
+{
+    if (m_liveDirty == false || m_live.isEmpty())
+        return;
+
+    m_liveDirty = false;
+
+    for (auto it = m_live.constBegin(); it != m_live.constEnd(); ++it)
+    {
+        Fixture *fixture = m_doc->fixture(it.key().first);
+        if (fixture == nullptr)
+            continue;
+
+        const quint32 universeId = fixture->universe();
+        if (universeId >= quint32(universes.count()))
+            continue;
+
+        Universe *universe = universes.at(int(universeId));
+        QSharedPointer<GenericFader> fader = faderFor(LIVE_OWNER, universeId, universe);
+
+        FadeChannel *fc = fader->getChannelFader(m_doc, universe, it.key().first, it.key().second);
+        if (fc->universe() == Universe::invalid())
+        {
+            fader->remove(fc);
+            continue;
+        }
+
+        /* Same rule as a level slider: anything that is not an intensity
+           channel is latest-takes-precedence and has to leave the fader once
+           written, or it fights whatever sets it next. */
+        const QLCChannel *qlcChannel = fixture->channel(it.key().second);
+        if (qlcChannel != nullptr && qlcChannel->group() != QLCChannel::Intensity)
+            fc->addFlag(FadeChannel::AutoRemove);
+
+        fc->setStart(fc->current());
+        fc->setTarget(it.value());
+        fc->setReady(false);
+        fc->setElapsed(0);
+    }
+}
+
 void LevelSource::writeDMX(MasterTimer *timer, QList<Universe *> universes)
 {
     QMutexLocker locker(&m_mutex);
@@ -540,6 +648,7 @@ void LevelSource::writeDMX(MasterTimer *timer, QList<Universe *> universes)
 
     writePads(universes);
     writePlaybacks(timer);
+    writeLive(universes);
 
     if (m_dirty.isEmpty())
         return;

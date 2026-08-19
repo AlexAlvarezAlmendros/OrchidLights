@@ -30,6 +30,7 @@
 
 #include "apiserver.h"
 #include "enginehost.h"
+#include "levelsource.h"
 #include "jsonview.h"
 #include "livefeed.h"
 #include "virtualconsole.h"
@@ -1258,6 +1259,100 @@ void ApiServer::registerRoutes()
         }
 
         return QHttpServerResponse(body);
+    });
+
+    /* The live desk: absolute values pinned on individual channels.
+     *
+     * This is what makes the plan a place to work rather than a place to look.
+     * Selecting four lamps and giving them a colour is, once the colour has
+     * been resolved into channels, exactly this: a handful of channels held at
+     * exact values, each its own.
+     *
+     * Deliberately generic. The interface already knows which channel of a
+     * fixture is its red -- GET /plan reports the roles, and the same map is
+     * what paints the plan -- so resolving a colour into channels happens once,
+     * in the place that also reads them back. A second mapping on this side
+     * would be a second thing to drift.
+     *
+     * It writes nothing to the document: this is a desk, not an edit. Nothing
+     * here survives a reload, and it says so by holding no state anybody has to
+     * remember to save.
+     */
+    m_server->route("/api/v1/live", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray values;
+        for (const auto &entry : m_engine->levels()->liveValues())
+        {
+            QJsonObject one;
+            one["fixture"] = qint64(entry.first.first);
+            one["channel"] = qint64(entry.first.second);
+            one["value"] = int(entry.second);
+            values.append(one);
+        }
+
+        QJsonObject body;
+        body["values"] = values;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/live", QHttpServerRequest::Method::Put,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        if (body.value("values").isArray() == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send a \"values\" array of "
+                                            "{\"fixture\": id, \"channel\": n, \"value\": 0-255}"));
+        }
+
+        QList<QPair<LevelSource::Channel, uchar>> values;
+
+        for (const QJsonValue &entry : body.value("values").toArray())
+        {
+            const QJsonObject one = entry.toObject();
+            const QJsonValue fixture = one.value("fixture");
+            const QJsonValue channel = one.value("channel");
+            const QJsonValue value = one.value("value");
+
+            if (fixture.isDouble() == false || channel.isDouble() == false
+                || value.isDouble() == false || fixture.toInt(-1) < 0 || channel.toInt(-1) < 0
+                || value.toInt(-1) < 0 || value.toInt(256) > 255)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Every value needs a non-negative \"fixture\" and "
+                                                "\"channel\", and a \"value\" from 0 to 255"));
+            }
+
+            values.append(qMakePair(qMakePair(quint32(fixture.toInt()), quint32(channel.toInt())),
+                                    uchar(value.toInt())));
+        }
+
+        QString error;
+        if (m_engine->setLiveValues(values, error) == false)
+            return jsonError(StatusCode::BadRequest, error);
+
+        QJsonObject response;
+        response["held"] = values.count();
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/live", QHttpServerRequest::Method::Delete,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        m_engine->releaseLive();
+
+        QJsonObject response;
+        response["held"] = 0;
+        return QHttpServerResponse(response);
     });
 
     /* The plan: where each fixture stands, and what colour it is right now.

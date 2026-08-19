@@ -419,6 +419,21 @@ export const api = {
     }),
 
   plan: () => json<PlanState>('/api/v1/plan'),
+  /**
+   * The live desk: absolute values pinned on individual channels.
+   *
+   * Not an edit — nothing here reaches the document, and nothing survives a
+   * reload. It is the desk you reach for when you want to see what four lamps
+   * look like in amber before deciding anything.
+   */
+  setLive: (values: { fixture: number; channel: number; value: number }[]) =>
+    json<{ held: number }>('/api/v1/live', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values }),
+    }),
+  releaseLive: () => json<{ held: number }>('/api/v1/live', { method: 'DELETE' }),
+
   /** Millimetres against the monitor grid. X and Y only: a plan is a top view,
    *  and a height would not survive being saved. */
   setPlanPosition: (

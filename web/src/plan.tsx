@@ -19,6 +19,20 @@ import { type PlanFixture, type PlanState, api } from './api'
  *  the grid so a stage of any size fits the same box. */
 const PLAN_WIDTH = 720
 
+/** A handful of colours worth reaching for without a picker: the ones a rig
+ *  gets asked for by name. A full picker belongs in the scene editor, where a
+ *  colour is being decided rather than tried. */
+const SWATCHES = [
+  '#ffffff',
+  '#ff2d2d',
+  '#ff9a2d',
+  '#ffe22d',
+  '#2dff77',
+  '#2dc9ff',
+  '#5c3dff',
+  '#ff2db4',
+]
+
 export function Plan({
   revision,
   universes,
@@ -36,7 +50,16 @@ export function Plan({
      came up and then jumped. Placing a rig that way is guesswork -- you find
      out where you put something after you have put it. */
   const [drag, setDrag] = useState<{ id: number; x: number; y: number } | null>(null)
+  /* Which lamps you are working on. The plan stops being a picture of the rig
+     the moment you can point at part of it and say "these". */
+  const [chosen, setChosen] = useState<number[]>([])
+  const [level, setLevel] = useState(255)
   const surface = useRef<HTMLDivElement>(null)
+  /* A finger down on a lamp is not yet a drag. Below the threshold it is a tap,
+     which chooses the lamp instead of moving it -- the same rule as the
+     console, for the same reason: one gesture that does two things needs to
+     know which one before it commits to either. */
+  const pending = useRef<{ id: number; x: number; y: number } | null>(null)
 
   const reload = useCallback(() => {
     api
@@ -73,6 +96,39 @@ export function Plan({
     }
   }
 
+  const selected = plan?.fixtures.filter((f) => chosen.includes(f.id)) ?? []
+
+  const fail = (e: unknown) => onError(e instanceof Error ? e.message : String(e))
+
+  /* How many of the chosen can actually take each thing. A control that is
+     offered and does nothing is the failure this whole codebase is arranged
+     against, so both are counted and both are said. */
+  const dimmable = selected.filter((f) => f.roles.intensity !== undefined).length
+  const mixable = selected.filter((f) => colourValues(f, { r: 0, g: 0, b: 0 }).length > 0).length
+
+  /** Give the selection a colour, resolved per fixture: an RGB bar and a CMY
+   *  head want different numbers for the same red. */
+  const paint = (hex: string) => {
+    const rgb = parseHex(hex)
+    const values = selected.flatMap((f) =>
+      colourValues(f, rgb).map((v) => ({ fixture: f.id, channel: v.channel, value: v.value })),
+    )
+    if (values.length === 0) return
+    onError(null)
+    api.setLive(values).catch(fail)
+  }
+
+  /** And an intensity, on whatever each of them calls its dimmer. */
+  const dim = (value: number) => {
+    setLevel(value)
+    const values = selected
+      .filter((f) => f.roles.intensity !== undefined)
+      .map((f) => ({ fixture: f.id, channel: f.roles.intensity as number, value }))
+    if (values.length === 0) return
+    onError(null)
+    api.setLive(values).catch(fail)
+  }
+
   const place = (id: number, x: number, y: number) => {
     onError(null)
     api
@@ -98,20 +154,46 @@ export function Plan({
         data-dragging={drag !== null}
         style={{ width: PLAN_WIDTH, height: deep * scale }}
         onPointerMove={(e) => {
+          const held = pending.current
+          if (held !== null && drag === null) {
+            const far = Math.abs(e.clientX - held.x) > 8 || Math.abs(e.clientY - held.y) > 8
+            if (!far) return
+            const at = toStage(e)
+            setDrag({ id: held.id, x: at?.x ?? 0, y: at?.y ?? 0 })
+            return
+          }
+
           if (drag === null) return
           e.preventDefault()
           const at = toStage(e)
           if (at !== null) setDrag({ id: drag.id, ...at })
         }}
         onPointerUp={() => {
-          if (drag === null) return
-          place(drag.id, drag.x, drag.y)
-          setDrag(null)
+          const held = pending.current
+          pending.current = null
+
+          if (drag !== null) {
+            place(drag.id, drag.x, drag.y)
+            setDrag(null)
+            return
+          }
+
+          /* A tap chooses. Tapping a chosen one lets it go, so a selection is
+             built and unbuilt with the same gesture and needs no modifier -- on
+             a phone there is no modifier to hold. */
+          if (held !== null) {
+            setChosen((current) =>
+              current.includes(held.id)
+                ? current.filter((id) => id !== held.id)
+                : [...current, held.id],
+            )
+          }
         }}
         onPointerLeave={() => {
           /* The finger left the stage. Committing where it last was beats
              dropping the move: a lamp dragged to the very edge is a lamp
              somebody meant to put at the edge. */
+          pending.current = null
           if (drag === null) return
           place(drag.id, drag.x, drag.y)
           setDrag(null)
@@ -129,10 +211,10 @@ export function Plan({
                not where the daemon still has it. */
             at={drag !== null && drag.id === fixture.id ? drag : null}
             scale={scale}
+            chosen={chosen.includes(fixture.id)}
             colour={colourOf(fixture, universes)}
             onGrab={(event) => {
-              const at = toStage(event)
-              setDrag({ id: fixture.id, x: at?.x ?? fixture.x ?? 0, y: at?.y ?? fixture.y ?? 0 })
+              pending.current = { id: fixture.id, x: event.clientX, y: event.clientY }
             }}
             onRemove={() => {
               api
@@ -143,6 +225,71 @@ export function Plan({
           />
         ))}
       </div>
+
+      {/* What you can do to what you chose.
+       *
+         Under the stage rather than over it: a panel floating on the plan
+         covers exactly the lamps you are looking at while you change them. */}
+      {selected.length > 0 && (
+        <div className="selection">
+          <div className="selection-head">
+            <strong>
+              {selected.length === 1 ? selected[0]?.name : `${selected.length} lámparas`}
+            </strong>
+            <span className="spacer" />
+            <button type="button" onClick={() => api.releaseLive().then(() => undefined, fail)}>
+              Soltar
+            </button>
+            <button type="button" onClick={() => setChosen([])}>
+              Deseleccionar
+            </button>
+          </div>
+
+          <label className="field">
+            <span>
+              Intensidad
+              {dimmable === 0 ? ' · ninguna de estas tiene dímer' : ''}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={255}
+              value={level}
+              disabled={dimmable === 0}
+              onChange={(e) => dim(Number(e.target.value))}
+            />
+          </label>
+
+          <div className="swatches">
+            {SWATCHES.map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                className="swatch"
+                style={{ background: hex }}
+                disabled={mixable === 0}
+                aria-label={`Poner ${hex}`}
+                onClick={() => paint(hex)}
+              />
+            ))}
+          </div>
+
+          {/* Said plainly rather than by a control that quietly does nothing:
+              a dimmer cannot be made amber, and a moving head with a colour
+              wheel does not mix either. */}
+          {mixable < selected.length && (
+            <p className="hint">
+              {mixable === 0
+                ? 'Ninguna de estas mezcla color.'
+                : `${selected.length - mixable} de ${selected.length} no mezclan color.`}
+            </p>
+          )}
+
+          <p className="hint">
+            Esto es una mesa, no una edición: no toca el proyecto y no sobrevive a una recarga.
+          </p>
+        </div>
+      )}
 
       {unplaced.length > 0 && (
         <div className="plan-tray">
@@ -181,6 +328,7 @@ function Lamp({
   fixture,
   at,
   scale,
+  chosen,
   colour,
   onGrab,
   onRemove,
@@ -189,6 +337,8 @@ function Lamp({
   /** Where the finger has it, while it is being dragged. */
   at: { x: number; y: number } | null
   scale: number
+  /** Part of what you are working on. */
+  chosen: boolean
   colour: string | null
   onGrab: (event: React.PointerEvent) => void
   onRemove: () => void
@@ -200,6 +350,7 @@ function Lamp({
     <div
       className="lamp"
       data-dragging={at !== null}
+      data-chosen={chosen}
       data-dark={colour === null}
       data-fixture={fixture.id}
       style={{
@@ -236,6 +387,55 @@ function Lamp({
  * what a dimmer-only lamp is. One with neither is reported dark, because
  * nothing about it is known.
  */
+/**
+ * A colour, resolved into the channel values that produce it on this fixture.
+ *
+ * The inverse of colourOf, and deliberately in the same file: the roles are one
+ * contract, and a second copy of the mapping somewhere else is a second thing
+ * to drift. Returns an empty list for a fixture that cannot take a colour at
+ * all -- a plain dimmer has nothing to mix with -- which is a fact the caller
+ * has to show rather than paper over.
+ *
+ * White and amber are driven to zero along with it. A red asked for on an RGBW
+ * bar whose white is still up is pink, and nobody asked for pink.
+ */
+export function colourValues(
+  fixture: PlanFixture,
+  colour: { r: number; g: number; b: number },
+): { channel: number; value: number }[] {
+  const roles = fixture.roles
+  const out: { channel: number; value: number }[] = []
+
+  if (roles.red !== undefined && roles.green !== undefined && roles.blue !== undefined) {
+    out.push({ channel: roles.red, value: colour.r })
+    out.push({ channel: roles.green, value: colour.g })
+    out.push({ channel: roles.blue, value: colour.b })
+  } else if (
+    roles.cyan !== undefined &&
+    roles.magenta !== undefined &&
+    roles.yellow !== undefined
+  ) {
+    /* Subtractive: the filter takes light out, so full cyan is no red. */
+    out.push({ channel: roles.cyan, value: 255 - colour.r })
+    out.push({ channel: roles.magenta, value: 255 - colour.g })
+    out.push({ channel: roles.yellow, value: 255 - colour.b })
+  } else {
+    return []
+  }
+
+  for (const extra of [roles.white, roles.amber]) {
+    if (extra !== undefined) out.push({ channel: extra, value: 0 })
+  }
+
+  return out
+}
+
+/** #rrggbb into the three numbers the channels want. */
+export function parseHex(hex: string): { r: number; g: number; b: number } {
+  const n = Number.parseInt(hex.replace('#', ''), 16)
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
+}
+
 export function colourOf(
   fixture: PlanFixture,
   universes: Record<number, Uint8Array>,
