@@ -124,6 +124,40 @@ const click = (text) =>
 
 const count = () => evaluate("document.querySelectorAll('.widget').length")
 
+/* A real pointer, driven through the browser rather than through the DOM.
+ *
+   This exists because of a bug that a synthetic test could not see: setting an
+   input's value and firing a change event goes straight to React and works
+   perfectly whatever shape the element is on screen. A leftover rule had left
+   the range a 32-pixel square in the corner of its track, so every fader in the
+   app answered on about a tenth of itself -- and the assertion that was
+   supposed to guard exactly that passed, every run, because it never touched
+   the thing with a pointer.
+
+   Anything about whether a control can be *used* goes through here. */
+const mouse = (type, x, y) =>
+  send('Input.dispatchMouseEvent', {
+    type,
+    x,
+    y,
+    button: 'left',
+    buttons: type === 'mouseReleased' ? 0 : 1,
+    clickCount: 1,
+  })
+
+async function dragAcross(box, from, to) {
+  const y = box.y + box.height / 2
+  const at = (f) => box.x + box.width * f
+  await mouse('mousePressed', at(from), y)
+  await sleep(100)
+  await mouse('mouseMoved', at((from + to) / 2), y)
+  await sleep(100)
+  await mouse('mouseMoved', at(to), y)
+  await sleep(150)
+  await mouse('mouseReleased', at(to), y)
+  await sleep(600)
+}
+
 try {
   // The console is fetched, the feed connects, and the layout resolves; none of
   // that is instant against a real engine.
@@ -940,6 +974,70 @@ try {
   })()`)
   check('lamps can be chosen on the plan and driven from it', worked === 'none' || worked === 'ok', worked)
 
+  /* The whole chain, with a real pointer at one end and held channels at the
+     other: press, drag, release on the intensity bar, then ask the daemon what
+     it is holding.
+
+     Everything else about faders in this suite drives the input through the
+     DOM, and that is precisely the path a broken control still satisfies: for
+     one release every fader in the app answered on a 32-pixel square in the
+     corner of its own track, drew the right number, and no assertion moved.
+     A pointer is the only thing that can tell the difference. */
+  const grabbed = await evaluate(`(async () => {
+    const plan = await (await fetch('/api/v1/plan')).json()
+    const lit = (plan.fixtures ?? []).find(f => f.resolved && f.roles?.intensity !== undefined)
+    if (!lit) return 'none'
+
+    // Put it on the plan if it is not already, so there is a lamp to choose.
+    if (lit.x === undefined || lit.x === null) {
+      await fetch('/api/v1/plan/fixtures/' + lit.id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: 2, y: 2 }),
+      })
+      await new Promise(r => setTimeout(r, 900))
+    }
+
+    const lamp = document.querySelector('.lamp[data-fixture="' + lit.id + '"]')
+    if (!lamp) return 'the lamp is not on the plan'
+    const b = lamp.getBoundingClientRect()
+    for (const type of ['pointerdown', 'pointerup']) {
+      lamp.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: 11, clientX: b.left + 4, clientY: b.top + 4,
+      }))
+    }
+    await new Promise(r => setTimeout(r, 700))
+
+    const track = document.querySelector('.selection .track')
+    if (!track) return 'no intensity bar in the panel'
+    const t = track.getBoundingClientRect()
+    return JSON.stringify({ id: lit.id, channel: lit.roles.intensity,
+      x: t.x, y: t.y, width: t.width, height: t.height })
+  })()`)
+
+  if (grabbed === 'none') {
+    check('an intensity bar can be dragged with a pointer', true, 'none')
+  } else {
+    let held = grabbed
+    try {
+      const box = JSON.parse(grabbed)
+      await dragAcross(box, 0.02, 0.6)
+      held = await evaluate(`(async () => {
+        const live = await (await fetch('/api/v1/live')).json()
+        const value = live.values.find(v => v.fixture === ${box.id}
+          && v.channel === ${box.channel})
+        if (!value) return 'the drag held nothing at all'
+        // 60% of the way along a 0-255 bar, give or take the thumb's own width.
+        if (value.value < 120 || value.value > 175) return 'held ' + value.value + ', wanted ~153'
+        await fetch('/api/v1/live', { method: 'DELETE' })
+        return 'ok'
+      })()`)
+    } catch (error) {
+      held = String(error).slice(0, 200)
+    }
+    check('an intensity bar can be dragged with a pointer', held === 'ok', held)
+  }
+
   /* The shell: where you are, and what is loaded.
    *
      The four views used to be four buttons in a row of nine, competing with
@@ -1061,40 +1159,24 @@ try {
       if (loose.some(f => f.closest('.levels') === null)) return 'a fader is loose in the grid'
     }
 
-    /* The fader is drawn, and the drawing is the value.
+    /* The drawn track has to cover its own control.
      *
-       Replacing the browser's range with a bar is only worth doing if the bar
-       is the truth: a fill that sits at some fixed width looks like a working
-       fader from across a room and is a lie the operator finds out about when
-       the light does not move. So this reads the fill against the input it
-       covers, at both ends of the travel. */
+       A range that is smaller than the bar drawn over it is a fader that
+       answers on part of itself, and the part that does nothing looks exactly
+       like the part that does. Measured rather than assumed -- this is the
+       shape the pointer meets. */
     const bar = loose.find(f => f.getAttribute('data-usable') === 'true')
     if (bar) {
       const input = bar.querySelector('input[type=range]')
       const fill = bar.querySelector('.fill')
-      const thumb = bar.querySelector('.thumb')
-      if (!fill || !thumb) return 'the fader has no drawn track'
+      if (!fill || !bar.querySelector('.thumb')) return 'the fader has no drawn track'
       if (getComputedStyle(input).opacity !== '0') return 'the range is drawn twice'
 
-      const set = v => {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype, 'value').set
-        setter.call(input, String(v))
-        input.dispatchEvent(new Event('change', { bubbles: true }))
-      }
-      const width = () => fill.getBoundingClientRect().width
-      const track = bar.querySelector('.track').getBoundingClientRect().width
-
-      const was = input.value
-      set(input.max); await new Promise(r => setTimeout(r, 400))
-      const full = width()
-      set(input.min); await new Promise(r => setTimeout(r, 400))
-      const none = width()
-      set(was); await new Promise(r => setTimeout(r, 400))
-
-      if (none > 2) return 'the fader draws ' + Math.round(none) + 'px of fill at zero'
-      if (full < track * 0.9) {
-        return 'at full the fill is ' + Math.round(full) + ' of ' + Math.round(track)
+      const t = bar.querySelector('.track').getBoundingClientRect()
+      const i = input.getBoundingClientRect()
+      if (i.width < t.width - 4 || i.height < t.height - 4) {
+        return 'the grab area is ' + Math.round(i.width) + 'x' + Math.round(i.height)
+          + ' inside a ' + Math.round(t.width) + 'x' + Math.round(t.height) + ' track'
       }
     }
 
@@ -1573,6 +1655,59 @@ try {
     return 'ok'
   })()`)
   check('the app can be installed to a home screen', installable === 'ok', installable)
+
+  /* Every kind of widget shows the colour it was given.
+   *
+     The stripe is drawn as a background layer, which means any rule that sets
+     the `background` shorthand on a widget erases it -- and a card with no
+     stripe looks exactly like a card that was never given a colour, so there is
+     nothing to notice. It has happened three times: on the selected widget in
+     edit mode, on frames, on labels.
+
+     Rather than wait for a project that happens to have a coloured one of each,
+     this paints every widget on the screen and asks each of them back. The
+     colour is put on and taken off in the browser; nothing is written to the
+     project. */
+  const striped = await evaluate(`(async () => {
+    const orange = 'rgb(255, 136, 0)'
+    const bare = new Set()
+    let seen = 0
+
+    const sweep = () => {
+      const widgets = [...document.querySelectorAll('.widget')]
+      seen += widgets.length
+      for (const w of widgets) w.style.setProperty('--tint', orange)
+      for (const w of widgets) {
+        const pill = getComputedStyle(w, '::before').backgroundColor
+        const edge = getComputedStyle(w).backgroundImage
+        if (pill !== orange && !edge.includes(orange)) {
+          bare.add(w.className.split(' ').filter(c => c !== 'widget').join('.') || 'widget')
+        }
+      }
+      for (const w of widgets) w.style.removeProperty('--tint')
+    }
+
+    /* Both modes, because they do not draw the same set. A label is a section
+       heading while the console is being run and only becomes a widget again
+       while it is being arranged -- so a sweep of run mode alone never sees
+       one, and a label was one of the three that lost its stripe. */
+    sweep()
+    const arrange = [...document.querySelectorAll('button')]
+      .find(b => b.textContent.trim() === 'Ordenar')
+    if (arrange) {
+      arrange.click()
+      await new Promise(r => setTimeout(r, 900))
+      sweep()
+      const done = [...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Listo')
+      if (done) done.click()
+      await new Promise(r => setTimeout(r, 900))
+    }
+
+    if (seen === 0) return 'no widgets to look at'
+    return bare.size === 0 ? 'ok' : [...bare].join(', ') + ' draw no stripe'
+  })()`)
+  check('every kind of widget shows the colour it was given', striped === 'ok', striped)
 
   /* One slider in the app, everywhere.
    *

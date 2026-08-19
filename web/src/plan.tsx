@@ -161,71 +161,117 @@ export function Plan({
         colocarlas · {grid.width} × {grid.depth} {grid.units === 'feet' ? 'pies' : 'm'}
       </p>
 
-      {/* Sized by its aspect ratio rather than by a pixel scale, so it fills
-          whatever room the window has and the dock below it is never pushed off
-          the bottom. Lamps are placed in per cent for the same reason: a
-          fraction of the stage means the same thing at any size. */}
-      <div
-        className="plan-stage"
-        ref={surface}
-        data-dragging={drag !== null}
-        style={{ aspectRatio: `${across} / ${deep}` }}
-        onPointerMove={(e) => {
-          const held = pending.current
-          if (held !== null && drag === null) {
-            const far = Math.abs(e.clientX - held.x) > 8 || Math.abs(e.clientY - held.y) > 8
-            if (!far) return
+      {/* The stage and the panel that acts on it, in one box.
+       *
+          Together, because on a wide screen the panel sits in the stage's
+          corner -- below the fold is where a panel goes to be missed -- and on
+          a phone it drops below the stage instead of over it. Fixed to the
+          bottom of the window was the first try and it covered the navigation:
+          choosing a lamp left no way off the screen. */}
+      <div className="plan-frame">
+        {/* Fills the room the window has, rather than being letterboxed to the
+          proportions of the grid.
+       *
+          Those proportions are usually a default nobody chose -- QLC+ opens at
+          5 x 5 m -- and holding to them left two thirds of a wide screen black
+          while the rig was squeezed into a square in the middle. Lamps are
+          placed in per cent, so along each axis the drawing stays exact and the
+          only thing lost is the aspect.
+
+          Which is why the metre grid below is drawn all the time now and not
+          just while something is being placed: it is what keeps the scale
+          readable once the two axes no longer share one. */}
+        <div
+          className="plan-stage"
+          ref={surface}
+          data-dragging={drag !== null}
+          style={
+            {
+              // One grid line per metre (or per foot), taken from the project.
+              '--cols': grid.width,
+              '--rows': grid.depth,
+            } as React.CSSProperties
+          }
+          onPointerMove={(e) => {
+            const held = pending.current
+            if (held !== null && drag === null) {
+              const far = Math.abs(e.clientX - held.x) > 8 || Math.abs(e.clientY - held.y) > 8
+              if (!far) return
+              const at = toStage(e)
+              setDrag({ id: held.id, x: at?.x ?? 0, y: at?.y ?? 0 })
+              return
+            }
+
+            if (drag === null) return
+            e.preventDefault()
             const at = toStage(e)
-            setDrag({ id: held.id, x: at?.x ?? 0, y: at?.y ?? 0 })
-            return
-          }
+            if (at !== null) setDrag({ id: drag.id, ...at })
+          }}
+          onPointerUp={() => {
+            const held = pending.current
+            pending.current = null
 
-          if (drag === null) return
-          e.preventDefault()
-          const at = toStage(e)
-          if (at !== null) setDrag({ id: drag.id, ...at })
-        }}
-        onPointerUp={() => {
-          const held = pending.current
-          pending.current = null
+            if (drag !== null) {
+              place(drag.id, drag.x, drag.y)
+              setDrag(null)
+              return
+            }
 
-          if (drag !== null) {
-            place(drag.id, drag.x, drag.y)
-            setDrag(null)
-            return
-          }
-
-          /* A tap chooses. Tapping a chosen one lets it go, so a selection is
+            /* A tap chooses. Tapping a chosen one lets it go, so a selection is
              built and unbuilt with the same gesture and needs no modifier -- on
              a phone there is no modifier to hold. */
-          if (held !== null) {
-            setChosen((current) =>
-              current.includes(held.id)
-                ? current.filter((id) => id !== held.id)
-                : [...current, held.id],
-            )
-          }
-        }}
-        onPointerLeave={() => {
-          /* The finger left the stage. Committing where it last was beats
+            if (held !== null) {
+              setChosen((current) =>
+                current.includes(held.id)
+                  ? current.filter((id) => id !== held.id)
+                  : [...current, held.id],
+              )
+            }
+          }}
+          onPointerLeave={() => {
+            /* The finger left the stage. Committing where it last was beats
              dropping the move: a lamp dragged to the very edge is a lamp
              somebody meant to put at the edge. */
-          pending.current = null
-          if (drag === null) return
-          place(drag.id, drag.x, drag.y)
-          setDrag(null)
-        }}
-      >
-        {plan.background && (
-          <img className="plan-background" src="/api/v1/plan/background" alt="" />
-        )}
+            pending.current = null
+            if (drag === null) return
+            place(drag.id, drag.x, drag.y)
+            setDrag(null)
+          }}
+        >
+          {plan.background && (
+            <img className="plan-background" src="/api/v1/plan/background" alt="" />
+          )}
+
+          {placed.map((fixture) => (
+            <Lamp
+              key={fixture.id}
+              fixture={fixture}
+              /* While it is being dragged the lamp is drawn where the finger is,
+               not where the daemon still has it. */
+              at={drag !== null && drag.id === fixture.id ? drag : null}
+              across={across}
+              deep={deep}
+              chosen={chosen.includes(fixture.id)}
+              colour={colourOf(fixture, universes)}
+              onGrab={(event) => {
+                pending.current = { id: fixture.id, x: event.clientX, y: event.clientY }
+              }}
+              onRemove={() => {
+                api
+                  .clearPlanPosition(fixture.id)
+                  .then(reload)
+                  .catch((e) => onError(e instanceof Error ? e.message : String(e)))
+              }}
+            />
+          ))}
+        </div>
 
         {/* What you can do to what you chose, in the corner of the stage.
-         *
-           On the stage rather than under it: below the fold is where a panel
-           goes to be missed, and choosing a lamp and seeing nothing happen is
-           how an interface teaches somebody that it is broken. A corner covers
-           less than a lamp does. */}
+       *
+         On the stage rather than under it: below the fold is where a panel
+         goes to be missed, and choosing a lamp and seeing nothing happen is
+         how an interface teaches somebody that it is broken. A corner covers
+         less than a lamp does. */}
         {selected.length > 0 && (
           <div className="selection">
             <div className="selection-head">
@@ -251,7 +297,7 @@ export function Plan({
                 <span className="num">{Math.round((level / 255) * 100)}%</span>
               </span>
               {/* Green rather than the console's violet: this bar drives the
-                  rig directly, and green is what says "live" everywhere else. */}
+                rig directly, and green is what says "live" everywhere else. */}
               <Slider
                 min={0}
                 max={255}
@@ -277,8 +323,8 @@ export function Plan({
             </div>
 
             {/* Said plainly rather than by a control that quietly does nothing:
-              a dimmer cannot be made amber, and a moving head with a colour
-              wheel does not mix either. */}
+            a dimmer cannot be made amber, and a moving head with a colour
+            wheel does not mix either. */}
             {mixable < selected.length && (
               <p className="hint">
                 {mixable === 0
@@ -296,29 +342,6 @@ export function Plan({
             </p>
           </div>
         )}
-
-        {placed.map((fixture) => (
-          <Lamp
-            key={fixture.id}
-            fixture={fixture}
-            /* While it is being dragged the lamp is drawn where the finger is,
-               not where the daemon still has it. */
-            at={drag !== null && drag.id === fixture.id ? drag : null}
-            across={across}
-            deep={deep}
-            chosen={chosen.includes(fixture.id)}
-            colour={colourOf(fixture, universes)}
-            onGrab={(event) => {
-              pending.current = { id: fixture.id, x: event.clientX, y: event.clientY }
-            }}
-            onRemove={() => {
-              api
-                .clearPlanPosition(fixture.id)
-                .then(reload)
-                .catch((e) => onError(e instanceof Error ? e.message : String(e)))
-            }}
-          />
-        ))}
       </div>
 
       {/* The cues, along the bottom.
@@ -347,6 +370,19 @@ export function Plan({
               </span>
             </button>
           ))}
+
+          {/* At the end of the dock as well as up in the bar.
+           *
+              Not a duplicate so much as the same action within reach: during a
+              pase the thumb lives down here among the cues, and the one control
+              you may need without looking is the one that stops everything. */}
+          <button
+            type="button"
+            className="cue blackout"
+            onClick={() => api.blackout(true).then(() => undefined, fail)}
+          >
+            <span className="cue-name">BLACKOUT</span>
+          </button>
         </div>
       )}
 

@@ -362,7 +362,6 @@ button.danger {
 .widget {
   flex: var(--grow, 1) 1 var(--basis, 8rem);
   min-width: 6.5rem;
-  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 0.7rem 0.75rem;
@@ -439,7 +438,7 @@ button.danger {
 }
 
 .widget.label {
-  background: transparent;
+  background-color: transparent;
   border: none;
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -558,12 +557,23 @@ button.danger {
   background: var(--text);
 }
 
+/* The grab area, and it must cover the whole track.
+ *
+   Marked !important because that is exactly how this broke once: a rule left
+   over from the vertical faders still said `width: 32px`, won on source order,
+   and left the input a 32-pixel square in the corner. The fader drew correctly,
+   showed the right number, and answered the pointer on about a tenth of itself.
+   Nothing is allowed to size this again. */
 .track input[type="range"] {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
+  min-height: 0;
   margin: 0;
+  writing-mode: horizontal-tb;
+  direction: ltr;
   opacity: 0;
   cursor: inherit;
   touch-action: none;
@@ -578,18 +588,6 @@ button.danger {
 
 .widget.fader .track {
   grid-area: track;
-}
-
-@media (min-width: 700px) {
-  .widget.fader {
-    min-height: 190px;
-  }
-  .widget.fader input[type="range"] {
-    writing-mode: vertical-lr;
-    direction: rtl;
-    width: 32px;
-    flex: 1;
-  }
 }
 
 /* Arranging mode.
@@ -875,13 +873,12 @@ button.danger {
   margin: 0.4rem 0;
 }
 
-.group-fader input[type="range"] {
+.group-fader .track {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
 }
 
-.group-fader input[type="range"]:disabled {
+.group-fader .track:has(input:disabled) {
   opacity: 0.4;
 }
 
@@ -1232,7 +1229,7 @@ button.linkish.left {
   flex: 2;
 }
 
-.channels li input[type="range"] {
+.channels li .track {
   flex: 1;
   min-width: 5rem;
 }
@@ -1288,7 +1285,10 @@ button.linkish.left {
   gap: 0.5rem;
   padding: 0.5rem;
   text-align: left;
-  background: transparent;
+  /* Transparent so the widgets inside sit on the page rather than on a second
+     surface -- but background-color only, or the shorthand takes the tint
+     stripe down with it and a frame given a colour shows none. */
+  background-color: transparent;
   border-style: dashed;
 }
 
@@ -1664,9 +1664,7 @@ button.linkish.left {
   position: relative;
   flex: 1;
   min-height: 0;
-  align-self: center;
-  max-height: 100%;
-  max-width: 100%;
+  width: 100%;
   border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   border-radius: 18px;
   /* Darker than the console, and deliberately: every lit lamp on it is drawn
@@ -1706,10 +1704,32 @@ button.linkish.left {
   z-index: 2;
 }
 
-/* A faint grid while something is being placed, so "a bit left of centre" can
-   be seen rather than estimated. Only while dragging: a plan is read far more
-   often than it is edited, and graph paper under a rig is noise the rest of
-   the time. */
+/* The metre grid.
+ *
+   Faint enough to read past and never to compete with a lit lamp, and always
+   there: the stage fills the window rather than holding to the grid's aspect,
+   so this is the only thing left saying how far apart two lamps actually are.
+   It comes from the project's own grid size, one line per metre or per foot. */
+.plan-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: calc(100% / var(--cols, 5)) calc(100% / var(--rows, 5));
+}
+
+/* And a brighter one while something is being placed, so "a bit left of
+   centre" can be seen rather than estimated. */
 .plan-stage[data-dragging="true"]::before {
   content: "";
   position: absolute;
@@ -1917,6 +1937,15 @@ button.linkish.left {
   border-style: solid;
 }
 
+/* The stage and the panel that acts on it. */
+.plan-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* In the corner of the stage, not under it. Below the fold is where a panel
    goes to be missed. */
 .selection {
@@ -1937,16 +1966,36 @@ button.linkish.left {
   box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
 }
 
-/* On a phone the stage is narrow enough that a corner panel would be most of
-   it, so it drops to the bottom edge and spans the width. */
+/* On a phone a corner panel would be most of the stage, so it drops below it
+   and the stage gives up the room.
+ *
+   Below rather than over: fixed to the bottom of the window covered the cue
+   dock and the navigation both, so choosing a lamp left no way off the screen
+   and no way to fire anything -- on the one screen meant for driving a pase. */
 @media (max-width: 699px) {
+  /* The stage keeps the room. It has no intrinsic height -- the lamps are all
+     absolutely placed -- so without a floor it is the first thing the column
+     squeezes, and a rig drawn 130 pixels tall is not a plan of anything. */
+  .plan-stage {
+    min-height: 42vh;
+  }
+
+  /* Names off. At phone width they overlap into a grey mush that is harder to
+     read than nothing, and tapping a lamp puts its name at the top of the panel
+     in a size you can actually read. Kept while dragging, where the label is
+     carrying the position rather than the name. */
+  .lamp:not([data-dragging="true"]) .lamp-label {
+    display: none;
+  }
+
   .selection {
-    position: fixed;
-    top: auto;
-    left: 0.5rem;
-    right: 0.5rem;
-    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    position: static;
     width: auto;
+    max-width: none;
+    margin-top: 0.6rem;
+    flex: none;
+    box-shadow: none;
+    backdrop-filter: none;
   }
 }
 
@@ -1987,6 +2036,19 @@ button.linkish.left {
   font-size: 0.68rem;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* Fixed width at the end of the row: it is not one of the cues and should not
+   share their sizing, and it must stay in the same place whatever is docked. */
+.cue.blackout {
+  flex: 0 0 7rem;
+  min-width: 7rem;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+  letter-spacing: 0.04em;
 }
 
 .cue[data-running="true"] {
@@ -2048,12 +2110,6 @@ button.linkish.left {
 .selection button {
   min-height: 40px;
   font-size: 0.85rem;
-}
-
-.selection input[type="range"] {
-  accent-color: var(--accent);
-  height: 32px;
-  touch-action: none;
 }
 
 .swatches {
@@ -2186,6 +2242,5 @@ button.linkish.left {
   min-height: 0;
   padding: 0;
   border: none;
-  background: transparent;
-  background-image: none;
+  background-color: transparent;
 }
