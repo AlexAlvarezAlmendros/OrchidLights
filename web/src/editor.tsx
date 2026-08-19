@@ -13,7 +13,7 @@
  * operator never sees.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   type FixtureDetail,
   type FixtureState,
@@ -64,6 +64,7 @@ export function WidgetEditor({
   const [caption, setCaption] = useState(widget.caption ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const panel = useRef<HTMLElement>(null)
 
   /* Reset when the panel is pointed at a *different* widget, keyed on the id
      rather than the object.
@@ -76,6 +77,14 @@ export function WidgetEditor({
   useEffect(() => {
     setCaption(widget.caption ?? '')
     setError(null)
+
+    /* On a phone the panel is below the console, so choosing a widget opens
+       something off the bottom of the screen. Tapping a button and having
+       nothing visibly happen is the single most common way an interface
+       teaches somebody that it is broken. */
+    if (window.matchMedia('(max-width: 699px)').matches) {
+      panel.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
   }, [widget.id])
 
   const apply = async (patch: WidgetPatch) => {
@@ -97,7 +106,7 @@ export function WidgetEditor({
   const chasers = functions.filter((f) => f.type === 'Chaser')
 
   return (
-    <aside className="editor" aria-label={`Editar ${widget.caption || widget.type}`}>
+    <aside className="editor" ref={panel} aria-label={`Editar ${widget.caption || widget.type}`}>
       <header>
         <strong>{widget.caption || widget.type}</strong>
         <span className="chip">

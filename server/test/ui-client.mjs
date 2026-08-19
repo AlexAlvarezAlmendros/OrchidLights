@@ -648,6 +648,52 @@ try {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ start: 800 }),
     })
+    await new Promise(r => setTimeout(r, 900))
+
+    /* And a move onto another bar says so before the finger comes up.
+     *
+       The daemon refuses overlaps and remains the authority; what is checked
+       here is that the refusal is visible while there is still time to do
+       something about it, and that letting go there quietly does nothing
+       instead of firing a request that will bounce. */
+    const both = bars()
+    if (both.length !== 2) return 'expected the two bars back, got ' + both.length
+
+    const second = both[1]
+    const target = both[0].getBoundingClientRect()
+    const secondBox = second.getBoundingClientRect()
+    second.setPointerCapture = () => {}
+    const onto = (type, x) => second.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, pointerId: 3, clientX: x, clientY: secondBox.top + secondBox.height / 2,
+    }))
+
+    const startedAt = left(second)
+    onto('pointerdown', secondBox.left + 10)
+    onto('pointermove', target.left + 12)
+    await new Promise(r => setTimeout(r, 120))
+
+    const dragging = bars()[1]
+    if (dragging.getAttribute('data-blocked') !== 'true') {
+      return 'the overlap was not shown while dragging'
+    }
+    if (!dragging.textContent.includes('choca con')) {
+      return 'the bar does not name what it would hit: ' + dragging.textContent
+    }
+    if (bars()[0].getAttribute('data-hit') !== 'true') {
+      return 'the bar being landed on is not marked'
+    }
+
+    onto('pointerup', target.left + 12)
+    await new Promise(r => setTimeout(r, 900))
+
+    if (Math.abs(left(bars()[1]) - startedAt) > 2) {
+      return 'letting go over another bar moved it anyway'
+    }
+
+    const still = await (await fetch('/api/v1/functions/3/body')).json()
+    const verde = still.tracks[0].functions.find(f => f.name === 'Verde')
+    if (verde.start !== 800) return 'the daemon has it at ' + verde.start
+
     return 'ok'
   })()`)
   check('a show timeline can be dragged in the browser', timeline === 'none' || timeline === 'ok', timeline)
@@ -774,6 +820,122 @@ try {
   })()`)
   check('the plan shows what each lamp is doing', litUp === 'none' || litUp === 'ok', litUp)
 
+  /* Arranging by dragging, which is the gesture this console is used with far
+     more than any other.
+   *
+     What is checked is the feedback, not just the result: a ghost under the
+     finger, a caret where it would land, and the widget actually moving when it
+     is let go. A drag that only reveals what it did after the fact is the thing
+     this was rewritten to stop being. */
+  check('back to the console to arrange it', (await click('Consola')) === 'ok')
+  await sleep(800)
+  check('arrange mode opens', (await click('Ordenar')) === 'ok')
+  await sleep(600)
+
+  const dragged = await evaluate(`(async () => {
+    const widgets = () => [...document.querySelectorAll('.widget.arranging')]
+    if (widgets().length < 2) return 'none'      // nothing to reorder
+
+    /* By id, not by caption. In Sample.qxw the top level is four frames all
+       captioned the same, so comparing the text said nothing had moved when it
+       had -- and would have said nothing had moved if it had not, too. */
+    const order = () => widgets().map(w => w.dataset.widgetId).join('|')
+    if (widgets().some(w => !w.dataset.widgetId)) return 'none'   // a console with no ids
+    const before = order()
+
+    const first = widgets()[0]
+    const last = widgets()[widgets().length - 1]
+    const from = first.getBoundingClientRect()
+    const to = last.getBoundingClientRect()
+
+    first.setPointerCapture = () => {}
+    const at = (type, x, y) => first.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, pointerId: 1, clientX: x, clientY: y,
+    }))
+
+    at('pointerdown', from.left + 10, from.top + 10)
+
+    /* Under the threshold: nothing has begun, and the sticky path is still on
+       the table. A tap that trembles must not turn into a drag. */
+    at('pointermove', from.left + 13, from.top + 12)
+    await new Promise(r => setTimeout(r, 60))
+    if (document.querySelector('.ghost')) return 'a 3px tremble started a drag'
+
+    // Past it: the ghost appears and follows.
+    at('pointermove', from.left + 60, from.top + 30)
+    await new Promise(r => setTimeout(r, 80))
+    const ghost = document.querySelector('.ghost')
+    if (!ghost) return 'no ghost once the drag began'
+    if (ghost.textContent.trim() !== first.textContent.trim()) {
+      return 'the ghost is not the widget: ' + ghost.textContent.trim()
+    }
+    const firstAt = ghost.getBoundingClientRect().left
+
+    at('pointermove', to.right - 8, to.top + to.height / 2)
+    await new Promise(r => setTimeout(r, 80))
+    if (document.querySelector('.ghost').getBoundingClientRect().left <= firstAt) {
+      return 'the ghost did not follow the pointer'
+    }
+
+    /* And the caret says where it would land -- in the place it would land,
+       which is the whole point of it. Two positions, because there are two
+       carets in the markup and one of them would otherwise never be looked at:
+       the one drawn before a widget, and the one at the end of a row. */
+    const caretX = () => {
+      const c = document.querySelector('.caret')
+      return c ? c.getBoundingClientRect().left : null
+    }
+
+    at('pointermove', to.left + 4, to.top + to.height / 2)
+    await new Promise(r => setTimeout(r, 90))
+    const beforeLast = caretX()
+    if (beforeLast === null) return 'no caret on the left half of a widget'
+    if (beforeLast > to.left + 12) return 'the caret is not in front of that widget'
+
+    at('pointermove', to.right - 8, to.top + to.height / 2)
+    await new Promise(r => setTimeout(r, 90))
+    const afterLast = caretX()
+    if (afterLast === null) return 'no caret past the middle of a widget'
+    if (!(afterLast > beforeLast)) {
+      return 'the caret did not move with the pointer: ' + beforeLast + ' -> ' + afterLast
+    }
+
+    at('pointerup', to.right - 8, to.top + to.height / 2)
+    await new Promise(r => setTimeout(r, 500))
+
+    if (document.querySelector('.ghost')) return 'the ghost outlived the drop'
+    if (document.querySelector('.caret')) return 'the caret outlived the drop'
+
+    const after = order()
+    if (after === before) return 'the widget did not move: ' + after
+    if (!after.endsWith(first.dataset.widgetId)) {
+      return 'it did not land at the end: ' + before + ' -> ' + after
+    }
+
+    /* Escape puts a drag back, which is what makes one safe to start. */
+    const other = widgets()[0]
+    other.setPointerCapture = () => {}
+    const box = other.getBoundingClientRect()
+    const on = (type, x, y) => other.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, pointerId: 2, clientX: x, clientY: y,
+    }))
+    on('pointerdown', box.left + 10, box.top + 10)
+    on('pointermove', box.left + 90, box.top + 10)
+    await new Promise(r => setTimeout(r, 80))
+    if (!document.querySelector('.ghost')) return 'the second drag never began'
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(r => setTimeout(r, 300))
+    if (document.querySelector('.ghost')) return 'Escape did not cancel the drag'
+    if (order() !== after) return 'Escape moved something'
+
+    return 'ok'
+  })()`)
+  check('a widget can be dragged into place', dragged === 'none' || dragged === 'ok', dragged)
+
+  check('leaving arrange mode', (await click('Listo')) === 'ok')
+  await sleep(500)
+
   /* Appearance, edited from the browser. Cosmetic on a desk is not decoration:
      a colour bank where every button is grey is one nobody can use in the dark,
      and until now these were the one thing this daemon could read and could not
@@ -833,6 +995,39 @@ try {
     return 'ok'
   })()`)
   check('a widget can be painted from the browser', painted === 'ok', painted)
+
+  /* Edit mode, as a thing to use rather than a thing that works.
+   *
+     Three small absences that together make a screen feel stuck: nothing says
+     what a tap will do now that it no longer fires the widget, the panel cannot
+     be put away by tapping the space around it, and Escape does nothing. */
+  const usable = await evaluate(`(async () => {
+    if (!document.querySelector('.modehint')) return 'no line saying what this mode does'
+    const said = document.querySelector('.modehint').textContent
+    if (!said.includes('Escape')) return 'it does not mention the way out: ' + said
+
+    const widget = document.querySelector('.widget.arranging')
+    if (!widget) return 'no widgets'
+    widget.click()
+    await new Promise(r => setTimeout(r, 700))
+    if (!document.querySelector('.editor')) return 'the panel did not open'
+    if (widget.getAttribute('data-selected') !== 'true') return 'the widget is not marked chosen'
+
+    /* Tapping the space around the widgets puts it away. */
+    const console_ = document.querySelector('main.console')
+    console_.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 4 }))
+    await new Promise(r => setTimeout(r, 500))
+    if (document.querySelector('.editor')) return 'tapping the background left the panel open'
+
+    // And so does Escape.
+    widget.click()
+    await new Promise(r => setTimeout(r, 700))
+    if (!document.querySelector('.editor')) return 'the panel did not reopen'
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(r => setTimeout(r, 500))
+    return document.querySelector('.editor') ? 'Escape did not close the panel' : 'ok'
+  })()`)
+  check('edit mode says what it does and can be put away', usable === 'ok', usable)
 
   check('leaving edit mode again', (await click('Listo')) === 'ok')
   await sleep(500)

@@ -22,6 +22,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FunctionBody, type FunctionState, type ShowItem, type ShowTrack, api } from './api'
+import { type Span, collision } from './drag'
 
 /** Milliseconds a drag snaps to. Fine enough to place a cue, coarse enough
  *  that a hand cannot leave a bar at 4993 ms by accident. */
@@ -248,10 +249,26 @@ function Lane({
   zoom: number
   onApply: (action: () => Promise<unknown>) => Promise<void>
 }) {
+  /* Which bar a drag would land on top of, so the whole lane can show it: the
+     one being moved turns red and the one it would hit is marked. The daemon is
+     still the authority and still refuses -- this only moves the refusal to
+     before the finger comes up, which is the difference between "that will not
+     fit" and "that did not fit". */
+  const [blocked, setBlocked] = useState<number | null>(null)
+
   return (
     <div className="lane">
       {track.functions.map((item) => (
-        <Bar key={item.id} showId={showId} item={item} zoom={zoom} onApply={onApply} />
+        <Bar
+          key={item.id}
+          showId={showId}
+          item={item}
+          spans={track.functions}
+          zoom={zoom}
+          hit={blocked === item.id}
+          onBlocked={setBlocked}
+          onApply={onApply}
+        />
       ))}
     </div>
   )
@@ -267,12 +284,20 @@ function Lane({
 function Bar({
   showId,
   item,
+  spans,
   zoom,
+  hit,
+  onBlocked,
   onApply,
 }: {
   showId: number
   item: ShowItem
+  /** Everything on this track, to work out what a move would land on. */
+  spans: ShowItem[]
   zoom: number
+  /** Another bar is being dragged onto this one. */
+  hit: boolean
+  onBlocked: (id: number | null) => void
   onApply: (action: () => Promise<unknown>) => Promise<void>
 }) {
   const [drag, setDrag] = useState<{ start: number; duration: number } | null>(null)
@@ -305,29 +330,49 @@ function Bar({
     set({ start: item.start, duration: item.duration })
   }
 
+  /* What this move would land on, kept in a ref for the same reason the drag
+     itself is: the drop reads it at the moment the finger lifts. */
+  const hitting = useRef<(Span & { name?: string }) | null>(null)
+
   const move = (event: React.PointerEvent) => {
     if (live.current === null) return
     const delta = ((event.clientX - origin.current.x) / zoom) * 1000
     const snapped = Math.round(delta / SNAP) * SNAP
 
-    if (origin.current.mode === 'move') {
-      set({
-        start: Math.max(0, origin.current.start + snapped),
-        duration: origin.current.duration,
-      })
-    } else {
-      /* A bar of no length is a cue that never plays. One snap is the floor. */
-      set({
-        start: origin.current.start,
-        duration: Math.max(SNAP, origin.current.duration + snapped),
-      })
-    }
+    const next =
+      origin.current.mode === 'move'
+        ? {
+            start: Math.max(0, origin.current.start + snapped),
+            duration: origin.current.duration,
+          }
+        : {
+            /* A bar of no length is a cue that never plays. One snap is the
+               floor. */
+            start: origin.current.start,
+            duration: Math.max(SNAP, origin.current.duration + snapped),
+          }
+
+    set(next)
+
+    const onto = collision(spans, item.id, next.start, next.duration)
+    hitting.current = onto
+    onBlocked(onto?.id ?? null)
   }
 
   const end = () => {
     const dropped = live.current
+    const onto = hitting.current
     if (dropped === null) return
+
     set(null)
+    hitting.current = null
+    onBlocked(null)
+
+    /* Let go over something else: nothing moves, and the bar goes back where it
+       was. The daemon would have refused it anyway; the difference is that this
+       was visible the whole way, so letting go there was already a decision not
+       to move it rather than a mistake to be told about. */
+    if (onto !== null) return
 
     if (dropped.start !== item.start || dropped.duration !== item.duration) {
       onApply(() =>
@@ -345,6 +390,8 @@ function Bar({
       data-missing={item.missing}
       data-locked={item.locked}
       data-dragging={drag !== null}
+      data-blocked={drag !== null && hitting.current !== null}
+      data-hit={hit}
       style={{
         left: `${(start / 1000) * zoom}px`,
         width: `${Math.max(2, (duration / 1000) * zoom)}px`,
@@ -361,7 +408,9 @@ function Bar({
       </span>
 
       <span className="bar-time">
-        {formatTime(start)} · {formatTime(duration)}
+        {drag !== null && hitting.current !== null
+          ? `choca con ${hitting.current.name}`
+          : `${formatTime(start)} · ${formatTime(duration)}`}
       </span>
 
       <button

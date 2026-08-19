@@ -3,6 +3,7 @@ import { type FixtureState, type FunctionState, type WidgetPatch, api } from './
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
 import { AudioTriggers } from './audiotriggers'
 import { CueList } from './cuelist'
+import { type Insertion, insertionAt, isNoop, sameInsertion } from './drag'
 import { WidgetEditor } from './editor'
 import { Functions } from './functions'
 import {
@@ -78,6 +79,14 @@ export function App() {
   const [mode, setMode] = useState<Mode>('run')
   const [layout, setLayout] = useState<LayoutRows | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
+  /* Where the widget being dragged would land if it were let go now, and where
+     to draw the thing following the finger.
+   *
+     Both are live: the whole difference between a drag that feels solid and one
+     that feels approximate is whether "where will this go?" is answered while
+     the finger is still down, rather than after. */
+  const [dropAt, setDropAt] = useState<Insertion | null>(null)
+  const [ghost, setGhost] = useState<{ x: number; y: number; label: string } | null>(null)
   const [dirty, setDirty] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
   const [fixtures, setFixtures] = useState<FixtureState[]>([])
@@ -292,14 +301,132 @@ export function App() {
   const drop = useCallback(
     (rowIndex: number, beforeId: number | null) => {
       if (dragging === null) return
-      setLayout((currentLayout) =>
-        moveWidget(currentLayout ?? rowsToLayout(rows), dragging, rowIndex, beforeId),
-      )
+
+      const from = layout ?? rowsToLayout(rows)
+
+      /* Dropping a widget back where it already was is not an edit. Marking the
+         show modified for it would put a Guardar button on screen for a move
+         that never happened. */
+      if (isNoop(from, dragging, { rowIndex, beforeId })) {
+        setDragging(null)
+        setDropAt(null)
+        setGhost(null)
+        return
+      }
+
+      setLayout(moveWidget(from, dragging, rowIndex, beforeId))
       setDragging(null)
+      setDropAt(null)
+      setGhost(null)
       setDirty(true)
     },
-    [dragging, rows],
+    [dragging, layout, rows],
   )
+
+  /**
+   * Following the finger.
+   *
+   * The insertion point is read off whatever is under the pointer rather than
+   * from rects measured when the drag began: the console reflows -- rows wrap
+   * at every width, and a widget leaving one changes where the rest sit -- so
+   * anything measured up front is wrong as soon as it matters. The ghost is
+   * pointer-events: none precisely so this sees through it.
+   */
+  const dragOver = useCallback((x: number, y: number) => {
+    const under = document.elementFromPoint(x, y)
+    if (under === null) return
+
+    const widget = under.closest<HTMLElement>('[data-widget-id]')
+
+    if (widget !== null) {
+      const rowIndex = Number(widget.dataset.row ?? 0)
+      const id = widget.dataset.widgetId === '' ? null : Number(widget.dataset.widgetId)
+      const box = widget.getBoundingClientRect()
+
+      const after = widget.nextElementSibling?.closest<HTMLElement>('[data-widget-id]') ?? null
+      const next =
+        after === null
+          ? null
+          : {
+              id: after.dataset.widgetId === '' ? null : Number(after.dataset.widgetId),
+              rowIndex: Number(after.dataset.row ?? 0),
+              left: 0,
+              right: 0,
+            }
+
+      const where = insertionAt({ id, rowIndex, left: box.left, right: box.right }, x, next)
+      setDropAt((current) => (sameInsertion(current, where) ? current : where))
+      return
+    }
+
+    /* Past the end of a row but still inside it: append there. Below every row:
+       a new one. Anywhere else, keep the last answer rather than flickering to
+       nothing -- a caret that disappears while the finger is still moving reads
+       as the drag having been dropped. */
+    const row = under.closest<HTMLElement>('.row[data-row]')
+    if (row !== null) {
+      const where = { rowIndex: Number(row.dataset.row ?? 0), beforeId: null }
+      setDropAt((current) => (sameInsertion(current, where) ? current : where))
+      return
+    }
+
+    if (under.closest('.newrow') !== null) {
+      setDropAt((current) =>
+        sameInsertion(current, { rowIndex: rowsRef.current, beforeId: null })
+          ? current
+          : { rowIndex: rowsRef.current, beforeId: null },
+      )
+    }
+  }, [])
+
+  /* The row count, read during a pointer move without making the callback
+     depend on it -- a drag handler rebuilt mid-gesture drops the gesture. */
+  const rowsRef = useRef(0)
+  rowsRef.current = rows.length
+
+  const dragMove = useCallback(
+    (x: number, y: number, label: string) => {
+      setGhost({ x, y, label })
+      dragOver(x, y)
+    },
+    [dragOver],
+  )
+
+  /* Reading the landing point out of state at the moment the finger lifts,
+     rather than closing over it: the handler is attached once per render and
+     the drop has to use where the caret actually is, not where it was when
+     this callback was built. */
+  const dropAtRef = useRef<Insertion | null>(null)
+  dropAtRef.current = dropAt
+
+  const dragEnd = useCallback(() => {
+    const where = dropAtRef.current
+    if (where === null) {
+      /* Let go somewhere that is not a place: nothing moves, and the widget is
+         put back down rather than left waiting. */
+      setDragging(null)
+      setGhost(null)
+      return
+    }
+    drop(where.rowIndex, where.beforeId)
+  }, [drop])
+
+  /* Escape puts it back. A drag with no way out is a drag people are afraid to
+     start. */
+  useEffect(() => {
+    if (dragging === null && selected === null) return
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setDragging(null)
+      setDropAt(null)
+      setGhost(null)
+      setSelected(null)
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dragging, selected])
 
   const persist = useCallback(async () => {
     const pageId = current?.id ?? 0
@@ -554,6 +681,19 @@ export function App() {
         </nav>
       )}
 
+      {/* What the mode expects of you, in one line.
+       *
+         Both non-run modes change what a tap does, and a screen that changes
+         under your finger without saying so is a screen you learn by making
+         mistakes on. One sentence costs nothing and removes the whole class. */}
+      {view === 'console' && mode !== 'run' && (
+        <p className="modehint">
+          {mode === 'arrange'
+            ? 'Arrastra un widget para moverlo, o tócalo y luego toca un hueco. Escape lo devuelve.'
+            : 'Toca un widget para editarlo. Escape cierra el panel.'}
+        </p>
+      )}
+
       {view === 'console' && mode === 'edit' && (
         <nav className="palette" aria-label="Añadir widget">
           <span className="hint">Añadir:</span>
@@ -578,6 +718,22 @@ export function App() {
           <button type="button" onClick={assignIds}>
             Asignar identificadores
           </button>
+        </div>
+      )}
+
+      {/* The thing that follows the finger.
+       *
+         Fixed to the viewport and outside every scrolling box, because a ghost
+         clipped by the container it started in stops being a ghost. It never
+         takes a pointer event: the drop target is read with elementFromPoint,
+         and a ghost that answered would be the only thing ever found. */}
+      {ghost !== null && (
+        <div
+          className="ghost"
+          style={{ left: `${ghost.x}px`, top: `${ghost.y}px` }}
+          aria-hidden="true"
+        >
+          {ghost.label}
         </div>
       )}
 
@@ -611,7 +767,17 @@ export function App() {
         </main>
       ) : (
         <div className="workspace">
-          <main className="console">
+          <main
+            className="console"
+            /* Tapping the space around the widgets puts the panel away. Every
+               interface with a selection has this, and its absence is only
+               noticed as a nagging sense that something is stuck open. */
+            onPointerDown={(event) => {
+              if (mode !== 'edit') return
+              if ((event.target as HTMLElement).closest('.widget') !== null) return
+              setSelected(null)
+            }}
+          >
             {error && <p className="empty">{error}</p>}
 
             {current ? (
@@ -632,7 +798,11 @@ export function App() {
                 onSpeed={setSpeed}
                 editing={editing}
                 dragging={dragging}
+                dropAt={dropAt}
+                ghost={ghost}
                 onDragStart={setDragging}
+                onDragMove={dragMove}
+                onDragEnd={dragEnd}
                 onDrop={drop}
                 selecting={mode === 'edit'}
                 selected={selected}
@@ -677,7 +847,11 @@ function Surface({
   onSpeed,
   editing,
   dragging,
+  dropAt,
+  ghost,
   onDragStart,
+  onDragMove,
+  onDragEnd,
   onDrop,
   selecting,
   selected,
@@ -699,7 +873,11 @@ function Surface({
   onSpeed: (id: number, milliseconds: number) => void
   editing: boolean
   dragging: number | null
+  dropAt: Insertion | null
+  ghost: { x: number; y: number; label: string } | null
   onDragStart: (id: number | null) => void
+  onDragMove: (x: number, y: number, label: string) => void
+  onDragEnd: () => void
   onDrop: (rowIndex: number, beforeId: number | null) => void
   selecting: boolean
   selected: number | null
@@ -712,16 +890,31 @@ function Surface({
   return (
     <>
       {rows.map((row, rowIndex) => (
-        <div className="row" key={`${rowIndex}-${row.widgets[0]?.id}`} data-editing={editing}>
+        <div
+          className="row"
+          key={`${rowIndex}-${row.widgets[0]?.id}`}
+          data-editing={editing}
+          data-row={rowIndex}
+        >
           {row.widgets.map((child, childIndex) => (
             // Position in the key, because an id is not guaranteed: a console
             // from QLC+ 4 has none until the operator asks for them.
             <Fragment key={child.id ?? `${rowIndex}-${childIndex}`}>
-              {editing && dragging !== null && dragging !== child.id && (
+              {/* The sticky path: tapped rather than dragged, the widget waits
+                  and every gap becomes a target. Kept because it is the precise
+                  way to place something on a phone, and the only way without a
+                  pointer at all. */}
+              {editing && dragging !== null && dragging !== child.id && ghost === null && (
                 <DropSlot onDrop={() => onDrop(rowIndex, child.id ?? null)} />
               )}
               <Widget
                 widget={child}
+                rowIndex={rowIndex}
+                dropBefore={
+                  dropAt !== null &&
+                  dropAt.rowIndex === rowIndex &&
+                  dropAt.beforeId === (child.id ?? null)
+                }
                 grow={growFactor(child, row)}
                 running={running}
                 allFunctions={allFunctions}
@@ -739,18 +932,28 @@ function Surface({
                 editing={editing}
                 dragged={dragging === child.id}
                 onDragStart={onDragStart}
+                onDragMove={onDragMove}
+                onDragEnd={onDragEnd}
                 selecting={selecting}
                 selected={selected === child.id}
                 onSelect={onSelect}
               />
             </Fragment>
           ))}
-          {editing && dragging !== null && <DropSlot onDrop={() => onDrop(rowIndex, null)} />}
+          {editing && dragging !== null && ghost === null && (
+            <DropSlot onDrop={() => onDrop(rowIndex, null)} />
+          )}
+          {/* The caret for "at the end of this row", which has no widget to sit
+              in front of. */}
+          {editing &&
+            dropAt !== null &&
+            dropAt.rowIndex === rowIndex &&
+            dropAt.beforeId === null && <span className="caret" aria-hidden="true" />}
         </div>
       ))}
 
       {editing && dragging !== null && (
-        <div className="row">
+        <div className="row newrow" data-active={dropAt !== null && dropAt.rowIndex >= rows.length}>
           <DropSlot wide onDrop={() => onDrop(rows.length, null)} label="Nueva fila" />
         </div>
       )}
@@ -805,7 +1008,11 @@ function Widget({
   onSpeed,
   editing,
   dragged,
+  rowIndex,
+  dropBefore,
   onDragStart,
+  onDragMove,
+  onDragEnd,
   selecting,
   selected,
   onSelect,
@@ -827,7 +1034,12 @@ function Widget({
   onSpeed: (id: number, milliseconds: number) => void
   editing: boolean
   dragged: boolean
+  rowIndex: number
+  /** The drop caret belongs immediately before this widget. */
+  dropBefore: boolean
   onDragStart: (id: number | null) => void
+  onDragMove: (x: number, y: number, label: string) => void
+  onDragEnd: () => void
   selecting: boolean
   selected: boolean
   onSelect: (id: number) => void
@@ -838,19 +1050,67 @@ function Widget({
     ...(widget.foreground ? { color: widget.foreground } : {}),
   } as React.CSSProperties
 
+  /* Where the finger went down, and whether it has gone anywhere since. In a
+     ref because a drag that re-rendered on every pixel would drop frames on the
+     one screen where dropped frames read as the desk being slow. */
+  const origin = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+
   // While arranging, every widget is a handle and nothing fires its function:
   // moving a button must never also press it.
   if (editing) {
+    const label = widget.caption || widget.type
+
     return (
-      <button
-        type="button"
-        className={`widget ${widget.type} arranging`}
-        style={style}
-        data-dragged={dragged}
-        onPointerDown={() => onDragStart(dragged ? null : (widget.id ?? null))}
-      >
-        {widget.caption || widget.type}
-      </button>
+      <>
+        {dropBefore && <span className="caret" aria-hidden="true" />}
+        <button
+          type="button"
+          className={`widget ${widget.type} arranging`}
+          style={style}
+          data-dragged={dragged}
+          data-widget-id={widget.id ?? ''}
+          data-row={rowIndex}
+          /* Both gestures, decided by whether the finger moved.
+           *
+             A drag is what a hand reaches for and it shows where the widget is
+             going. A tap is what works when there is no pointer to drag with,
+             and it is the precise way to place something on a phone: the widget
+             waits, every gap becomes a target, and one more tap puts it there.
+             Neither has to be chosen or explained. */
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId)
+            origin.current = { x: event.clientX, y: event.clientY, moved: false }
+            onDragStart(widget.id ?? null)
+          }}
+          onPointerMove={(event) => {
+            const from = origin.current
+            if (from === null) return
+
+            /* A threshold, so a tap that trembles is still a tap. Below it
+               nothing has begun and the sticky path is still on the table. */
+            if (!from.moved) {
+              const far =
+                Math.abs(event.clientX - from.x) > 8 || Math.abs(event.clientY - from.y) > 8
+              if (!far) return
+              origin.current = { ...from, moved: true }
+            }
+
+            onDragMove(event.clientX, event.clientY, label)
+          }}
+          onPointerUp={() => {
+            const moved = origin.current?.moved === true
+            origin.current = null
+            if (moved) onDragEnd()
+            else if (dragged) onDragStart(null) // tapped again: put it down
+          }}
+          onPointerCancel={() => {
+            origin.current = null
+            onDragStart(null)
+          }}
+        >
+          {label}
+        </button>
+      </>
     )
   }
 
@@ -1103,7 +1363,11 @@ function NestedFrame({
                 onSpeed={onSpeed}
                 editing={false}
                 dragged={false}
+                rowIndex={rowIndex}
+                dropBefore={false}
                 onDragStart={() => undefined}
+                onDragMove={() => undefined}
+                onDragEnd={() => undefined}
                 selecting={false}
                 selected={false}
                 onSelect={() => undefined}
