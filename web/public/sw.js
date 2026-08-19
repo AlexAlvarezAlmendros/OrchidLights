@@ -14,7 +14,10 @@
  * nobody can reproduce.
  */
 
-const SHELL = 'orchid-shell-v1'
+/* Bumped when the worker's own rules change: the activate handler drops every
+   cache that is not this one, which is what evicts a shell cached under the
+   old rules. */
+const SHELL = 'orchid-shell-v2'
 
 self.addEventListener('install', (event) => {
   // The shell only. Hashed assets are added as they are used.
@@ -41,8 +44,17 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api') || url.pathname.startsWith('/ws')) return
   if (event.request.method !== 'GET') return
 
+  /* The shell is asked for without the HTTP cache in the way.
+   *
+     Network-first is not enough on its own: fetch() inside a worker still goes
+     through the browser's own cache, so a stale entry document -- the one file
+     that names which bundle to run -- can be handed back without a single
+     request leaving the machine. The daemon now says no-cache on it too; this
+     is the half that does not depend on a header arriving. */
+  const isShell = event.request.mode === 'navigate' || url.pathname === '/'
+
   event.respondWith(
-    fetch(event.request)
+    fetch(isShell ? new Request(event.request, { cache: 'no-store' }) : event.request)
       .then((response) => {
         // Keep what came back, so the next cold start is instant.
         if (response.ok) {

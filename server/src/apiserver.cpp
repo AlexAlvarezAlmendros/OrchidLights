@@ -130,6 +130,26 @@ namespace
         return true;
     }
 
+    /**
+     * Never keep this one.
+     *
+     * The entry document names the hashed bundle, so a browser that serves it
+     * from cache runs whatever bundle it named the day it was cached -- against
+     * today's API. That is the failure the service worker's own comment warns
+     * about, and it happened anyway because nothing here said not to cache the
+     * one file that must not be: no headers at all means the browser applies
+     * its own heuristic, and the heuristic for a document with no dates is to
+     * keep it.
+     *
+     * "no-cache" is not "do not store": it stores it and revalidates every
+     * time, which is exactly right for a small file that changes with every
+     * build.
+     */
+    void noCache(QHttpServerResponse &response)
+    {
+        response.setHeader("Cache-Control", "no-cache, must-revalidate");
+    }
+
     /** A command was queued on the engine. Deliberately carries no state: see
         the note on the function routes. */
     QJsonObject acknowledge(const Function *function, const QString &requested)
@@ -239,8 +259,10 @@ void ApiServer::registerRoutes()
     else
     {
         m_server->route("/", [webRoot]() {
-            return QHttpServerResponse::fromFile(QDir(webRoot).absoluteFilePath(
-                QStringLiteral("index.html")));
+            QHttpServerResponse page = QHttpServerResponse::fromFile(
+                QDir(webRoot).absoluteFilePath(QStringLiteral("index.html")));
+            noCache(page);
+            return page;
         });
 
         /* The three files a browser needs at the root to install the app: the
@@ -273,6 +295,7 @@ void ApiServer::registerRoutes()
 
                 QHttpServerResponse response = QHttpServerResponse::fromFile(path);
                 response.setHeader("Content-Type", type.toUtf8());
+                noCache(response);
                 return response;
             });
         }
@@ -290,7 +313,13 @@ void ApiServer::registerRoutes()
             if (QFileInfo::exists(path) == false)
                 return jsonError(StatusCode::NotFound, QStringLiteral("No such asset"));
 
-            return QHttpServerResponse::fromFile(path);
+            /* Vite puts the content hash in the name, so this exact file can
+               never change: caching it for a year is not a gamble, it is the
+               whole point of the hash, and it is what makes a reload on a
+               venue's wifi instant. */
+            QHttpServerResponse asset = QHttpServerResponse::fromFile(path);
+            asset.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+            return asset;
         });
     }
 
