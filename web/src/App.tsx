@@ -1,5 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { type FixtureState, type FunctionState, type WidgetPatch, api } from './api'
+import {
+  type FixtureState,
+  type FunctionState,
+  type ProjectState,
+  type WidgetPatch,
+  api,
+} from './api'
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
 import { AudioTriggers } from './audiotriggers'
 import { CueList } from './cuelist'
@@ -17,8 +23,10 @@ import {
 } from './layout'
 import { type Connection, Live } from './live'
 import { MatrixWidget } from './matrix'
+import { Nav } from './nav'
 import { Plan } from './plan'
 import { Setup } from './setup'
+import type { View } from './views'
 import { CREATABLE, placeBelow } from './widgets'
 import { XYPad } from './xypad'
 
@@ -40,7 +48,6 @@ type Mode = 'run' | 'arrange' | 'edit'
  * the fixtures in them -- which is what makes light come out and which, until
  * now, was reachable only with curl.
  */
-type View = 'console' | 'setup' | 'functions' | 'plan'
 
 /** Transport for a cue list: a chaser plus next and previous. */
 type CueAction = 'play' | 'stop' | 'next' | 'previous' | 'step'
@@ -90,6 +97,10 @@ export function App() {
   const [dirty, setDirty] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
   const [fixtures, setFixtures] = useState<FixtureState[]>([])
+  /* What show is loaded and whether it has unsaved edits. A daemon can hold
+     several over an evening, and "which one is up" is not a question anybody
+     should have to leave the screen to answer. */
+  const [project, setProject] = useState<ProjectState | null>(null)
   const [view, setView] = useState<View>('console')
   /* Operator mode: the console and nothing else.
    *
@@ -170,10 +181,22 @@ export function App() {
         if (all || what.includes('vc') || what.includes('groups')) {
           setRevision((n) => n + 1)
         }
+
+        /* Anything at all changed the document, so the unsaved marker in the
+           header is stale. It is cheap and it is the only warning there is. */
+        api
+          .project()
+          .then(setProject)
+          .catch(() => undefined)
       },
     })
     live.current = feed
     feed.connect()
+
+    api
+      .project()
+      .then(setProject)
+      .catch(() => setProject(null))
 
     api
       .vc()
@@ -556,276 +579,279 @@ export function App() {
 
   return (
     <div className="app" data-operator={operator}>
-      <header className="topbar">
-        <span className="brand">OrchidLights</span>
-        <span className="chip" data-state={connection}>
-          {connection === 'open'
-            ? 'en vivo'
-            : connection === 'closed'
-              ? 'sin conexión'
-              : connection}
-        </span>
-        <span className="chip">{running.size} en marcha</span>
-        <span className="spacer" />
-        <button
-          type="button"
-          onClick={() => setTheme(theme === 'stage' ? 'blackout' : 'stage')}
-          title="Modo seguro para la oscuridad"
-        >
-          {theme === 'stage' ? '🌙' : '☀'}
-        </button>
-        {operator ? (
-          <Unlock onUnlock={leaveOperator} />
-        ) : (
-          <>
+      {/* Where you are, down the left with room and across the bottom without.
+          Gone in operator mode, along with everything else that is not the
+          console. */}
+      {!operator && (
+        <Nav
+          view={view}
+          theme={theme}
+          onView={(target) => {
+            setView(target)
+            setMode('run')
+            setSelected(null)
+          }}
+          onTheme={() => setTheme(theme === 'stage' ? 'blackout' : 'stage')}
+        />
+      )}
+
+      {/* Everything that is not the rail. One column, so the shell is a grid of
+          exactly two things and nothing else has to declare where it lives. */}
+      <div className="screen">
+        <header className="showbar">
+          {/* What is loaded and whether it is alive -- the two things worth a
+            permanent place. The name is the show, not the product: an operator
+            with three shows on one daemon needs to know which one is up. */}
+          <div className="showbar-id">
+            <strong>{project?.name.replace(/\.qxw$/i, '') ?? 'OrchidLights'}</strong>
+            <span>
+              {fixtures.length} fixtures
+              {project?.modified ? ' · sin guardar' : ''}
+            </span>
+          </div>
+
+          <span className="chip" data-state={connection}>
+            <span className="dot" />
+            {connection === 'open'
+              ? 'en vivo'
+              : connection === 'closed'
+                ? 'sin conexión'
+                : connection}
+          </span>
+          {running.size > 0 && <span className="chip">{running.size} en marcha</span>}
+
+          <span className="spacer" />
+
+          {operator ? (
+            <Unlock onUnlock={leaveOperator} />
+          ) : (
             <button type="button" onClick={enterOperator} title="Solo la consola, sin edición">
               Operador
             </button>
-          </>
-        )}
-        {!operator &&
-          (['console', 'functions', 'setup', 'plan'] as const).map((target) => (
-            <button
-              key={target}
-              type="button"
-              aria-pressed={view === target}
-              onClick={() => {
-                setView(target)
-                setMode('run')
-                setSelected(null)
-              }}
-            >
-              {target === 'console'
-                ? 'Consola'
-                : target === 'functions'
-                  ? 'Funciones'
-                  : target === 'setup'
-                    ? 'Patch'
-                    : 'Planta'}
-            </button>
-          ))}
-        {!operator &&
-          view === 'console' &&
-          vc &&
-          /* One control at a time. Showing "Ordenar" beside "Listo" made it
+          )}
+          {!operator &&
+            view === 'console' &&
+            vc &&
+            /* One control at a time. Showing "Ordenar" beside "Listo" made it
              read as two separate states, when there is only ever one. */
-          (mode === 'run' ? (
-            <>
-              <button type="button" onClick={() => setMode('arrange')}>
-                Ordenar
+            (mode === 'run' ? (
+              <>
+                <button type="button" onClick={() => setMode('arrange')}>
+                  Ordenar
+                </button>
+                <button type="button" onClick={() => setMode('edit')}>
+                  Editar
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                aria-pressed={true}
+                onClick={() => {
+                  setMode('run')
+                  setSelected(null)
+                }}
+              >
+                Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
               </button>
-              <button type="button" onClick={() => setMode('edit')}>
-                Editar
+            ))}
+          {view === 'console' && mode === 'edit' && (
+            <>
+              <button type="button" disabled={history.undo === 0} onClick={undo} title="Deshacer">
+                ↶ {history.undo || ''}
+              </button>
+              <button type="button" disabled={history.redo === 0} onClick={redo} title="Rehacer">
+                ↷ {history.redo || ''}
               </button>
             </>
-          ) : (
-            <button
-              type="button"
-              aria-pressed={true}
-              onClick={() => {
-                setMode('run')
-                setSelected(null)
-              }}
-            >
-              Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
+          )}
+          {mode !== 'run' && dirty && (
+            <button type="button" onClick={persist}>
+              Guardar
             </button>
-          ))}
-        {view === 'console' && mode === 'edit' && (
-          <>
-            <button type="button" disabled={history.undo === 0} onClick={undo} title="Deshacer">
-              ↶ {history.undo || ''}
-            </button>
-            <button type="button" disabled={history.redo === 0} onClick={redo} title="Rehacer">
-              ↷ {history.redo || ''}
-            </button>
-          </>
-        )}
-        {mode !== 'run' && dirty && (
-          <button type="button" onClick={persist}>
-            Guardar
+          )}
+          <button type="button" className="danger" onClick={() => api.blackout(true)}>
+            BLACKOUT
           </button>
+        </header>
+
+        {view === 'console' && (pages.length > 1 || framePages > 1) && (
+          <nav className="pages">
+            {pages.length > 1 &&
+              pages.map((p, i) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setPage(i)
+                    setFramePage(0)
+                  }}
+                  aria-pressed={i === page}
+                >
+                  {p.caption || `Página ${i + 1}`}
+                </button>
+              ))}
+            {framePages > 1 &&
+              Array.from({ length: framePages }, (_, i) => (
+                <button
+                  // biome-ignore lint/suspicious/noArrayIndexKey: the index is the page
+                  key={`page-${i}`}
+                  type="button"
+                  onClick={() => setFramePage(i)}
+                  aria-pressed={i === framePage}
+                >
+                  {i + 1}
+                </button>
+              ))}
+          </nav>
         )}
-        <button type="button" className="danger" onClick={() => api.blackout(true)}>
-          BLACKOUT
-        </button>
-      </header>
 
-      {view === 'console' && (pages.length > 1 || framePages > 1) && (
-        <nav className="pages">
-          {pages.length > 1 &&
-            pages.map((p, i) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => {
-                  setPage(i)
-                  setFramePage(0)
-                }}
-                aria-pressed={i === page}
-              >
-                {p.caption || `Página ${i + 1}`}
-              </button>
-            ))}
-          {framePages > 1 &&
-            Array.from({ length: framePages }, (_, i) => (
-              <button
-                // biome-ignore lint/suspicious/noArrayIndexKey: the index is the page
-                key={`page-${i}`}
-                type="button"
-                onClick={() => setFramePage(i)}
-                aria-pressed={i === framePage}
-              >
-                {i + 1}
-              </button>
-            ))}
-        </nav>
-      )}
-
-      {/* What the mode expects of you, in one line.
+        {/* What the mode expects of you, in one line.
        *
          Both non-run modes change what a tap does, and a screen that changes
          under your finger without saying so is a screen you learn by making
          mistakes on. One sentence costs nothing and removes the whole class. */}
-      {view === 'console' && mode !== 'run' && (
-        <p className="modehint">
-          {mode === 'arrange'
-            ? 'Arrastra un widget para moverlo, o tócalo y luego toca un hueco. Escape lo devuelve.'
-            : 'Toca un widget para editarlo. Escape cierra el panel.'}
-        </p>
-      )}
+        {view === 'console' && mode !== 'run' && (
+          <p className="modehint">
+            {mode === 'arrange'
+              ? 'Arrastra un widget para moverlo, o tócalo y luego toca un hueco. Escape lo devuelve.'
+              : 'Toca un widget para editarlo. Escape cierra el panel.'}
+          </p>
+        )}
 
-      {view === 'console' && mode === 'edit' && (
-        <nav className="palette" aria-label="Añadir widget">
-          <span className="hint">Añadir:</span>
-          {CREATABLE.map((c) => (
-            <button key={c.type} type="button" onClick={() => addWidget(c.type)}>
-              + {c.label}
-            </button>
-          ))}
-        </nav>
-      )}
+        {view === 'console' && mode === 'edit' && (
+          <nav className="palette" aria-label="Añadir widget">
+            <span className="hint">Añadir:</span>
+            {CREATABLE.map((c) => (
+              <button key={c.type} type="button" onClick={() => addWidget(c.type)}>
+                + {c.label}
+              </button>
+            ))}
+          </nav>
+        )}
 
-      {/* A console written by QLC+ 4 carries no widget ids, and every edit
+        {/* A console written by QLC+ 4 carries no widget ids, and every edit
           addresses a widget by id -- so it is not partly editable, it is not
           editable at all until this has run. Saying so beats a screen full of
           widgets that quietly refuse to be tapped. */}
-      {view === 'console' && mode === 'edit' && unidentified > 0 && (
-        <div className="notice">
-          <span>
-            {unidentified} widgets vienen sin identificador, de una versión antigua de QLC+, y no se
-            pueden editar hasta que lo tengan.
-          </span>
-          <button type="button" onClick={assignIds}>
-            Asignar identificadores
-          </button>
-        </div>
-      )}
+        {view === 'console' && mode === 'edit' && unidentified > 0 && (
+          <div className="notice">
+            <span>
+              {unidentified} widgets vienen sin identificador, de una versión antigua de QLC+, y no
+              se pueden editar hasta que lo tengan.
+            </span>
+            <button type="button" onClick={assignIds}>
+              Asignar identificadores
+            </button>
+          </div>
+        )}
 
-      {/* The thing that follows the finger.
+        {/* The thing that follows the finger.
        *
          Fixed to the viewport and outside every scrolling box, because a ghost
          clipped by the container it started in stops being a ghost. It never
          takes a pointer event: the drop target is read with elementFromPoint,
          and a ghost that answered would be the only thing ever found. */}
-      {ghost !== null && (
-        <div
-          className="ghost"
-          style={{ left: `${ghost.x}px`, top: `${ghost.y}px` }}
-          aria-hidden="true"
-        >
-          {ghost.label}
-        </div>
-      )}
-
-      {view === 'plan' ? (
-        <main className="console">
-          {planError && <p className="editor-error">{planError}</p>}
-          <Plan revision={revision} universes={frames} onError={setPlanError} />
-        </main>
-      ) : view === 'setup' ? (
-        <main className="console">
-          {/* The patch changes what the console is pointing at, so a fixture
-              added or removed here has to reach the widget editor too. */}
-          <Setup
-            revision={revision}
-            levels={groupLevels}
-            onLevel={setGroupLevel}
-            onChanged={reloadFixtures}
-          />
-        </main>
-      ) : view === 'functions' ? (
-        <main className="console">
-          <Functions
-            functions={functions}
-            fixtures={fixtures}
-            shows={shows}
-            running={running}
-            revision={revision}
-            onToggle={toggle}
-            onChanged={reloadFunctions}
-          />
-        </main>
-      ) : (
-        <div className="workspace">
-          <main
-            className="console"
-            /* Tapping the space around the widgets puts the panel away. Every
-               interface with a selection has this, and its absence is only
-               noticed as a nagging sense that something is stuck open. */
-            onPointerDown={(event) => {
-              if (mode !== 'edit') return
-              if ((event.target as HTMLElement).closest('.widget') !== null) return
-              setSelected(null)
-            }}
+        {ghost !== null && (
+          <div
+            className="ghost"
+            style={{ left: `${ghost.x}px`, top: `${ghost.y}px` }}
+            aria-hidden="true"
           >
-            {error && <p className="empty">{error}</p>}
+            {ghost.label}
+          </div>
+        )}
 
-            {current ? (
-              <Surface
-                rows={rows}
-                running={running}
-                allFunctions={functions}
-                onToggle={toggle}
-                onCueList={cueList}
-                pads={pads}
-                onPad={movePad}
-                onPreset={applyPreset}
-                audio={audio}
-                spectrum={spectrum}
-                onAudio={toggleAudio}
-                levels={levels}
-                onLevel={setLevel}
-                onSpeed={setSpeed}
-                editing={editing}
-                dragging={dragging}
-                dropAt={dropAt}
-                ghost={ghost}
-                onDragStart={setDragging}
-                onDragMove={dragMove}
-                onDragEnd={dragEnd}
-                onDrop={drop}
-                selecting={mode === 'edit'}
-                selected={selected}
-                onSelect={setSelected}
-              />
-            ) : (
-              <FunctionList functions={functions} onToggle={toggle} />
-            )}
+        {view === 'plan' ? (
+          <main className="console">
+            {planError && <p className="editor-error">{planError}</p>}
+            <Plan revision={revision} universes={frames} onError={setPlanError} />
           </main>
-
-          {mode === 'edit' && selectedWidget && (
-            <WidgetEditor
-              widget={selectedWidget}
+        ) : view === 'setup' ? (
+          <main className="console">
+            {/* The patch changes what the console is pointing at, so a fixture
+              added or removed here has to reach the widget editor too. */}
+            <Setup
+              revision={revision}
+              levels={groupLevels}
+              onLevel={setGroupLevel}
+              onChanged={reloadFixtures}
+            />
+          </main>
+        ) : view === 'functions' ? (
+          <main className="console">
+            <Functions
               functions={functions}
               fixtures={fixtures}
-              learning={lastInput}
-              onApply={editWidget}
-              onDelete={deleteWidget}
-              onClose={() => setSelected(null)}
+              shows={shows}
+              running={running}
+              revision={revision}
+              onToggle={toggle}
+              onChanged={reloadFunctions}
             />
-          )}
-        </div>
-      )}
+          </main>
+        ) : (
+          <div className="workspace">
+            <main
+              className="console"
+              /* Tapping the space around the widgets puts the panel away. Every
+               interface with a selection has this, and its absence is only
+               noticed as a nagging sense that something is stuck open. */
+              onPointerDown={(event) => {
+                if (mode !== 'edit') return
+                if ((event.target as HTMLElement).closest('.widget') !== null) return
+                setSelected(null)
+              }}
+            >
+              {error && <p className="empty">{error}</p>}
+
+              {current ? (
+                <Surface
+                  rows={rows}
+                  running={running}
+                  allFunctions={functions}
+                  onToggle={toggle}
+                  onCueList={cueList}
+                  pads={pads}
+                  onPad={movePad}
+                  onPreset={applyPreset}
+                  audio={audio}
+                  spectrum={spectrum}
+                  onAudio={toggleAudio}
+                  levels={levels}
+                  onLevel={setLevel}
+                  onSpeed={setSpeed}
+                  editing={editing}
+                  dragging={dragging}
+                  dropAt={dropAt}
+                  ghost={ghost}
+                  onDragStart={setDragging}
+                  onDragMove={dragMove}
+                  onDragEnd={dragEnd}
+                  onDrop={drop}
+                  selecting={mode === 'edit'}
+                  selected={selected}
+                  onSelect={setSelected}
+                />
+              ) : (
+                <FunctionList functions={functions} onToggle={toggle} />
+              )}
+            </main>
+
+            {mode === 'edit' && selectedWidget && (
+              <WidgetEditor
+                widget={selectedWidget}
+                functions={functions}
+                fixtures={fixtures}
+                learning={lastInput}
+                onApply={editWidget}
+                onDelete={deleteWidget}
+                onClose={() => setSelected(null)}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1112,6 +1138,20 @@ function Widget({
         </button>
       </>
     )
+  }
+
+  /* A label is a section heading, and QLC+ has no other way to write one.
+   *
+     Operators spell them "— MAESTRO —" because a label is all the format
+     offers, so the dashes are a workaround for a missing feature, not part of
+     the name. Read as a heading and drawn as one, the console gets the
+     structure its author was reaching for. In arrange and edit mode it stays a
+     widget: there it is a thing to move and rename, not a title. */
+  if (widget.type === 'label' && !editing && !selecting) {
+    const heading = (widget.caption ?? '').replace(/^[\s\u2014\u2013-]+|[\s\u2014\u2013-]+$/g, '')
+    if (heading === '') return null
+
+    return <h2 className="section">{heading}</h2>
   }
 
   // And while editing, a tap picks the widget rather than operating it. Same
