@@ -1503,10 +1503,18 @@ button.linkish.left {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  /* Fills the screen so the cue dock sits at the bottom of the window rather
+     than at the bottom of a document nobody scrolled to. */
+  height: 100%;
+  min-height: 0;
 }
 
 .plan-stage {
   position: relative;
+  flex: 1;
+  min-height: 0;
+  align-self: center;
+  max-height: 100%;
   max-width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1600,8 +1608,27 @@ button.linkish.left {
 
 .plan-tray {
   border: 1px dashed var(--border);
-  border-radius: 10px;
-  padding: 0.5rem;
+  border-radius: 12px;
+  padding: 0.4rem 0.6rem;
+  /* Capped as well as folded: opened on a rig with seventeen unplaced lamps it
+     still must not take the stage's room. */
+  max-height: 9rem;
+  overflow-y: auto;
+  flex: none;
+}
+
+.plan-tray summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.plan-hint {
+  flex: none;
+  margin: 0;
 }
 
 .tray-items {
@@ -1736,15 +1763,85 @@ button.linkish.left {
   border-style: solid;
 }
 
+/* In the corner of the stage, not under it. Below the fold is where a panel
+   goes to be missed. */
 .selection {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 14rem;
+  max-width: calc(100% - 1.5rem);
+  z-index: 3;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: var(--surface-raised);
-  padding: 0.75rem 0.85rem;
+  background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+  backdrop-filter: blur(8px);
+  padding: 0.7rem 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  max-width: 720px;
+  gap: 0.55rem;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
+}
+
+/* On a phone the stage is narrow enough that a corner panel would be most of
+   it, so it drops to the bottom edge and spans the width. */
+@media (max-width: 699px) {
+  .selection {
+    position: fixed;
+    top: auto;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    width: auto;
+  }
+}
+
+/* The cues, along the bottom of the plan: a pase is mostly firing what
+   somebody already built. */
+.cuedock {
+  flex: none;
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.cue {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 13px;
+  text-align: left;
+}
+
+.cue-name {
+  font-size: 0.86rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.cue-state {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.cue[data-running="true"] {
+  border-color: var(--live);
+  background: color-mix(in srgb, var(--live) 12%, var(--surface-raised));
+}
+
+.cue[data-running="true"] .cue-state {
+  color: var(--live);
 }
 
 .selection-head {
@@ -1758,9 +1855,18 @@ button.linkish.left {
   font-weight: 650;
 }
 
-.selection-head button {
-  min-height: 38px;
-  padding: 0.35rem 0.7rem;
+.selection-head button.icon {
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0;
+  font-size: 0.8rem;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.selection button {
+  min-height: 40px;
   font-size: 0.85rem;
 }
 
@@ -1791,4 +1897,127 @@ button.linkish.left {
 
 .swatch:hover:not(:disabled) {
   border-color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   The console as a designed screen.
+
+   Running it, the operator's rows are read as sections -- headings, a grid of
+   equal controls, faders in a column. Arranging it, the rows come back, because
+   rows are what is being arranged.
+   ------------------------------------------------------------------------- */
+/* The console: what you press on the left, what you hold on the right.
+   Below the width where two columns stop fitting, the levels go under. */
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .board[data-levels="true"] {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+  }
+}
+
+.blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* Equal cards, always. The old flex rows stretched whatever happened to be
+   alone on a line: two colours left over from a row of eight became two
+   half-width slabs, which reads as importance nobody assigned them. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+  align-content: start;
+}
+
+.grid > .widget {
+  /* The grid decides the size now, so the geometry-derived flex is off. */
+  flex: initial;
+  min-width: 0;
+  min-height: 62px;
+}
+
+/* A frame brings its own children and needs the room to show them. */
+.grid > .widget.frame,
+.grid > .widget.cuelist,
+.grid > .widget.xypad,
+.grid > .widget.matrix,
+.grid > .widget.audiotriggers {
+  grid-column: span 2;
+}
+
+.levels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.8rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  /* Held in place while the sections scroll past: a fader is what you are
+     holding while you press other things. */
+  position: sticky;
+  top: 0;
+}
+
+.levels-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.levels-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Horizontal in the column, which is what makes a stack of them readable at a
+   glance -- the name and the number line up down the left and right edges. */
+.levels .widget.fader {
+  flex: initial;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "caption value"
+    "track track";
+  gap: 0.25rem 0.5rem;
+  align-items: baseline;
+}
+
+.levels .widget.fader .fader-caption {
+  grid-area: caption;
+  text-align: left;
+}
+
+.levels .widget.fader .fader-value {
+  grid-area: value;
+}
+
+.levels .widget.fader input[type="range"] {
+  grid-area: track;
+  writing-mode: horizontal-tb;
+  direction: ltr;
+  width: 100%;
+  height: 34px;
 }

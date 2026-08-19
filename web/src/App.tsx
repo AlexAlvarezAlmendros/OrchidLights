@@ -25,6 +25,7 @@ import { type Connection, Live } from './live'
 import { MatrixWidget } from './matrix'
 import { Nav } from './nav'
 import { Plan } from './plan'
+import { toSections } from './sections'
 import { Setup } from './setup'
 import type { View } from './views'
 import { CREATABLE, placeBelow } from './widgets'
@@ -765,7 +766,14 @@ export function App() {
         {view === 'plan' ? (
           <main className="console">
             {planError && <p className="editor-error">{planError}</p>}
-            <Plan revision={revision} universes={frames} onError={setPlanError} />
+            <Plan
+              revision={revision}
+              universes={frames}
+              functions={functions}
+              running={running}
+              onToggle={toggle}
+              onError={setPlanError}
+            />
           </main>
         ) : view === 'setup' ? (
           <main className="console">
@@ -911,6 +919,95 @@ function Surface({
 }) {
   if (rows.length === 0) {
     return <p className="empty">Esta página está vacía.</p>
+  }
+
+  /* Two ways to draw the same console.
+   *
+     Running it, the console is a screen: sections with headings, a grid of
+     equal controls, faders in a column of their own. Arranging or editing it,
+     it is the operator's own rows again -- because that is what is being
+     arranged, and a drag that reorders something drawn somewhere else is a drag
+     nobody can aim.
+   *
+     Neither changes the project. The grid flows in document order, so the order
+     arranged in the other mode is still the order that comes out here. */
+  if (!editing && !selecting) {
+    const sections = toSections(rows)
+
+    const draw = (widget: VcWidget, index: number) => (
+      <Widget
+        key={widget.id ?? `w-${index}`}
+        widget={widget}
+        rowIndex={0}
+        dropBefore={false}
+        grow={1}
+        running={running}
+        allFunctions={allFunctions}
+        onToggle={onToggle}
+        onCueList={onCueList}
+        pads={pads}
+        onPad={onPad}
+        onPreset={onPreset}
+        audio={audio}
+        spectrum={spectrum}
+        onAudio={onAudio}
+        levels={levels}
+        onLevel={onLevel}
+        onSpeed={onSpeed}
+        editing={false}
+        dragged={false}
+        onDragStart={onDragStart}
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
+        selecting={false}
+        selected={false}
+        onSelect={onSelect}
+      />
+    )
+
+    /* Every fader in one column, for the whole console rather than per section.
+     *
+       A fader is a thing you hold while you press other things, so it wants to
+       be in the same place all the time and always reachable -- which is what a
+       desk does with them, and what a per-section strip cannot do: it puts the
+       levels wherever their heading happens to fall, and leaves a hole beside
+       whichever section is short.
+     *
+       The section each group came from stays written above it, so nothing is
+       lost by moving them. */
+    const levelGroups = sections
+      .filter((section) => section.levels.length > 0)
+      .map((section) => ({ title: section.title, widgets: section.levels }))
+
+    return (
+      <div className="board" data-levels={levelGroups.length > 0}>
+        <div className="blocks">
+          {sections.map((section, index) => (
+            <section className="block" key={section.title ?? `block-${index}`}>
+              {section.title !== null && <h2 className="section">{section.title}</h2>}
+              {section.controls.length > 0 && (
+                <div className="grid">{section.controls.map(draw)}</div>
+              )}
+            </section>
+          ))}
+        </div>
+
+        {levelGroups.length > 0 && (
+          <aside className="levels" aria-label="Niveles">
+            {levelGroups.map((group, index) => (
+              <div className="levels-group" key={group.title ?? `levels-${index}`}>
+                {/* Only worth a caption when there is more than one group to
+                    tell apart. */}
+                {levelGroups.length > 1 && group.title !== null && (
+                  <span className="levels-title">{group.title}</span>
+                )}
+                {group.widgets.map(draw)}
+              </div>
+            ))}
+          </aside>
+        )}
+      </div>
+    )
   }
 
   return (

@@ -1018,6 +1018,71 @@ try {
   })()`)
   check('a label reads as the section heading it always was', headings === 'none' || headings === 'ok', headings)
 
+  /* And the console is drawn as a screen rather than as somebody's pixel
+     positions: sections, a grid of equal controls, faders in a column of their
+     own. Their order survives it -- the grid flows in document order -- and so
+     does every widget, which is the part that matters. */
+  const drawn = await evaluate(`(async () => {
+    const board = document.querySelector('.board')
+    if (!board) return 'no board'
+
+    const vc = await (await fetch('/api/v1/vc')).json()
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+    const all = walk(vc).filter(w => w.type !== 'virtualconsole' && w.type !== 'frame')
+
+    /* Nothing may be lost by regrouping. A console rearranged for display that
+       drops a button is a console missing a cue on the night it matters. */
+    const labels = all.filter(w => w.type === 'label' && (w.caption || '').trim())
+    const others = all.filter(w => w.type !== 'label')
+    /* Only the top level: what is inside a frame is drawn by the frame. */
+    const top = [...document.querySelectorAll('.board .widget')]
+      .filter(w => w.parentElement?.closest('.widget.frame') === null)
+    const titles = document.querySelectorAll('.board .section').length
+
+    /* Every top-level label is a heading. One inside a frame is that frame's,
+       and is drawn by it. */
+    const topLabels = labels.filter(l =>
+      walk(vc).some(w => w === l) &&
+      (vc.children ?? []).some(f => (f.children ?? []).includes(l) || f === l))
+    if (labels.length > 0 && titles === 0) return 'no headings for ' + labels.length + ' labels'
+    if (titles < topLabels.length) return 'headings: ' + titles + ' of ' + topLabels.length
+    if (top.length === 0 && others.length > 0) return 'nothing was drawn'
+
+    /* Faders live in the column, not in the grid.
+     *
+       Asked of the screen rather than of the project: a frame draws its own
+       children with their own layout, so a fader inside one is that frame's
+       business and never reaches a section. Counting every fader in the tree
+       said the column was missing when it was simply not theirs. */
+    const loose = [...document.querySelectorAll('.board .widget.fader')]
+      .filter(f => f.closest('.widget.frame') === null)
+    if (loose.length > 0) {
+      if (!document.querySelector('.levels')) return 'no levels column for ' + loose.length + ' faders'
+      if (loose.some(f => f.closest('.levels') === null)) return 'a fader is loose in the grid'
+    }
+
+    /* Equal cards: the old flex rows stretched whatever was alone on a line,
+       so two colours left over from a row of eight became half-width slabs. */
+    const cards = [...document.querySelectorAll('.grid > .widget')]
+    if (cards.length > 2) {
+      const widths = new Set(cards.map(c => Math.round(c.getBoundingClientRect().width)))
+      if (widths.size > 3) return 'the cards are ' + widths.size + ' different widths'
+    }
+
+    /* Arranging brings the operator's rows back, because rows are what is
+       being arranged. */
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Ordenar')?.click()
+    await new Promise(r => setTimeout(r, 700))
+    if (document.querySelector('.board')) return 'arrange mode still draws the designed layout'
+    if (!document.querySelector('.row')) return 'arrange mode lost the rows'
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Listo'))?.click()
+    await new Promise(r => setTimeout(r, 700))
+    if (!document.querySelector('.board')) return 'the designed layout did not come back'
+
+    return 'ok'
+  })()`)
+  check('the console is drawn as sections, a grid and a column of faders', drawn === 'ok', drawn)
+
   /* Arranging by dragging, which is the gesture this console is used with far
      more than any other.
    *

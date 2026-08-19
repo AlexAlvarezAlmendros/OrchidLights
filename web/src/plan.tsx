@@ -13,11 +13,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { type PlanFixture, type PlanState, api } from './api'
-
-/** How far the drawing is from the truth, in pixels per millimetre. Set from
- *  the grid so a stage of any size fits the same box. */
-const PLAN_WIDTH = 720
+import { type FunctionState, type PlanFixture, type PlanState, api } from './api'
 
 /** A handful of colours worth reaching for without a picker: the ones a rig
  *  gets asked for by name. A full picker belongs in the scene editor, where a
@@ -36,11 +32,19 @@ const SWATCHES = [
 export function Plan({
   revision,
   universes,
+  functions,
+  running,
+  onToggle,
   onError,
 }: {
   revision: number
   /** The latest frame of each universe, 1-based, as the feed delivers it. */
   universes: Record<number, Uint8Array>
+  /** The show's own cues, for the dock along the bottom. Driving a rig is not
+   *  only pointing at lamps: most of a pase is firing what somebody built. */
+  functions: FunctionState[]
+  running: Set<number>
+  onToggle: (id: number) => void
   onError: (message: string | null) => void
 }) {
   const [plan, setPlan] = useState<PlanState | null>(null)
@@ -80,7 +84,6 @@ export function Plan({
      positions are millimetres, which is what QLC+ stores. */
   const across = grid.units === 'feet' ? grid.width * 304.8 : grid.width * 1000
   const deep = grid.units === 'feet' ? grid.depth * 304.8 : grid.depth * 1000
-  const scale = PLAN_WIDTH / across
 
   const placed = plan.fixtures.filter((f) => f.x !== undefined && f.y !== undefined)
   const unplaced = plan.fixtures.filter((f) => f.x === undefined || f.y === undefined)
@@ -90,9 +93,14 @@ export function Plan({
     const box = surface.current?.getBoundingClientRect()
     if (box === undefined) return null
 
+    /* From the box the stage actually has on screen, not from a scale worked
+       out up front: it is sized by its aspect ratio against whatever room the
+       window gives it, so the only honest scale is the one it ended up with. */
     return {
-      x: Math.round(Math.max(0, Math.min(across, (event.clientX - box.left) / scale))),
-      y: Math.round(Math.max(0, Math.min(deep, (event.clientY - box.top) / scale))),
+      x: Math.round(
+        Math.max(0, Math.min(across, ((event.clientX - box.left) / box.width) * across)),
+      ),
+      y: Math.round(Math.max(0, Math.min(deep, ((event.clientY - box.top) / box.height) * deep))),
     }
   }
 
@@ -103,6 +111,11 @@ export function Plan({
   /* How many of the chosen can actually take each thing. A control that is
      offered and does nothing is the failure this whole codebase is arranged
      against, so both are counted and both are said. */
+  /* Chasers and EFX: what a pase is made of. Scenes are left out -- a console
+     full of colour buttons already fires those, and every scene in the dock
+     would bury the handful that are cues. */
+  const cues = functions.filter((f) => f.type === 'Chaser' || f.type === 'EFX')
+
   const dimmable = selected.filter((f) => f.roles.intensity !== undefined).length
   const mixable = selected.filter((f) => colourValues(f, { r: 0, g: 0, b: 0 }).length > 0).length
 
@@ -142,17 +155,20 @@ export function Plan({
 
   return (
     <div className="plan">
-      <p className="hint">
-        Cada lámpara con el color que está dando ahora mismo, calculado aquí a partir de los frames
-        DMX. Arrastra para colocarlas; el escenario mide {grid.width} × {grid.depth}{' '}
-        {grid.units === 'feet' ? 'pies' : 'metros'}.
+      <p className="hint plan-hint">
+        Cada lámpara con el color que está dando ahora mismo. Toca para elegirlas, arrastra para
+        colocarlas · {grid.width} × {grid.depth} {grid.units === 'feet' ? 'pies' : 'm'}
       </p>
 
+      {/* Sized by its aspect ratio rather than by a pixel scale, so it fills
+          whatever room the window has and the dock below it is never pushed off
+          the bottom. Lamps are placed in per cent for the same reason: a
+          fraction of the stage means the same thing at any size. */}
       <div
         className="plan-stage"
         ref={surface}
         data-dragging={drag !== null}
-        style={{ width: PLAN_WIDTH, height: deep * scale }}
+        style={{ aspectRatio: `${across} / ${deep}` }}
         onPointerMove={(e) => {
           const held = pending.current
           if (held !== null && drag === null) {
@@ -203,6 +219,80 @@ export function Plan({
           <img className="plan-background" src="/api/v1/plan/background" alt="" />
         )}
 
+        {/* What you can do to what you chose, in the corner of the stage.
+         *
+           On the stage rather than under it: below the fold is where a panel
+           goes to be missed, and choosing a lamp and seeing nothing happen is
+           how an interface teaches somebody that it is broken. A corner covers
+           less than a lamp does. */}
+        {selected.length > 0 && (
+          <div className="selection">
+            <div className="selection-head">
+              <strong>
+                {selected.length === 1 ? selected[0]?.name : `${selected.length} lámparas`}
+              </strong>
+              <span className="spacer" />
+              <button
+                type="button"
+                className="icon"
+                aria-label="Deseleccionar"
+                title="Deseleccionar"
+                onClick={() => setChosen([])}
+              >
+                ✕
+              </button>
+            </div>
+
+            <label className="field">
+              <span>
+                Intensidad
+                {dimmable === 0 ? ' · ninguna de estas tiene dímer' : ''}
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={level}
+                disabled={dimmable === 0}
+                onChange={(e) => dim(Number(e.target.value))}
+              />
+            </label>
+
+            <div className="swatches">
+              {SWATCHES.map((hex) => (
+                <button
+                  key={hex}
+                  type="button"
+                  className="swatch"
+                  style={{ background: hex }}
+                  disabled={mixable === 0}
+                  aria-label={`Poner ${hex}`}
+                  onClick={() => paint(hex)}
+                />
+              ))}
+            </div>
+
+            {/* Said plainly rather than by a control that quietly does nothing:
+              a dimmer cannot be made amber, and a moving head with a colour
+              wheel does not mix either. */}
+            {mixable < selected.length && (
+              <p className="hint">
+                {mixable === 0
+                  ? 'Ninguna de estas mezcla color.'
+                  : `${selected.length - mixable} de ${selected.length} no mezclan color.`}
+              </p>
+            )}
+
+            <button type="button" onClick={() => api.releaseLive().then(() => undefined, fail)}>
+              Soltar
+            </button>
+
+            <p className="hint">
+              Es una mesa, no una edición: no toca el proyecto ni sobrevive a una recarga.
+            </p>
+          </div>
+        )}
+
         {placed.map((fixture) => (
           <Lamp
             key={fixture.id}
@@ -210,7 +300,8 @@ export function Plan({
             /* While it is being dragged the lamp is drawn where the finger is,
                not where the daemon still has it. */
             at={drag !== null && drag.id === fixture.id ? drag : null}
-            scale={scale}
+            across={across}
+            deep={deep}
             chosen={chosen.includes(fixture.id)}
             colour={colourOf(fixture, universes)}
             onGrab={(event) => {
@@ -226,77 +317,42 @@ export function Plan({
         ))}
       </div>
 
-      {/* What you can do to what you chose.
+      {/* The cues, along the bottom.
        *
-         Under the stage rather than over it: a panel floating on the plan
-         covers exactly the lamps you are looking at while you change them. */}
-      {selected.length > 0 && (
-        <div className="selection">
-          <div className="selection-head">
-            <strong>
-              {selected.length === 1 ? selected[0]?.name : `${selected.length} lámparas`}
-            </strong>
-            <span className="spacer" />
-            <button type="button" onClick={() => api.releaseLive().then(() => undefined, fail)}>
-              Soltar
+         A pase is mostly firing what somebody already built, so the chases
+         belong on the screen you drive from rather than one tab away. */}
+      {cues.length > 0 && (
+        <div className="cuedock">
+          {cues.map((cue) => (
+            <button
+              key={cue.id}
+              type="button"
+              className="cue"
+              data-running={running.has(cue.id)}
+              onClick={() => onToggle(cue.id)}
+            >
+              <span className="cue-name">{cue.name}</span>
+              <span className="cue-state">
+                {running.has(cue.id)
+                  ? cue.steps
+                    ? `paso ${(cue.step ?? 0) + 1}/${cue.steps}`
+                    : 'en marcha'
+                  : cue.type === 'EFX'
+                    ? 'EFX'
+                    : `${cue.steps ?? 0} pasos`}
+              </span>
             </button>
-            <button type="button" onClick={() => setChosen([])}>
-              Deseleccionar
-            </button>
-          </div>
-
-          <label className="field">
-            <span>
-              Intensidad
-              {dimmable === 0 ? ' · ninguna de estas tiene dímer' : ''}
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={255}
-              value={level}
-              disabled={dimmable === 0}
-              onChange={(e) => dim(Number(e.target.value))}
-            />
-          </label>
-
-          <div className="swatches">
-            {SWATCHES.map((hex) => (
-              <button
-                key={hex}
-                type="button"
-                className="swatch"
-                style={{ background: hex }}
-                disabled={mixable === 0}
-                aria-label={`Poner ${hex}`}
-                onClick={() => paint(hex)}
-              />
-            ))}
-          </div>
-
-          {/* Said plainly rather than by a control that quietly does nothing:
-              a dimmer cannot be made amber, and a moving head with a colour
-              wheel does not mix either. */}
-          {mixable < selected.length && (
-            <p className="hint">
-              {mixable === 0
-                ? 'Ninguna de estas mezcla color.'
-                : `${selected.length - mixable} de ${selected.length} no mezclan color.`}
-            </p>
-          )}
-
-          <p className="hint">
-            Esto es una mesa, no una edición: no toca el proyecto y no sobrevive a una recarga.
-          </p>
+          ))}
         </div>
       )}
 
+      {/* Folded away by default. A rig with seventeen lamps nobody has placed
+          would otherwise take more of the screen than the stage does, and the
+          stage is the thing. */}
       {unplaced.length > 0 && (
-        <div className="plan-tray">
-          <p className="hint">
-            Sin colocar ({unplaced.length}). Púlsalas para ponerlas en el centro y arrastra desde
-            ahí.
-          </p>
+        <details className="plan-tray">
+          <summary>Sin colocar ({unplaced.length})</summary>
+          <p className="hint">Púlsalas para ponerlas en el centro y arrastra desde ahí.</p>
           <div className="tray-items">
             {unplaced.map((fixture) => (
               <button
@@ -318,7 +374,7 @@ export function Plan({
               </button>
             ))}
           </div>
-        </div>
+        </details>
       )}
     </div>
   )
@@ -327,7 +383,8 @@ export function Plan({
 function Lamp({
   fixture,
   at,
-  scale,
+  across,
+  deep,
   chosen,
   colour,
   onGrab,
@@ -336,7 +393,9 @@ function Lamp({
   fixture: PlanFixture
   /** Where the finger has it, while it is being dragged. */
   at: { x: number; y: number } | null
-  scale: number
+  /** The stage, in millimetres, so a position can be a fraction of it. */
+  across: number
+  deep: number
   /** Part of what you are working on. */
   chosen: boolean
   colour: string | null
@@ -354,8 +413,8 @@ function Lamp({
       data-dark={colour === null}
       data-fixture={fixture.id}
       style={{
-        left: `${x * scale}px`,
-        top: `${y * scale}px`,
+        left: `${(x / across) * 100}%`,
+        top: `${(y / deep) * 100}%`,
         transform: `translate(-50%, -50%) rotate(${fixture.rotation ?? 0}deg)`,
         ...(colour !== null ? { background: colour, boxShadow: `0 0 18px ${colour}` } : {}),
       }}
