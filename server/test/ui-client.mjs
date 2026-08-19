@@ -820,6 +820,84 @@ try {
   })()`)
   check('the plan shows what each lamp is doing', litUp === 'none' || litUp === 'ok', litUp)
 
+  /* The shell: where you are, and what is loaded.
+   *
+     The four views used to be four buttons in a row of nine, competing with
+     the theme toggle and BLACKOUT for the same corner. They are navigation and
+     they now live in a rail of their own; the bar above says which show is up
+     and whether it has unsaved edits, which is the one question an operator
+     with three shows on one daemon cannot answer from anywhere else. */
+  const shell = await evaluate(`(async () => {
+    const rail = document.querySelector('.rail')
+    if (!rail) return 'no rail'
+
+    /* Start from the console, because the two assertions below are about it. */
+    const item = (name) => [...rail.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === name)
+    item('Consola').click()
+    await new Promise(r => setTimeout(r, 900))
+
+    const items = [...rail.querySelectorAll('.rail-item')].map(b => b.textContent.trim())
+    for (const view of ['Consola', 'Funciones', 'Patch', 'Planta']) {
+      if (!items.includes(view)) return view + ' is not in the rail: ' + items.join('/')
+    }
+
+    /* Drawn icons, not emoji: one stroke width on one grid, taking the colour
+       of the state they are in. */
+    const glyphs = rail.querySelectorAll('.rail-item svg[stroke="currentColor"]')
+    if (glyphs.length < 5) return 'the rail items are not drawn: ' + glyphs.length
+
+    const here = [...rail.querySelectorAll('.rail-item')].filter(b => b.getAttribute('aria-pressed') === 'true')
+    if (!here.some(b => b.textContent.trim() === 'Consola')) return 'the rail does not say where we are'
+
+    /* The show bar names the show, and the daemon agrees. */
+    const project = await (await fetch('/api/v1/project')).json()
+    const stem = project.name.replace(/\.qxw$/i, '')
+    const bar = document.querySelector('.showbar-id')
+    if (!bar) return 'no show bar'
+    if (!bar.textContent.includes(stem)) return 'the bar does not name the show: ' + bar.textContent
+
+    /* Navigating from the rail works, and comes back. */
+    const go = (name) => item(name).click()
+    go('Patch')
+    await new Promise(r => setTimeout(r, 900))
+    if (!document.querySelector('.setup .tabs')) return 'the rail did not reach the patch'
+    go('Consola')
+    await new Promise(r => setTimeout(r, 900))
+    if (!document.querySelector('main.console')) return 'the rail did not come back'
+
+    return 'ok'
+  })()`)
+  check('the rail says where you are and the bar says what is loaded', shell === 'ok', shell)
+
+  /* A label widget is a section heading. QLC+ has no other way to write one,
+     so operators spell them "— MAESTRO —"; the dashes are a workaround for a
+     missing feature, not part of the name. */
+  const headings = await evaluate(`(async () => {
+    const vc = await (await fetch('/api/v1/vc')).json()
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+    const labels = walk(vc).filter(w => w.type === 'label' && (w.caption || '').trim())
+    if (labels.length === 0) return 'none'
+
+    const shown = [...document.querySelectorAll('.section')].map(h => h.textContent.trim())
+    if (shown.length === 0) return 'no headings for ' + labels.length + ' labels'
+
+    /* Drawn as a heading and not as a widget. */
+    if ([...document.querySelectorAll('.widget.label')].length > 0) {
+      return 'a label is still drawn as a widget'
+    }
+
+    /* And the decoration is gone from the ends without the name changing. */
+    const dashed = labels.find(l => /^[\s\u2014\u2013-]/.test(l.caption))
+    if (dashed) {
+      const bare = dashed.caption.replace(/^[\s\u2014\u2013-]+|[\s\u2014\u2013-]+$/g, '')
+      if (!shown.includes(bare)) return 'the dashes were not stripped: ' + shown.join(' / ')
+      if (shown.includes(dashed.caption.trim())) return 'the heading kept its dashes'
+    }
+    return 'ok'
+  })()`)
+  check('a label reads as the section heading it always was', headings === 'none' || headings === 'ok', headings)
+
   /* Arranging by dragging, which is the gesture this console is used with far
      more than any other.
    *
@@ -1043,7 +1121,10 @@ try {
        in this page asked for it, so only the broadcast can bring it here.
        Counting rather than reading a caption, because which widgets a console
        happens to show is the project's business. */
-    const count = () => document.querySelectorAll('.widget').length
+    /* Widgets and section headings both: a label arrives as a heading now,
+       which is still it arriving. Counting only .widget missed it and read as
+       the broadcast being broken. */
+    const count = () => document.querySelectorAll('.widget, .section').length
     const before = count()
 
     const created = await (await fetch('/api/v1/vc/widgets', {
@@ -1166,9 +1247,10 @@ try {
    * that edits has to be *gone from the markup*, not hidden with a class: a
    * control that is only invisible is still there for a stray tap. */
   const locked = await evaluate(`(async () => {
-    const buttons = () => [...document.querySelectorAll('.topbar button')].map(b => b.textContent.trim())
+    const buttons = () => [...document.querySelectorAll('.showbar button, .rail button')]
+      .map(b => b.textContent.trim())
 
-    const enter = [...document.querySelectorAll('.topbar button')].find(b => b.textContent.trim() === 'Operador')
+    const enter = [...document.querySelectorAll('.showbar button')].find(b => b.textContent.trim() === 'Operador')
     if (!enter) return 'no operator button'
     enter.click()
     await new Promise(r => setTimeout(r, 600))
@@ -1226,7 +1308,8 @@ try {
     if (document.querySelector('.app').getAttribute('data-operator') === 'true') {
       return 'holding did not get out'
     }
-    const shown = [...document.querySelectorAll('.topbar button')].map(b => b.textContent.trim()).join('|')
+    const shown = [...document.querySelectorAll('.showbar button, .rail button')]
+      .map(b => b.textContent.trim()).join('|')
     return shown.includes('Patch') ? 'ok' : 'the rest of the interface did not come back: ' + shown
   })()`)
   check('and takes a press and hold to leave', released === 'ok', released)

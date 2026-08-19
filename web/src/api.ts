@@ -256,6 +256,16 @@ export interface WidgetPatch {
   input?: { universe: number; channel: number } | null
 }
 
+/** The show the daemon has open. */
+export interface ProjectState {
+  name: string
+  path: string
+  directory: string
+  /** Edited since it was loaded or last saved. Nothing here writes to disk on
+   *  its own, so this is the only warning there is. */
+  modified: boolean
+}
+
 export interface Status {
   name: string
   version: string
@@ -278,6 +288,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   status: () => json<Status>('/api/v1/status'),
+  project: () => json<ProjectState>('/api/v1/project'),
   functions: () => json<FunctionState[]>('/api/v1/functions'),
   vc: () => json<import('./layout').VcWidget>('/api/v1/vc'),
   layout: () => json<{ pages: { id: number; rows: number[][] }[] }>('/api/v1/layout'),
