@@ -30,7 +30,12 @@ export function Plan({
   onError: (message: string | null) => void
 }) {
   const [plan, setPlan] = useState<PlanState | null>(null)
-  const [dragging, setDragging] = useState<number | null>(null)
+  /* The lamp being moved and where it is right now, in millimetres.
+   *
+     It used to be only the id: the lamp stayed where it was until the finger
+     came up and then jumped. Placing a rig that way is guesswork -- you find
+     out where you put something after you have put it. */
+  const [drag, setDrag] = useState<{ id: number; x: number; y: number } | null>(null)
   const surface = useRef<HTMLDivElement>(null)
 
   const reload = useCallback(() => {
@@ -57,13 +62,18 @@ export function Plan({
   const placed = plan.fixtures.filter((f) => f.x !== undefined && f.y !== undefined)
   const unplaced = plan.fixtures.filter((f) => f.x === undefined || f.y === undefined)
 
-  const dropAt = (event: React.PointerEvent, id: number) => {
+  /** Pointer coordinates as millimetres on the stage, clamped to it. */
+  const toStage = (event: React.PointerEvent) => {
     const box = surface.current?.getBoundingClientRect()
-    if (box === undefined) return
+    if (box === undefined) return null
 
-    const x = Math.round(Math.max(0, Math.min(across, (event.clientX - box.left) / scale)))
-    const y = Math.round(Math.max(0, Math.min(deep, (event.clientY - box.top) / scale)))
+    return {
+      x: Math.round(Math.max(0, Math.min(across, (event.clientX - box.left) / scale))),
+      y: Math.round(Math.max(0, Math.min(deep, (event.clientY - box.top) / scale))),
+    }
+  }
 
+  const place = (id: number, x: number, y: number) => {
     onError(null)
     api
       .setPlanPosition(id, { x, y })
@@ -85,14 +95,26 @@ export function Plan({
       <div
         className="plan-stage"
         ref={surface}
+        data-dragging={drag !== null}
         style={{ width: PLAN_WIDTH, height: deep * scale }}
         onPointerMove={(e) => {
-          if (dragging !== null) e.preventDefault()
+          if (drag === null) return
+          e.preventDefault()
+          const at = toStage(e)
+          if (at !== null) setDrag({ id: drag.id, ...at })
         }}
-        onPointerUp={(e) => {
-          if (dragging === null) return
-          dropAt(e, dragging)
-          setDragging(null)
+        onPointerUp={() => {
+          if (drag === null) return
+          place(drag.id, drag.x, drag.y)
+          setDrag(null)
+        }}
+        onPointerLeave={() => {
+          /* The finger left the stage. Committing where it last was beats
+             dropping the move: a lamp dragged to the very edge is a lamp
+             somebody meant to put at the edge. */
+          if (drag === null) return
+          place(drag.id, drag.x, drag.y)
+          setDrag(null)
         }}
       >
         {plan.background && (
@@ -103,13 +125,14 @@ export function Plan({
           <Lamp
             key={fixture.id}
             fixture={fixture}
+            /* While it is being dragged the lamp is drawn where the finger is,
+               not where the daemon still has it. */
+            at={drag !== null && drag.id === fixture.id ? drag : null}
             scale={scale}
             colour={colourOf(fixture, universes)}
-            dragging={dragging === fixture.id}
-            onGrab={() => setDragging(fixture.id)}
-            onDrop={(event) => {
-              dropAt(event, fixture.id)
-              setDragging(null)
+            onGrab={(event) => {
+              const at = toStage(event)
+              setDrag({ id: fixture.id, x: at?.x ?? fixture.x ?? 0, y: at?.y ?? fixture.y ?? 0 })
             }}
             onRemove={() => {
               api
@@ -156,42 +179,48 @@ export function Plan({
 
 function Lamp({
   fixture,
+  at,
   scale,
   colour,
-  dragging,
   onGrab,
-  onDrop,
   onRemove,
 }: {
   fixture: PlanFixture
+  /** Where the finger has it, while it is being dragged. */
+  at: { x: number; y: number } | null
   scale: number
   colour: string | null
-  dragging: boolean
-  onGrab: () => void
-  onDrop: (event: React.PointerEvent) => void
+  onGrab: (event: React.PointerEvent) => void
   onRemove: () => void
 }) {
+  const x = at?.x ?? fixture.x ?? 0
+  const y = at?.y ?? fixture.y ?? 0
+
   return (
     <div
       className="lamp"
-      data-dragging={dragging}
+      data-dragging={at !== null}
       data-dark={colour === null}
       data-fixture={fixture.id}
       style={{
-        left: `${(fixture.x ?? 0) * scale}px`,
-        top: `${(fixture.y ?? 0) * scale}px`,
+        left: `${x * scale}px`,
+        top: `${y * scale}px`,
         transform: `translate(-50%, -50%) rotate(${fixture.rotation ?? 0}deg)`,
         ...(colour !== null ? { background: colour, boxShadow: `0 0 18px ${colour}` } : {}),
       }}
       title={`${fixture.name} · U${fixture.universe} @ ${fixture.address + 1}`}
       onPointerDown={(e) => {
         e.preventDefault()
-        onGrab()
+        onGrab(e)
       }}
-      onPointerUp={onDrop}
       onDoubleClick={onRemove}
     >
-      <span className="lamp-label">{fixture.name}</span>
+      {/* The label carries the position while the lamp is moving. Placing a rig
+          means putting a lamp *somewhere*, and "somewhere" on a plan is a
+          measurement, not a feeling. */}
+      <span className="lamp-label">
+        {at !== null ? `${(x / 1000).toFixed(2)} · ${(y / 1000).toFixed(2)} m` : fixture.name}
+      </span>
     </div>
   )
 }

@@ -279,12 +279,78 @@ button.danger {
 .widget.arranging {
   cursor: grab;
   opacity: 0.9;
+  /* The browser must not claim the gesture for scrolling: on a phone a drag
+     that starts as a scroll is a drag that never happens. */
+  touch-action: none;
+  user-select: none;
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
-.widget.arranging[data-dragged="true"] {
-  outline: 3px solid var(--accent);
-  outline-offset: -3px;
+.widget.arranging:hover {
   opacity: 1;
+  border-color: var(--accent);
+}
+
+/* Picked up. Faded and shrunk a little so the ghost following the finger reads
+   as the thing itself and this reads as the hole it left. */
+.widget.arranging[data-dragged="true"] {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  opacity: 0.35;
+  transform: scale(0.97);
+  cursor: grabbing;
+}
+
+/* Where it would land. A caret rather than a highlighted target, because the
+   question a hand is asking mid-drag is "between which two?", and a box lit up
+   answers a different one. */
+.caret {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 4px;
+  min-height: 48px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: caret-in 120ms ease;
+}
+
+@keyframes caret-in {
+  from {
+    transform: scaleY(0.4);
+    opacity: 0;
+  }
+}
+
+/* The thing that follows the finger. */
+.ghost {
+  position: fixed;
+  z-index: 50;
+  transform: translate(-50%, -50%) rotate(-1.5deg);
+  pointer-events: none;
+  padding: 0.5rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid var(--accent);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+  opacity: 0.95;
+}
+
+/* The row that only exists while something is being dragged. */
+.row.newrow {
+  transition: background 120ms ease;
+  border-radius: 12px;
+}
+
+.row.newrow[data-active="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .dropslot {
@@ -1170,6 +1236,24 @@ button.linkish.left {
 .bar[data-dragging="true"] {
   cursor: grabbing;
   opacity: 0.85;
+  z-index: 3;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 45%);
+}
+
+/* Where it would land is taken. Said before the finger comes up, because being
+   told "that would land on Verde" while you can still move is a different
+   experience from being told "that overlapped Verde" after the bar has jumped
+   back. */
+.bar[data-blocked="true"] {
+  background: var(--danger);
+  outline: 2px solid var(--danger);
+}
+
+/* And the bar it would hit says so too, so the eye does not have to work out
+   which one is meant. */
+.bar[data-hit="true"] {
+  outline: 2px dashed var(--danger);
+  outline-offset: 2px;
 }
 
 /* A bar whose function is gone. The show plays silence there, and the timeline
@@ -1283,6 +1367,43 @@ button.linkish.left {
 .lamp[data-dragging="true"] {
   cursor: grabbing;
   outline: 2px solid var(--accent);
+  z-index: 2;
+}
+
+/* A faint grid while something is being placed, so "a bit left of centre" can
+   be seen rather than estimated. Only while dragging: a plan is read far more
+   often than it is edited, and graph paper under a rig is noise the rest of
+   the time. */
+.plan-stage[data-dragging="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--accent) 22%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 10% 10%;
+}
+
+/* The measurement the label carries mid-drag needs to stay readable over
+   whatever is behind it. */
+.lamp[data-dragging="true"] .lamp-label {
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.lamp:hover {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 /* Dark is an outline, not black fill: a lamp at zero and a lamp whose universe
@@ -1374,4 +1495,52 @@ button.linkish.left {
   opacity: 0.35;
   pointer-events: none;
   transition: transform 60ms linear;
+}
+
+/* ---------------------------------------------------------------------------
+   Making the modes and the gestures legible.
+   ------------------------------------------------------------------------- */
+
+/* What the mode expects, said once, where the eye already is. */
+.modehint {
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* Run mode: a widget that can be pressed should look like it. Nothing here
+   moves anything on the rig -- it is affordance, which on a desk used in the
+   dark is not decoration. */
+.widget.button:not(.arranging),
+.widget.cuelist:not(.arranging) {
+  transition: transform 80ms ease, border-color 120ms ease;
+}
+
+.widget.button:not(.arranging):hover {
+  border-color: var(--accent);
+}
+
+.widget.button:not(.arranging):active {
+  transform: scale(0.97);
+}
+
+/* Keyboard users get to see where they are. :focus-visible rather than :focus,
+   so a finger on a phone is not followed around by a ring nobody asked for. */
+.app :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Edit mode: the chosen widget, and everything that can be chosen.
+   The dashed edge is the invitation; the solid one is the answer. */
+.widget.arranging[data-selected="false"]:hover {
+  border-color: var(--accent);
+}
+
+.widget.arranging[data-selected="true"] {
+  box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgb(0 0 0 / 35%);
 }
