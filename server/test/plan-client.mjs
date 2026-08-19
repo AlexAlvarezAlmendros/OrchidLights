@@ -107,6 +107,67 @@ try {
   await sleep(400)
   await fetch(`${base}/api/v1/channel-groups/${group.id}`, { method: 'DELETE' })
 
+  /* The live desk: absolute values pinned on individual channels.
+   *
+     This is what turns the plan from a picture into a place to work, and it is
+     worth checking here as well as through the browser -- the route is the
+     thing, and it should not need an interface to be known to work. */
+  const live = (values) =>
+    fetch(`${base}/api/v1/live`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values }),
+    })
+
+  const held = await live([
+    { fixture: BARRA, channel: barra.roles.red, value: 255 },
+    { fixture: BARRA, channel: barra.roles.green, value: 45 },
+    { fixture: BARRA, channel: barra.roles.blue, value: 45 },
+  ])
+  check('the live desk takes a set of channel values', held.ok, `${held.status}`)
+  await sleep(500)
+
+  check(
+    'and each one lands on its own channel',
+    dmx?.[barra.address] === 255 &&
+      dmx?.[barra.address + 1] === 45 &&
+      dmx?.[barra.address + 2] === 45,
+    `${dmx?.[barra.address]}/${dmx?.[barra.address + 1]}/${dmx?.[barra.address + 2]}`,
+  )
+
+  /* A fader could not have done that: it holds every channel it owns at one
+     value, which is right for a group of dimmers and wrong for a colour. */
+  check(
+    'which is something a level fader cannot express',
+    dmx?.[barra.address] !== dmx?.[barra.address + 1],
+    `red ${dmx?.[barra.address]} vs green ${dmx?.[barra.address + 1]}`,
+  )
+
+  const reported = await (await fetch(`${base}/api/v1/live`)).json()
+  check('what it is holding can be read back', reported.values?.length === 3,
+        `${reported.values?.length}`)
+
+  const badChannel = await live([{ fixture: BARRA, channel: 9, value: 1 }])
+  check("a channel past the fixture's last is refused", badChannel.status === 400,
+        badChannel.ok ? '(accepted)' : (await badChannel.json()).error)
+
+  const badValue = await live([{ fixture: BARRA, channel: 0, value: 300 }])
+  check('and a value that is not a DMX value', badValue.status === 400, `${badValue.status}`)
+
+  /* Nothing it refused was applied: it checks the whole batch before writing
+     any of it, because half a colour is a lamp nobody asked for. */
+  await sleep(400)
+  check('a refused batch changed nothing', dmx?.[barra.address] === 255,
+        `${dmx?.[barra.address]}`)
+
+  await fetch(`${base}/api/v1/live`, { method: 'DELETE' })
+  await sleep(600)
+  check(
+    'and letting go puts the channels down rather than leaving them latched',
+    dmx?.[barra.address] === 0 && dmx?.[barra.address + 1] === 0,
+    `${dmx?.[barra.address]}/${dmx?.[barra.address + 1]}`,
+  )
+
   /* Placing. */
   const placed = await place(BARRA, { x: 1200, y: 800, rotation: 45, gel: '#ff8800' })
   check('a fixture can be placed', placed.ok, `${placed.status}`)
