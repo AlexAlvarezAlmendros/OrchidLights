@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FunctionBody, type FunctionState, type ShowItem, type ShowTrack, api } from './api'
 import { type Span, collision } from './drag'
+import { Slider } from './slider'
 
 /** Milliseconds a drag snaps to. Fine enough to place a cue, coarse enough
  *  that a hand cannot leave a bar at 4993 ms by accident. */
@@ -79,8 +80,7 @@ export function ShowTimeline({
         <span className="spacer" />
         <label className="field">
           <span>Zoom</span>
-          <input
-            type="range"
+          <Slider
             min={10}
             max={200}
             value={zoom}

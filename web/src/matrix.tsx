@@ -13,6 +13,7 @@
  */
 
 import type { VcWidget } from './layout'
+import { Slider } from './slider'
 
 export function MatrixWidget({
   widget,
@@ -46,8 +47,7 @@ export function MatrixWidget({
     <div className="widget matrix" style={style}>
       <span className="fader-caption">{widget.caption || 'Matriz'}</span>
 
-      <input
-        type="range"
+      <Slider
         min={0}
         max={255}
         value={value}

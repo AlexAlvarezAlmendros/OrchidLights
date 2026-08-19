@@ -38,11 +38,11 @@
   --shadow: none;
 }
 
-/* Widget colours from the show are muted here: the designer picked them for
-   stage lights, not for a screen an operator stares at in the dark. */
+/* Widget colours from the show are dropped here: the designer picked them for
+   stage lights, not for a screen an operator stares at in the dark, and a green
+   edge is enough to ruin the eye the rest of this theme exists to protect. */
 [data-theme="blackout"] .widget {
-  --widget-bg: var(--surface-raised) !important;
-  color: var(--text);
+  --tint: var(--border) !important;
 }
 
 * {
@@ -190,7 +190,7 @@ body {
 }
 
 .showbar-id strong {
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 650;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -199,7 +199,7 @@ body {
 }
 
 .showbar-id span {
-  font-size: 0.74rem;
+  font-size: 0.78rem;
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -217,6 +217,19 @@ body {
   min-height: 44px;
   font-weight: 700;
   letter-spacing: 0.04em;
+}
+
+/* Numbers that are read rather than counted -- percentages, times, step counts,
+   frame rates. Monospaced digits stop the value jittering sideways as it
+   changes, which on a fader that is being moved is the difference between a
+   number you can read and a number you watch dance. */
+.num,
+.fader-value,
+.cue-state,
+.cue-time,
+.cue-number {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
 }
 
 .chip .dot {
@@ -238,6 +251,18 @@ body {
   letter-spacing: -0.005em;
   color: var(--text);
   flex-basis: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+/* What the operator wrote in brackets, set as the caption it reads as. */
+.section-note {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-dim);
 }
 
 .section:first-child {
@@ -275,7 +300,8 @@ body {
 
 .chip[data-state="open"] {
   color: var(--live);
-  border-color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 35%, transparent);
+  background: color-mix(in srgb, var(--live) 10%, transparent);
 }
 .chip[data-state="closed"] {
   color: var(--danger);
@@ -336,25 +362,80 @@ button.danger {
 .widget {
   flex: var(--grow, 1) 1 var(--basis, 8rem);
   min-width: 6.5rem;
-  background: var(--widget-bg, var(--surface-raised));
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 0.75rem 0.6rem;
+  padding: 0.7rem 0.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  min-height: 56px;
+  min-height: 64px;
   word-break: break-word;
+  /* The designer's colour down the edge.
+   *
+     Drawn as a background layer rather than an inset shadow, because the
+     shadow is where selection rings and lift shadows live: the first version
+     of this put the stripe there and edit mode's ring silently replaced it, so
+     the one screen where you pick a colour was the one screen that would not
+     show it. A background layer collides with nothing, costs no layout, and is
+     invisible when the show gave no colour. */
+  background-color: var(--surface);
+  background-image: linear-gradient(90deg, var(--tint, transparent) 0 3px, transparent 3px);
 }
 
 .widget.button {
   font-weight: 600;
+  font-size: 0.88rem;
+  gap: 0.6rem;
+}
+
+/* A button that came with a colour says so with a stripe, and then it is a card
+   like any other: text at full contrast, surface free to show state. */
+/* Arranging a button shows the same pill run mode will: picking a colour on a
+   screen that does not show it is picking blind. */
+.widget.button[data-tint="true"],
+.widget.arranging[data-tint="true"] {
+  background-image: none;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.widget.button[data-tint="true"]::before,
+.widget.arranging[data-tint="true"]::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  align-self: stretch;
+  margin: 0.15rem 0;
+  border-radius: 999px;
+  background: var(--tint);
+}
+
+/* The lamp. Dim while the function is stopped, lit while it runs -- the one
+   thing on the card that changes, so it is the one thing worth looking for.
+   Only buttons that have a function to run get one: an indicator on a control
+   that can never light is an indicator that means nothing. */
+.widget.button[data-running]::after {
+  content: "";
+  flex: none;
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .widget.button[data-running="true"] {
-  outline: 3px solid var(--live);
-  outline-offset: -3px;
+  background-color: color-mix(in srgb, var(--live) 9%, var(--surface));
+  border-color: color-mix(in srgb, var(--live) 40%, transparent);
+  color: color-mix(in srgb, var(--live) 55%, var(--text));
+}
+
+.widget.button[data-running="true"]::after {
+  background: var(--live);
+  box-shadow: 0 0 8px var(--live);
 }
 
 .widget.label {
@@ -397,10 +478,18 @@ button.danger {
    Vertical on wide screens, where they sit in a row like a real desk; the
    browser default (horizontal) is easier to drag on a phone held in one hand,
    so that is what narrow screens get. */
+/* Name and number on one line, the track under it: the pair reads as a label
+   with a value the way a desk's own scribble strip does, and a column of them
+   lines up down both edges. */
 .widget.fader {
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.6rem 0.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "caption value"
+    "track track";
+  gap: 0.3rem 0.5rem;
+  align-items: baseline;
+  padding: 0.6rem 0.7rem;
   cursor: pointer;
 }
 
@@ -411,22 +500,84 @@ button.danger {
 }
 
 .fader-caption {
-  font-size: 0.8rem;
+  grid-area: caption;
+  font-size: 0.82rem;
   font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fader-value {
-  font-size: 0.75rem;
+  grid-area: value;
+  font-size: 0.82rem;
   color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
 }
 
-.widget.fader input[type="range"] {
+/* The track, drawn.
+ *
+   A range input on a dark screen is a hairline with a dot on it, readable at
+   arm's length and no further. This is the same control -- the input is still
+   there, transparent and full size on top, so the keyboard, the disabled state
+   and the screen reader are the platform's, not a reimplementation of them --
+   with a bar you can read from the back of a room.
+
+   Its own component, because the console's faders and the plan's intensity are
+   the same gesture and should not be two different-looking bars.
+ */
+.track {
+  position: relative;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.track .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--pct, 0%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--fill-colour, var(--accent)) 35%, transparent),
+    var(--fill-colour, var(--accent))
+  );
+}
+
+.track .thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  /* Clamped so it stays inside the track at both ends rather than sliding out
+     under the rounding. */
+  left: clamp(4px, calc(var(--pct, 0%) - 7px), calc(100% - 18px));
+  width: 14px;
+  border-radius: 5px;
+  background: var(--text);
+}
+
+.track input[type="range"] {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  accent-color: var(--accent);
-  /* Fat enough to grab without looking. */
-  height: 32px;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
   touch-action: none;
+}
+
+/* Nothing behind it: an empty track is the honest drawing of a control that
+   has nothing to move. */
+.track:has(input:disabled) .fill,
+.track:has(input:disabled) .thumb {
+  display: none;
+}
+
+.widget.fader .track {
+  grid-area: track;
 }
 
 @media (min-width: 700px) {
@@ -1516,9 +1667,11 @@ button.linkish.left {
   align-self: center;
   max-height: 100%;
   max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 18px;
+  /* Darker than the console, and deliberately: every lit lamp on it is drawn
+     as a halo, and a halo needs somewhere dark to fall. */
+  background: color-mix(in srgb, var(--bg) 55%, #000);
   overflow: hidden;
   touch-action: none;
 }
@@ -1601,7 +1754,8 @@ button.linkish.left {
   position: absolute;
   top: 1.7rem;
   font-size: 0.6rem;
-  color: var(--text-dim);
+  font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+  color: color-mix(in srgb, var(--text-dim) 70%, transparent);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -1774,7 +1928,7 @@ button.linkish.left {
   z-index: 3;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(8px);
   padding: 0.7rem 0.75rem;
   display: flex;
@@ -1851,8 +2005,34 @@ button.linkish.left {
 }
 
 .selection-head strong {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 650;
+}
+
+/* Name on the left, value on the right, the way the console's faders read. */
+.selection .field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.selection .field-head .num {
+  margin-left: auto;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The panel sits over the rig; anything in it that is not a control is said
+   quietly so the lamps stay the loudest thing on the stage. */
+.selection .hint {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  margin: 0;
 }
 
 .selection-head button.icon {
@@ -1878,16 +2058,20 @@ button.linkish.left {
 
 .swatches {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
 }
 
+/* Squares, not slabs. Ten colours poured across a panel is a paint program;
+   this is a strip you glance at and hit, so the swatch is the size of a
+   fingertip and no larger, and the panel keeps its room for the lamps behind
+   it. */
 .swatch {
-  flex: 1 1 3rem;
-  min-width: 3rem;
-  min-height: 44px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 2px solid transparent;
   padding: 0;
 }
 
@@ -1948,7 +2132,7 @@ button.linkish.left {
   /* The grid decides the size now, so the geometry-derived flex is off. */
   flex: initial;
   min-width: 0;
-  min-height: 62px;
+  min-height: 64px;
 }
 
 /* A frame brings its own children and needs the room to show them. */
@@ -1964,9 +2148,9 @@ button.linkish.left {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-  padding: 0.8rem 0.85rem;
+  padding: 0.9rem 0.95rem;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--surface);
   /* Held in place while the sections scroll past: a fader is what you are
      holding while you press other things. */
@@ -1980,6 +2164,12 @@ button.linkish.left {
   gap: 0.55rem;
 }
 
+/* The panel's own heading sits tight to the first fader: the border already
+   says where the panel starts. */
+.levels > .section {
+  margin: 0;
+}
+
 .levels-title {
   font-size: 0.7rem;
   font-weight: 700;
@@ -1988,36 +2178,14 @@ button.linkish.left {
   color: var(--text-dim);
 }
 
-/* Horizontal in the column, which is what makes a stack of them readable at a
-   glance -- the name and the number line up down the left and right edges. */
+/* Inside the panel the faders are rows, not cards: one border around the group
+   instead of one around each, which is what makes a stack of five read as a
+   bank rather than as five separate things that happen to be adjacent. */
 .levels .widget.fader {
   flex: initial;
   min-height: 0;
   padding: 0;
   border: none;
   background: transparent;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "caption value"
-    "track track";
-  gap: 0.25rem 0.5rem;
-  align-items: baseline;
-}
-
-.levels .widget.fader .fader-caption {
-  grid-area: caption;
-  text-align: left;
-}
-
-.levels .widget.fader .fader-value {
-  grid-area: value;
-}
-
-.levels .widget.fader input[type="range"] {
-  grid-area: track;
-  writing-mode: horizontal-tb;
-  direction: ltr;
-  width: 100%;
-  height: 34px;
+  background-image: none;
 }

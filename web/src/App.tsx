@@ -25,8 +25,9 @@ import { type Connection, Live } from './live'
 import { MatrixWidget } from './matrix'
 import { Nav } from './nav'
 import { Plan } from './plan'
-import { toSections } from './sections'
+import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
+import { Slider } from './slider'
 import type { View } from './views'
 import { CREATABLE, placeBelow } from './widgets'
 import { XYPad } from './xypad'
@@ -984,7 +985,7 @@ function Surface({
         <div className="blocks">
           {sections.map((section, index) => (
             <section className="block" key={section.title ?? `block-${index}`}>
-              {section.title !== null && <h2 className="section">{section.title}</h2>}
+              {section.title !== null && <Heading text={section.title} />}
               {section.controls.length > 0 && (
                 <div className="grid">{section.controls.map(draw)}</div>
               )}
@@ -994,6 +995,7 @@ function Surface({
 
         {levelGroups.length > 0 && (
           <aside className="levels" aria-label="Niveles">
+            <h2 className="section">Niveles</h2>
             {levelGroups.map((group, index) => (
               <div className="levels-group" key={group.title ?? `levels-${index}`}>
                 {/* Only worth a caption when there is more than one group to
@@ -1167,10 +1169,20 @@ function Widget({
   selected: boolean
   onSelect: (id: number) => void
 }) {
+  /* The colour the designer gave the widget, shown as a stripe down its edge
+     rather than poured over the whole card.
+   *
+     Flooding it was how the old desk did it and it costs twice: the caption
+     goes unreadable whenever the pair was picked for a lamp instead of a
+     screen, and a wall of saturated slabs leaves nothing to tell the operator
+     what is running -- every card already shouts. On the edge the colour still
+     identifies the button across a dark room, and the card is free to say
+     something with its own surface. Foreground stands in when that is the only
+     colour there is, so nothing the designer chose is dropped. */
+  const tint = widget.background ?? widget.foreground
   const style = {
     '--grow': grow,
-    ...(widget.background ? { '--widget-bg': widget.background } : {}),
-    ...(widget.foreground ? { color: widget.foreground } : {}),
+    ...(tint ? { '--tint': tint } : {}),
   } as React.CSSProperties
 
   /* Where the finger went down, and whether it has gone anywhere since. In a
@@ -1190,6 +1202,7 @@ function Widget({
           type="button"
           className={`widget ${widget.type} arranging`}
           style={style}
+          data-tint={tint !== undefined}
           data-dragged={dragged}
           data-widget-id={widget.id ?? ''}
           data-row={rowIndex}
@@ -1287,6 +1300,7 @@ function Widget({
         type="button"
         className="widget button"
         style={style}
+        data-tint={tint !== undefined}
         data-running={running.has(id)}
         aria-pressed={running.has(id)}
         onClick={() => onToggle(id)}
@@ -1539,8 +1553,11 @@ function SpeedDial({
   return (
     <label className="widget fader speeddial" style={style} data-usable={usable}>
       <span className="fader-caption">{widget.caption || 'Velocidad'}</span>
-      <input
-        type="range"
+      <span className="fader-value num">
+        {value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(2)} s`}
+        {count > 0 && <> · {count} fn</>}
+      </span>
+      <Slider
         min={min}
         max={max}
         step={10}
@@ -1549,11 +1566,18 @@ function SpeedDial({
         aria-label={widget.caption}
         onChange={(e) => widget.id !== undefined && onChange(widget.id, Number(e.target.value))}
       />
-      <span className="fader-value">
-        {value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(2)} s`}
-        {count > 0 && <> · {count} fn</>}
-      </span>
     </label>
+  )
+}
+
+/** A section heading, and the aside the operator bracketed after it. */
+function Heading({ text }: { text: string }) {
+  const { title, note } = splitHeading(text)
+  return (
+    <h2 className="section">
+      {title}
+      {note !== null && <span className="section-note">{note}</span>}
+    </h2>
   )
 }
 
@@ -1584,8 +1608,8 @@ function Fader({
   return (
     <label className="widget fader" style={style} data-usable={usable}>
       <span className="fader-caption">{widget.caption || `#${widget.id ?? '?'}`}</span>
-      <input
-        type="range"
+      <span className="fader-value num">{usable ? `${percent}%` : widget.sliderMode}</span>
+      <Slider
         min={low}
         max={high}
         value={value}
@@ -1593,7 +1617,6 @@ function Fader({
         aria-label={widget.caption}
         onChange={(e) => widget.id !== undefined && onChange(widget.id, Number(e.target.value))}
       />
-      <span className="fader-value">{usable ? `${percent}%` : widget.sliderMode}</span>
     </label>
   )
 }

@@ -35,6 +35,26 @@ export function headingOf(widget: VcWidget): string {
   return (widget.caption ?? '').replace(/^[\s—–-]+|[\s—–-]+$/g, '')
 }
 
+/**
+ * A heading split into its name and the aside the operator put in brackets.
+ *
+ * "COLORES (Washes + Spots + Bars + Blinders)" is one label doing two jobs:
+ * naming the group and listing what it covers. Drawn as one line it is a long
+ * heading; drawn as two it is a heading with a caption, which is what it always
+ * was. Nothing is reworded or dropped -- both halves come out exactly as
+ * written, so a bracket that meant something else still says it.
+ */
+export function splitHeading(heading: string): { title: string; note: string | null } {
+  const match = /^(.*?)\s*\(([^()]*)\)$/.exec(heading.trim())
+  const before = match?.[1]?.trim()
+  const inside = match?.[2]?.trim()
+  // A heading that is nothing but a bracket keeps it: it is the whole name.
+  if (before === undefined || before === '' || inside === undefined || inside === '') {
+    return { title: heading, note: null }
+  }
+  return { title: before, note: inside }
+}
+
 export function toSections(rows: readonly Row[]): Section[] {
   const sections: Section[] = []
   let current: Section | null = null

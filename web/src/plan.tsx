@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { type FunctionState, type PlanFixture, type PlanState, api } from './api'
+import { Slider } from './slider'
 
 /** A handful of colours worth reaching for without a picker: the ones a rig
  *  gets asked for by name. A full picker belongs in the scene editor, where a
@@ -244,15 +245,18 @@ export function Plan({
             </div>
 
             <label className="field">
-              <span>
+              <span className="field-head">
                 Intensidad
                 {dimmable === 0 ? ' · ninguna de estas tiene dímer' : ''}
+                <span className="num">{Math.round((level / 255) * 100)}%</span>
               </span>
-              <input
-                type="range"
+              {/* Green rather than the console's violet: this bar drives the
+                  rig directly, and green is what says "live" everywhere else. */}
+              <Slider
                 min={0}
                 max={255}
                 value={level}
+                fill="var(--live)"
                 disabled={dimmable === 0}
                 onChange={(e) => dim(Number(e.target.value))}
               />
@@ -416,7 +420,13 @@ function Lamp({
         left: `${(x / across) * 100}%`,
         top: `${(y / deep) * 100}%`,
         transform: `translate(-50%, -50%) rotate(${fixture.rotation ?? 0}deg)`,
-        ...(colour !== null ? { background: colour, boxShadow: `0 0 18px ${colour}` } : {}),
+        /* Lit: filled, ringed in its own colour, and throwing a halo. The
+           halo is the whole point of drawing a rig from above -- a flat disc
+           says which lamp, a glow says which lamp is on, and that is the
+           question somebody standing at the desk is actually asking. */
+        ...(colour !== null
+          ? { background: colour, borderColor: colour, boxShadow: `0 0 22px ${colour}` }
+          : {}),
       }}
       title={`${fixture.name} · U${fixture.universe} @ ${fixture.address + 1}`}
       onPointerDown={(e) => {

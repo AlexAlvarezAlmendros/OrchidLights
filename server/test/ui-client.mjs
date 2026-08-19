@@ -1061,6 +1061,43 @@ try {
       if (loose.some(f => f.closest('.levels') === null)) return 'a fader is loose in the grid'
     }
 
+    /* The fader is drawn, and the drawing is the value.
+     *
+       Replacing the browser's range with a bar is only worth doing if the bar
+       is the truth: a fill that sits at some fixed width looks like a working
+       fader from across a room and is a lie the operator finds out about when
+       the light does not move. So this reads the fill against the input it
+       covers, at both ends of the travel. */
+    const bar = loose.find(f => f.getAttribute('data-usable') === 'true')
+    if (bar) {
+      const input = bar.querySelector('input[type=range]')
+      const fill = bar.querySelector('.fill')
+      const thumb = bar.querySelector('.thumb')
+      if (!fill || !thumb) return 'the fader has no drawn track'
+      if (getComputedStyle(input).opacity !== '0') return 'the range is drawn twice'
+
+      const set = v => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype, 'value').set
+        setter.call(input, String(v))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      const width = () => fill.getBoundingClientRect().width
+      const track = bar.querySelector('.track').getBoundingClientRect().width
+
+      const was = input.value
+      set(input.max); await new Promise(r => setTimeout(r, 400))
+      const full = width()
+      set(input.min); await new Promise(r => setTimeout(r, 400))
+      const none = width()
+      set(was); await new Promise(r => setTimeout(r, 400))
+
+      if (none > 2) return 'the fader draws ' + Math.round(none) + 'px of fill at zero'
+      if (full < track * 0.9) {
+        return 'at full the fill is ' + Math.round(full) + ' of ' + Math.round(track)
+      }
+    }
+
     /* Equal cards: the old flex rows stretched whatever was alone on a line,
        so two colours left over from a row of eight became half-width slabs. */
     const cards = [...document.querySelectorAll('.grid > .widget')]
@@ -1237,12 +1274,25 @@ try {
     const painted = walk(vc).filter(w => w.background === '#ff8800')
     if (painted.length !== 1) return painted.length + ' widgets came back orange'
 
-    /* And it reaches the screen, which is a different question: the console
-       renders the colour through a custom property. */
+    /* And it reaches the screen, which is a different question.
+     *
+       Asking whether the custom property was set proves only that a string
+       arrived somewhere; the operator's question is whether the colour is
+       visible on the card. So this reads the pixels the stripe is actually
+       painted with -- the pill on a button, the inset edge on anything else --
+       and either one has to come back orange. */
     const drawn = [...document.querySelectorAll('.widget')]
-      .find(w => w.style.getPropertyValue('--widget-bg') === 'rgb(255, 136, 0)'
-              || w.style.getPropertyValue('--widget-bg') === '#ff8800')
+      .find(w => w.style.getPropertyValue('--tint') === 'rgb(255, 136, 0)'
+              || w.style.getPropertyValue('--tint') === '#ff8800')
     if (!drawn) return 'the colour did not reach the widget'
+
+    const orange = 'rgb(255, 136, 0)'
+    const pill = getComputedStyle(drawn, '::before').backgroundColor
+    const edge = getComputedStyle(drawn).backgroundImage
+    if (pill !== orange && !edge.includes(orange)) {
+      return 'the colour is set but not drawn on .' + drawn.className
+        + ': pill ' + pill + ', edge ' + edge
+    }
 
     /* Back to the default, which is not the same as picking a grey that
        matches: QLC+ writes "Default" and each theme renders it its own way. */
@@ -1523,6 +1573,35 @@ try {
     return 'ok'
   })()`)
   check('the app can be installed to a home screen', installable === 'ok', installable)
+
+  /* One slider in the app, everywhere.
+   *
+     The rule this guards is the one that already broke once: a speed dial kept
+     the browser's range, and in a grid with no height to constrain it the thing
+     rendered as a tall vertical slider through the middle of a row of buttons.
+     Nothing failed -- it worked perfectly, it just looked like a different
+     program had been pasted in. So the check is structural rather than visual:
+     every range in the document is inside a drawn track, on every screen.
+
+     Walked across the views rather than asked once, because a control that only
+     appears in the show editor is exactly the one that gets missed. */
+  const bare = await evaluate(`(async () => {
+    const found = []
+    for (const view of ['Consola', 'Funciones', 'Patch', 'Planta']) {
+      const tab = [...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === view)
+      if (!tab) continue
+      tab.click()
+      await new Promise(r => setTimeout(r, 900))
+      for (const input of document.querySelectorAll('input[type=range]')) {
+        if (input.closest('.track') === null) {
+          found.push(view + ': ' + (input.getAttribute('aria-label') ?? input.className ?? '?'))
+        }
+      }
+    }
+    return found.length === 0 ? 'ok' : found.join(', ')
+  })()`)
+  check('every slider in the app is the same drawn control', bare === 'ok', bare)
 
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {

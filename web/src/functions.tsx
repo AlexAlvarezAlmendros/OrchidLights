@@ -21,6 +21,7 @@ import {
   api,
 } from './api'
 import { ShowTimeline } from './show'
+import { Slider } from './slider'
 
 /** The seven EFX patterns the engine has. Fixed, unlike the RGB algorithms,
  *  which are scripts and are asked for at runtime. */
@@ -302,8 +303,7 @@ function FunctionEditor({
           />
           <label className="field">
             <span>Volumen</span>
-            <input
-              type="range"
+            <Slider
               min={0}
               max={100}
               defaultValue={Math.round((body.volume ?? 1) * 100)}
@@ -670,8 +670,7 @@ function SceneValues({
               {value.fixtureName ?? `#${value.fixture}`} ·{' '}
               {value.channelName ?? `canal ${value.channel + 1}`}
             </span>
-            <input
-              type="range"
+            <Slider
               min={0}
               max={255}
               defaultValue={value.value}
