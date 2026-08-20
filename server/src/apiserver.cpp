@@ -23,6 +23,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QDateTime>
+#include <QSettings>
 #include <QHttpServerRequest>
 #include <QUrlQuery>
 #include <QFileInfo>
@@ -218,6 +220,23 @@ QString ApiServer::url() const
     return QStringLiteral("http://%1:%2")
         .arg(m_listenAll ? QStringLiteral("0.0.0.0") : QStringLiteral("127.0.0.1"))
         .arg(m_port);
+}
+
+QStringList ApiServer::recentProjects() const
+{
+    QSettings settings;
+    return settings.value(QStringLiteral("recents/projects")).toStringList();
+}
+
+void ApiServer::rememberRecent(const QString &path)
+{
+    QSettings settings;
+    QStringList recents = settings.value(QStringLiteral("recents/projects")).toStringList();
+    recents.removeAll(path);
+    recents.prepend(path);
+    while (recents.size() > 10)
+        recents.removeLast();
+    settings.setValue(QStringLiteral("recents/projects"), recents);
 }
 
 void ApiServer::registerRoutes()
@@ -2202,6 +2221,20 @@ void ApiServer::registerRoutes()
         body["name"] = QFileInfo(m_engine->projectPath()).fileName();
         body["directory"] = m_engine->projectsDirectory();
         body["modified"] = doc->isModified();
+
+        /* A recovery copy newer than the project it shadows. Reported, never
+           auto-loaded: the operator decides whether the crash's last thirty
+           seconds are worth more than what the file says. */
+        const QString autosave = m_engine->pendingAutosave();
+        if (autosave.isEmpty() == false)
+        {
+            QJsonObject recovery;
+            recovery["name"] = QFileInfo(autosave).fileName();
+            recovery["savedAt"] =
+                QFileInfo(autosave).lastModified().toString(Qt::ISODate);
+            body["autosave"] = recovery;
+        }
+
         return QHttpServerResponse(body);
     });
 
@@ -2259,6 +2292,118 @@ void ApiServer::registerRoutes()
 
         QJsonObject body;
         body["path"] = m_engine->projectPath();
+        return QHttpServerResponse(body);
+    });
+
+    /* The disk-path routes. Strict token, whatever the loopback policy says:
+       the rest of the API touches the show, these touch the filesystem, and
+       "anything on this machine may run lights" must never grow into
+       "anything that can reach this socket can read or write my files". The
+       desktop shell holds the token; a phone on the venue network does not.
+
+       The name-only routes above stay as the phone-safe surface. */
+    m_server->route("/api/v1/project/new", QHttpServerRequest::Method::Post,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        m_engine->newProject();
+
+        QJsonObject body;
+        body["path"] = QString();
+        body["modified"] = false;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project/open", QHttpServerRequest::Method::Post,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const QString path = asked.value(QStringLiteral("path")).toString();
+        if (path.isEmpty() || QFileInfo(path).isAbsolute() == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Give an absolute path"));
+        if (path.endsWith(QStringLiteral(".qxw"), Qt::CaseInsensitive) == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Only .qxw projects open"));
+        if (QFileInfo::exists(path) == false)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such file"));
+
+        QString errorMessage;
+        if (m_engine->loadProject(path, errorMessage) == false)
+            return jsonError(StatusCode::Conflict, errorMessage);
+
+        rememberRecent(path);
+
+        QJsonObject body;
+        body["path"] = m_engine->projectPath();
+        const QString unresolved = m_engine->projectErrors();
+        if (unresolved.isEmpty() == false)
+            body["unresolved"] = unresolved;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project/save-as", QHttpServerRequest::Method::Post,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        QString path = asked.value(QStringLiteral("path")).toString();
+        if (path.isEmpty() || QFileInfo(path).isAbsolute() == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Give an absolute path"));
+        /* The suffix is appended, not demanded: every file dialog in the
+           world lets the operator type a bare name, and refusing it would
+           make the shell re-implement this rule. */
+        if (path.endsWith(QStringLiteral(".qxw"), Qt::CaseInsensitive) == false)
+            path += QStringLiteral(".qxw");
+
+        QString errorMessage;
+        if (m_engine->saveProject(path, errorMessage) == false)
+            return jsonError(StatusCode::Conflict, errorMessage);
+
+        rememberRecent(path);
+
+        QJsonObject body;
+        body["path"] = m_engine->projectPath();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project/recover", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        /* Ordinary auth: this loads a file the daemon itself wrote next to
+           the project, never a path a client chose. */
+        if (denied(request))
+            return unauthorized();
+
+        QString errorMessage;
+        if (m_engine->recoverAutosave(errorMessage) == false)
+            return jsonError(StatusCode::Conflict, errorMessage);
+
+        QJsonObject body;
+        body["path"] = m_engine->projectPath();
+        body["modified"] = true;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project/recents", QHttpServerRequest::Method::Get,
+                    [this](const QHttpServerRequest &request) {
+        /* Strict as well: a list of paths is a map of the disk. */
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        QJsonArray entries;
+        for (const QString &path : recentProjects())
+        {
+            QJsonObject entry;
+            entry["path"] = path;
+            entry["name"] = QFileInfo(path).fileName();
+            entry["exists"] = QFileInfo::exists(path);
+            entries.append(entry);
+        }
+
+        QJsonObject body;
+        body["recents"] = entries;
         return QHttpServerResponse(body);
     });
 

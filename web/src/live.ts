@@ -39,6 +39,10 @@ export interface LiveHandlers {
   onUniverse?: (universe: number, channels: Uint8Array) => void
   /** Blackout engaged or released -- by us or by anyone. */
   onBlackout?: (on: boolean) => void
+  /** The dirty flag flipped -- an edit landed, or a save (anyone's) cleaned
+   *  it. Both edges travel: a banner that says "sin guardar" after the
+   *  desktop saved reads as a desk that lost the edits. */
+  onProject?: (dirty: boolean, name: string) => void
   /** The daemon refused something this client sent. Surfaced, not swallowed:
    *  a press that did nothing and said nothing teaches the operator that the
    *  desk is broken. */
@@ -126,6 +130,9 @@ export class Live {
           break
         case 'blackout':
           this.handlers.onBlackout?.(message.on === true)
+          break
+        case 'project':
+          this.handlers.onProject?.(message.dirty === true, String(message.name ?? ''))
           break
         case 'error':
           this.handlers.onError?.(String(message.message ?? 'La mesa rechazó la orden'))

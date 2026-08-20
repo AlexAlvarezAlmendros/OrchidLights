@@ -99,6 +99,12 @@ signals:
 private:
     void registerRoutes();
 
+    /** The recent-projects list, newest first, capped at ten. Stored in
+     *  QSettings like the audio input preference: machine state, not project
+     *  state. */
+    QStringList recentProjects() const;
+    void rememberRecent(const QString &path);
+
     EngineHost *m_engine = nullptr;
     QHttpServer *m_server = nullptr;
     LiveFeed *m_feed = nullptr;

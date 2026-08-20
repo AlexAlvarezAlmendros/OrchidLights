@@ -89,6 +89,15 @@ public:
     /** Load a project into the running engine. */
     bool loadProject(const QString &fileName, QString &errorMessage);
 
+    /**
+     * Start over: an empty document, no path.
+     *
+     * Deliberately forgets where the old project lived, so the next save has
+     * to say where -- "new" that silently keeps the old path is how a blank
+     * workspace ends up written over last night's show.
+     */
+    void newProject();
+
     /** Write the current project back out. An empty fileName saves over the
      *  file it was loaded from. */
     bool saveProject(const QString &fileName, QString &errorMessage);
@@ -113,6 +122,26 @@ public:
     /** Resolve a bare file name inside the projects directory. Empty when the
      *  name tries to escape it. */
     QString resolveProjectName(const QString &name) const;
+
+    /**
+     * The autosave: <project>.autosave.qxw next to the project, thirty
+     * seconds after each modification (collapsed while edits keep coming),
+     * deleted by a real save. The interval bends only for the tests
+     * (ORCHID_AUTOSAVE_MS), because a smoke test that waits half a minute
+     * per assertion is a smoke test nobody runs.
+     */
+    QString autosavePath() const;
+    /** An autosave newer than the project it shadows, or empty. */
+    QString pendingAutosave() const;
+
+    /**
+     * Load the pending autosave's CONTENT while keeping the project's own
+     * path: the recovered show is "your project, modified" -- saving it goes
+     * to the real file, and the shadow disappears with that save. Loading the
+     * autosave as if it were the project would aim every later save at
+     * <show>.qxw.autosave.qxw, a file no other tool will ever look for.
+     */
+    bool recoverAutosave(QString &errorMessage);
 
     Doc *doc() const { return m_doc; }
 
@@ -321,8 +350,12 @@ private:
      *  exist. The console itself is only text and will hold anything. */
     VcPatch::Result checkReferences(const QString &widgetId, const QJsonObject &patch) const;
 
+    /** Arm (or re-arm) the autosave countdown after a modification. */
+    void armAutosave();
+
     Doc *m_doc = nullptr;
     LevelSource *m_levels = nullptr;
+    class QTimer *m_autosave = nullptr;
     SeenInput m_lastInput;
     AudioTriggers *m_triggers = nullptr;
     bool m_running = false;

@@ -26,6 +26,7 @@ import { type Connection, Live } from './live'
 import { MatrixWidget } from './matrix'
 import { Nav } from './nav'
 import { Plan } from './plan'
+import { ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
 import { Slider } from './slider'
@@ -155,6 +156,17 @@ export function App() {
     return () => clearTimeout(timer)
   }, [connection])
 
+  /* Closing a tab with unsaved edits gets the browser's own "are you sure".
+     Only while dirty: registering it permanently would nag on every close. */
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+
   /* A toast is a moment, not a state: it clears itself so the next problem is
      legible, and touching nothing else. */
   useEffect(() => {
@@ -183,6 +195,15 @@ export function App() {
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
       onBlackout: setBlackout,
       onError: setToast,
+      onProject: (isDirty) => {
+        setDirty(isDirty)
+        /* The identity (name, autosave) re-reads cheaply; the flag is what
+           needs to be instant. */
+        api
+          .project()
+          .then(setProject)
+          .catch(() => undefined)
+      },
       /* Somebody else edited the show. Re-read what they touched rather than
          patching a local copy from the message: the daemon decides what a
          change means, and two clients guessing at it is how they drift. */
@@ -230,7 +251,10 @@ export function App() {
 
     api
       .project()
-      .then(setProject)
+      .then((state) => {
+        setProject(state)
+        setDirty(state.modified)
+      })
       .catch(() => setProject(null))
 
     api
@@ -670,10 +694,14 @@ export function App() {
             permanent place. The name is the show, not the product: an operator
             with three shows on one daemon needs to know which one is up. */}
           <div className="showbar-id">
-            <strong>{project?.name.replace(/\.qxw$/i, '') ?? 'OrchidLights'}</strong>
+            <ProjectMenu
+              name={project?.name.replace(/\.qxw$/i, '') || 'OrchidLights'}
+              dirty={dirty}
+              onError={setToast}
+            />
             <span>
               {fixtures.length} fixtures
-              {project?.modified ? ' · sin guardar' : ''}
+              {dirty ? ' · sin guardar' : ''}
             </span>
           </div>
 
@@ -761,6 +789,43 @@ export function App() {
           <p className="toast" role="alert">
             {toast}
           </p>
+        )}
+
+        {/* A crash left edits newer than the file. Offered, never auto-loaded:
+            whether the last thirty seconds beat the file is the operator's
+            call, and "Seguir con el archivo" leaves the shadow alone (the
+            next real save clears it). */}
+        {project?.autosave && (
+          <div className="notice">
+            <span>
+              Hay una copia de recuperación más nueva que el proyecto (guardada{' '}
+              {new Date(project.autosave.savedAt).toLocaleTimeString()}).
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                api.recoverAutosave().then(
+                  () => api.project().then(setProject, () => undefined),
+                  (e: unknown) => setToast(e instanceof Error ? e.message : String(e)),
+                )
+              }
+            >
+              Recuperar
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setProject((current) => {
+                  if (current === null) return current
+                  // exactOptionalPropertyTypes: absent, not undefined.
+                  const { autosave: _dismissed, ...rest } = current
+                  return rest
+                })
+              }
+            >
+              Seguir con el archivo
+            </button>
+          </div>
         )}
 
         {/* Full-screen on purpose: nothing behind it works without the token,
