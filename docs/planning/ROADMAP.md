@@ -383,6 +383,11 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
   - **Apagada se dibuja como contorno, no como negro**: una lámpara a cero y una lámpara cuyo universo no está llegando se ven idénticas si las dos se pintan negras, y solo una de las dos es un problema.
   - **La altura se rechaza** en vez de aceptarse y perderse: este build del motor solo escribe X e Y al fichero (la tercera coordenada está tras `QMLUI` en `monitorproperties.cpp:959`), y una lámpara que se mueve al reabrir el proyecto es peor que una que nunca se pudo subir.
   - Los frames solo se piden mientras la planta está abierta, y se tiran al salir: llegan al ritmo del flush y meterlos por el estado de React re-renderiza todo lo que haya montado.
+- [x] **La planta como sitio donde trabajar, no solo donde mirar.** Se tocan lámparas para elegirlas —un toque elige, otro la suelta, sin modificador porque en un móvil no hay ninguno que mantener— y el panel de abajo es lo que se les puede hacer: intensidad y color.
+  - Para eso hizo falta algo que el daemon no tenía: **una mesa en vivo**, valores absolutos clavados en canales sueltos (`PUT /api/v1/live`). Un fader de nivel no sirve —sostiene todos sus canales a UN valor, que está bien para un grupo de intensidad y mal para rojo 255, verde 40, azul 0.
+  - El mapa de color→canales vive **en el mismo sitio que el de canales→color**, en `plan.tsx`: los roles son un contrato, y una segunda copia del mapeo en el servidor sería una segunda cosa que se desincroniza. El blanco y el ámbar bajan a cero con él, porque un rojo sobre una barra con el blanco arriba es rosa.
+  - **No es una edición**: no toca el documento y no sobrevive a una recarga, y el panel lo dice. Soltar baja los canales a cero en vez de dejarlos enganchados.
+  - Lo que no mezcla color, o no tiene dímer, se dice con el número — «2 de 4 no mezclan color»— en vez de ofrecer un control que no hace nada.
 
 ### F8 — Extras
 

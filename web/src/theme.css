@@ -38,11 +38,11 @@
   --shadow: none;
 }
 
-/* Widget colours from the show are muted here: the designer picked them for
-   stage lights, not for a screen an operator stares at in the dark. */
+/* Widget colours from the show are dropped here: the designer picked them for
+   stage lights, not for a screen an operator stares at in the dark, and a green
+   edge is enough to ruin the eye the rest of this theme exists to protect. */
 [data-theme="blackout"] .widget {
-  --widget-bg: var(--surface-raised) !important;
-  color: var(--text);
+  --tint: var(--border) !important;
 }
 
 * {
@@ -190,7 +190,7 @@ body {
 }
 
 .showbar-id strong {
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 650;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -199,7 +199,7 @@ body {
 }
 
 .showbar-id span {
-  font-size: 0.74rem;
+  font-size: 0.78rem;
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -217,6 +217,19 @@ body {
   min-height: 44px;
   font-weight: 700;
   letter-spacing: 0.04em;
+}
+
+/* Numbers that are read rather than counted -- percentages, times, step counts,
+   frame rates. Monospaced digits stop the value jittering sideways as it
+   changes, which on a fader that is being moved is the difference between a
+   number you can read and a number you watch dance. */
+.num,
+.fader-value,
+.cue-state,
+.cue-time,
+.cue-number {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
 }
 
 .chip .dot {
@@ -238,6 +251,18 @@ body {
   letter-spacing: -0.005em;
   color: var(--text);
   flex-basis: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+/* What the operator wrote in brackets, set as the caption it reads as. */
+.section-note {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-dim);
 }
 
 .section:first-child {
@@ -275,7 +300,8 @@ body {
 
 .chip[data-state="open"] {
   color: var(--live);
-  border-color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 35%, transparent);
+  background: color-mix(in srgb, var(--live) 10%, transparent);
 }
 .chip[data-state="closed"] {
   color: var(--danger);
@@ -336,29 +362,83 @@ button.danger {
 .widget {
   flex: var(--grow, 1) 1 var(--basis, 8rem);
   min-width: 6.5rem;
-  background: var(--widget-bg, var(--surface-raised));
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 0.75rem 0.6rem;
+  padding: 0.7rem 0.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  min-height: 56px;
+  min-height: 64px;
   word-break: break-word;
+  /* The designer's colour down the edge.
+   *
+     Drawn as a background layer rather than an inset shadow, because the
+     shadow is where selection rings and lift shadows live: the first version
+     of this put the stripe there and edit mode's ring silently replaced it, so
+     the one screen where you pick a colour was the one screen that would not
+     show it. A background layer collides with nothing, costs no layout, and is
+     invisible when the show gave no colour. */
+  background-color: var(--surface);
+  background-image: linear-gradient(90deg, var(--tint, transparent) 0 3px, transparent 3px);
 }
 
 .widget.button {
   font-weight: 600;
+  font-size: 0.88rem;
+  gap: 0.6rem;
+}
+
+/* A button that came with a colour says so with a stripe, and then it is a card
+   like any other: text at full contrast, surface free to show state. */
+/* Arranging a button shows the same pill run mode will: picking a colour on a
+   screen that does not show it is picking blind. */
+.widget.button[data-tint="true"],
+.widget.arranging[data-tint="true"] {
+  background-image: none;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.widget.button[data-tint="true"]::before,
+.widget.arranging[data-tint="true"]::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  align-self: stretch;
+  margin: 0.15rem 0;
+  border-radius: 999px;
+  background: var(--tint);
+}
+
+/* The lamp. Dim while the function is stopped, lit while it runs -- the one
+   thing on the card that changes, so it is the one thing worth looking for.
+   Only buttons that have a function to run get one: an indicator on a control
+   that can never light is an indicator that means nothing. */
+.widget.button[data-running]::after {
+  content: "";
+  flex: none;
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .widget.button[data-running="true"] {
-  outline: 3px solid var(--live);
-  outline-offset: -3px;
+  background-color: color-mix(in srgb, var(--live) 9%, var(--surface));
+  border-color: color-mix(in srgb, var(--live) 40%, transparent);
+  color: color-mix(in srgb, var(--live) 55%, var(--text));
+}
+
+.widget.button[data-running="true"]::after {
+  background: var(--live);
+  box-shadow: 0 0 8px var(--live);
 }
 
 .widget.label {
-  background: transparent;
+  background-color: transparent;
   border: none;
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -397,10 +477,18 @@ button.danger {
    Vertical on wide screens, where they sit in a row like a real desk; the
    browser default (horizontal) is easier to drag on a phone held in one hand,
    so that is what narrow screens get. */
+/* Name and number on one line, the track under it: the pair reads as a label
+   with a value the way a desk's own scribble strip does, and a column of them
+   lines up down both edges. */
 .widget.fader {
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.6rem 0.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "caption value"
+    "track track";
+  gap: 0.3rem 0.5rem;
+  align-items: baseline;
+  padding: 0.6rem 0.7rem;
   cursor: pointer;
 }
 
@@ -411,34 +499,95 @@ button.danger {
 }
 
 .fader-caption {
-  font-size: 0.8rem;
+  grid-area: caption;
+  font-size: 0.82rem;
   font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fader-value {
-  font-size: 0.75rem;
+  grid-area: value;
+  font-size: 0.82rem;
   color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
 }
 
-.widget.fader input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-  /* Fat enough to grab without looking. */
-  height: 32px;
+/* The track, drawn.
+ *
+   A range input on a dark screen is a hairline with a dot on it, readable at
+   arm's length and no further. This is the same control -- the input is still
+   there, transparent and full size on top, so the keyboard, the disabled state
+   and the screen reader are the platform's, not a reimplementation of them --
+   with a bar you can read from the back of a room.
+
+   Its own component, because the console's faders and the plan's intensity are
+   the same gesture and should not be two different-looking bars.
+ */
+.track {
+  position: relative;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.track .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--pct, 0%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--fill-colour, var(--accent)) 35%, transparent),
+    var(--fill-colour, var(--accent))
+  );
+}
+
+.track .thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  /* Clamped so it stays inside the track at both ends rather than sliding out
+     under the rounding. */
+  left: clamp(4px, calc(var(--pct, 0%) - 7px), calc(100% - 18px));
+  width: 14px;
+  border-radius: 5px;
+  background: var(--text);
+}
+
+/* The grab area, and it must cover the whole track.
+ *
+   Marked !important because that is exactly how this broke once: a rule left
+   over from the vertical faders still said `width: 32px`, won on source order,
+   and left the input a 32-pixel square in the corner. The fader drew correctly,
+   showed the right number, and answered the pointer on about a tenth of itself.
+   Nothing is allowed to size this again. */
+.track input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  writing-mode: horizontal-tb;
+  direction: ltr;
+  opacity: 0;
+  cursor: inherit;
   touch-action: none;
 }
 
-@media (min-width: 700px) {
-  .widget.fader {
-    min-height: 190px;
-  }
-  .widget.fader input[type="range"] {
-    writing-mode: vertical-lr;
-    direction: rtl;
-    width: 32px;
-    flex: 1;
-  }
+/* Nothing behind it: an empty track is the honest drawing of a control that
+   has nothing to move. */
+.track:has(input:disabled) .fill,
+.track:has(input:disabled) .thumb {
+  display: none;
+}
+
+.widget.fader .track {
+  grid-area: track;
 }
 
 /* Arranging mode.
@@ -724,13 +873,12 @@ button.danger {
   margin: 0.4rem 0;
 }
 
-.group-fader input[type="range"] {
+.group-fader .track {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
 }
 
-.group-fader input[type="range"]:disabled {
+.group-fader .track:has(input:disabled) {
   opacity: 0.4;
 }
 
@@ -1081,7 +1229,7 @@ button.linkish.left {
   flex: 2;
 }
 
-.channels li input[type="range"] {
+.channels li .track {
   flex: 1;
   min-width: 5rem;
 }
@@ -1137,7 +1285,10 @@ button.linkish.left {
   gap: 0.5rem;
   padding: 0.5rem;
   text-align: left;
-  background: transparent;
+  /* Transparent so the widgets inside sit on the page rather than on a second
+     surface -- but background-color only, or the shorthand takes the tint
+     stripe down with it and a frame given a colour shows none. */
+  background-color: transparent;
   border-style: dashed;
 }
 
@@ -1503,14 +1654,22 @@ button.linkish.left {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  /* Fills the screen so the cue dock sits at the bottom of the window rather
+     than at the bottom of a document nobody scrolled to. */
+  height: 100%;
+  min-height: 0;
 }
 
 .plan-stage {
   position: relative;
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 18px;
+  /* Darker than the console, and deliberately: every lit lamp on it is drawn
+     as a halo, and a halo needs somewhere dark to fall. */
+  background: color-mix(in srgb, var(--bg) 55%, #000);
   overflow: hidden;
   touch-action: none;
 }
@@ -1545,10 +1704,32 @@ button.linkish.left {
   z-index: 2;
 }
 
-/* A faint grid while something is being placed, so "a bit left of centre" can
-   be seen rather than estimated. Only while dragging: a plan is read far more
-   often than it is edited, and graph paper under a rig is noise the rest of
-   the time. */
+/* The metre grid.
+ *
+   Faint enough to read past and never to compete with a lit lamp, and always
+   there: the stage fills the window rather than holding to the grid's aspect,
+   so this is the only thing left saying how far apart two lamps actually are.
+   It comes from the project's own grid size, one line per metre or per foot. */
+.plan-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: calc(100% / var(--cols, 5)) calc(100% / var(--rows, 5));
+}
+
+/* And a brighter one while something is being placed, so "a bit left of
+   centre" can be seen rather than estimated. */
 .plan-stage[data-dragging="true"]::before {
   content: "";
   position: absolute;
@@ -1593,15 +1774,35 @@ button.linkish.left {
   position: absolute;
   top: 1.7rem;
   font-size: 0.6rem;
-  color: var(--text-dim);
+  font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+  color: color-mix(in srgb, var(--text-dim) 70%, transparent);
   white-space: nowrap;
   pointer-events: none;
 }
 
 .plan-tray {
   border: 1px dashed var(--border);
-  border-radius: 10px;
-  padding: 0.5rem;
+  border-radius: 12px;
+  padding: 0.4rem 0.6rem;
+  /* Capped as well as folded: opened on a rig with seventeen unplaced lamps it
+     still must not take the stage's room. */
+  max-height: 9rem;
+  overflow-y: auto;
+  flex: none;
+}
+
+.plan-tray summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.plan-hint {
+  flex: none;
+  margin: 0;
 }
 
 .tray-items {
@@ -1718,4 +1919,328 @@ button.linkish.left {
 
 .widget.arranging[data-selected="true"] {
   box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgb(0 0 0 / 35%);
+}
+
+/* ---------------------------------------------------------------------------
+   The plan as a place to work: choose lamps, then act on them.
+   ------------------------------------------------------------------------- */
+
+/* Chosen is a ring outside the lamp, so it survives whatever colour the lamp
+   is currently putting out -- including white, which any highlight drawn
+   inside it would disappear into. */
+.lamp[data-chosen="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.lamp[data-chosen="true"][data-dark="true"] {
+  border-style: solid;
+}
+
+/* The stage and the panel that acts on it. */
+.plan-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* In the corner of the stage, not under it. Below the fold is where a panel
+   goes to be missed. */
+.selection {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 14rem;
+  max-width: calc(100% - 1.5rem);
+  z-index: 3;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+  padding: 0.7rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 45%);
+}
+
+/* On a phone a corner panel would be most of the stage, so it drops below it
+   and the stage gives up the room.
+ *
+   Below rather than over: fixed to the bottom of the window covered the cue
+   dock and the navigation both, so choosing a lamp left no way off the screen
+   and no way to fire anything -- on the one screen meant for driving a pase. */
+@media (max-width: 699px) {
+  /* The stage keeps the room. It has no intrinsic height -- the lamps are all
+     absolutely placed -- so without a floor it is the first thing the column
+     squeezes, and a rig drawn 130 pixels tall is not a plan of anything. */
+  .plan-stage {
+    min-height: 42vh;
+  }
+
+  /* Names off. At phone width they overlap into a grey mush that is harder to
+     read than nothing, and tapping a lamp puts its name at the top of the panel
+     in a size you can actually read. Kept while dragging, where the label is
+     carrying the position rather than the name. */
+  .lamp:not([data-dragging="true"]) .lamp-label {
+    display: none;
+  }
+
+  .selection {
+    position: static;
+    width: auto;
+    max-width: none;
+    margin-top: 0.6rem;
+    flex: none;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+}
+
+/* The cues, along the bottom of the plan: a pase is mostly firing what
+   somebody already built. */
+.cuedock {
+  flex: none;
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.cue {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+  min-height: 62px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 13px;
+  text-align: left;
+}
+
+.cue-name {
+  font-size: 0.86rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.cue-state {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fixed width at the end of the row: it is not one of the cues and should not
+   share their sizing, and it must stay in the same place whatever is docked. */
+.cue.blackout {
+  flex: 0 0 7rem;
+  min-width: 7rem;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+  letter-spacing: 0.04em;
+}
+
+.cue[data-running="true"] {
+  border-color: var(--live);
+  background: color-mix(in srgb, var(--live) 12%, var(--surface-raised));
+}
+
+.cue[data-running="true"] .cue-state {
+  color: var(--live);
+}
+
+.selection-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.selection-head strong {
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+/* Name on the left, value on the right, the way the console's faders read. */
+.selection .field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.selection .field-head .num {
+  margin-left: auto;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The panel sits over the rig; anything in it that is not a control is said
+   quietly so the lamps stay the loudest thing on the stage. */
+.selection .hint {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.selection-head button.icon {
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0;
+  font-size: 0.8rem;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.selection button {
+  min-height: 40px;
+  font-size: 0.85rem;
+}
+
+.swatches {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Squares, not slabs. Ten colours poured across a panel is a paint program;
+   this is a strip you glance at and hit, so the swatch is the size of a
+   fingertip and no larger, and the panel keeps its room for the lamps behind
+   it. */
+.swatch {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 2px solid transparent;
+  padding: 0;
+}
+
+.swatch:disabled {
+  opacity: 0.3;
+}
+
+.swatch:hover:not(:disabled) {
+  border-color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   The console as a designed screen.
+
+   Running it, the operator's rows are read as sections -- headings, a grid of
+   equal controls, faders in a column. Arranging it, the rows come back, because
+   rows are what is being arranged.
+   ------------------------------------------------------------------------- */
+/* The console: what you press on the left, what you hold on the right.
+   Below the width where two columns stop fitting, the levels go under. */
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .board[data-levels="true"] {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+  }
+}
+
+.blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* Equal cards, always. The old flex rows stretched whatever happened to be
+   alone on a line: two colours left over from a row of eight became two
+   half-width slabs, which reads as importance nobody assigned them. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+  align-content: start;
+}
+
+.grid > .widget {
+  /* The grid decides the size now, so the geometry-derived flex is off. */
+  flex: initial;
+  min-width: 0;
+  min-height: 64px;
+}
+
+/* A frame brings its own children and needs the room to show them. */
+.grid > .widget.frame,
+.grid > .widget.cuelist,
+.grid > .widget.xypad,
+.grid > .widget.matrix,
+.grid > .widget.audiotriggers {
+  grid-column: span 2;
+}
+
+.levels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.9rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  /* Held in place while the sections scroll past: a fader is what you are
+     holding while you press other things. */
+  position: sticky;
+  top: 0;
+}
+
+.levels-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* The panel's own heading sits tight to the first fader: the border already
+   says where the panel starts. */
+.levels > .section {
+  margin: 0;
+}
+
+.levels-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Inside the panel the faders are rows, not cards: one border around the group
+   instead of one around each, which is what makes a stack of five read as a
+   bank rather than as five separate things that happen to be adjacent. */
+.levels .widget.fader {
+  flex: initial;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background-color: transparent;
 }

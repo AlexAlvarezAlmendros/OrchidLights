@@ -217,6 +217,22 @@ public:
     int forgetFixture(quint32 fixtureId);
 
     /**
+     * The live desk: absolute values pinned on individual channels.
+     *
+     * Validated here rather than in LevelSource, which holds no opinion about
+     * what a channel is: a channel past a fixture's last one lands on the
+     * address of whatever is patched next to it, exactly as it does for a
+     * channels group.
+     */
+    bool setLiveValues(const QList<QPair<LevelSource::Channel, uchar>> &values,
+                       QString &errorMessage);
+
+    /** Let go of everything the live desk holds, and put those channels down.
+     *  A channel a control stops holding stays latched at whatever it was, and
+     *  the control that could lower it is the one being let go of. */
+    void releaseLive();
+
+    /**
      * Channels groups: the document's own faders, edited from here rather than
      * straight from the routes.
      *

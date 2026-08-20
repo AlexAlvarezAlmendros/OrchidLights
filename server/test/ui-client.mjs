@@ -124,6 +124,40 @@ const click = (text) =>
 
 const count = () => evaluate("document.querySelectorAll('.widget').length")
 
+/* A real pointer, driven through the browser rather than through the DOM.
+ *
+   This exists because of a bug that a synthetic test could not see: setting an
+   input's value and firing a change event goes straight to React and works
+   perfectly whatever shape the element is on screen. A leftover rule had left
+   the range a 32-pixel square in the corner of its track, so every fader in the
+   app answered on about a tenth of itself -- and the assertion that was
+   supposed to guard exactly that passed, every run, because it never touched
+   the thing with a pointer.
+
+   Anything about whether a control can be *used* goes through here. */
+const mouse = (type, x, y) =>
+  send('Input.dispatchMouseEvent', {
+    type,
+    x,
+    y,
+    button: 'left',
+    buttons: type === 'mouseReleased' ? 0 : 1,
+    clickCount: 1,
+  })
+
+async function dragAcross(box, from, to) {
+  const y = box.y + box.height / 2
+  const at = (f) => box.x + box.width * f
+  await mouse('mousePressed', at(from), y)
+  await sleep(100)
+  await mouse('mouseMoved', at((from + to) / 2), y)
+  await sleep(100)
+  await mouse('mouseMoved', at(to), y)
+  await sleep(150)
+  await mouse('mouseReleased', at(to), y)
+  await sleep(600)
+}
+
 try {
   // The console is fetched, the feed connects, and the layout resolves; none of
   // that is instant against a real engine.
@@ -820,6 +854,190 @@ try {
   })()`)
   check('the plan shows what each lamp is doing', litUp === 'none' || litUp === 'ok', litUp)
 
+  /* And the plan as a place to work: choose lamps, act on them, read the wire.
+   *
+     This is the assertion the whole direction rests on. A colour picker over a
+     drawing of a rig is a toy; the same picker that moves DMX is a desk. The
+     only way to tell them apart from outside is to look at the wire. */
+  const worked = await evaluate(`(async () => {
+    const plan = await (await fetch('/api/v1/plan')).json()
+    const bar = plan.fixtures.find(f => f.roles.red !== undefined)
+    if (!bar) return 'none'          // nothing here mixes colour
+
+    /* A channel with a curve on it does not put out what was asked for -- an
+       inverted red at 255 is 0 on the wire -- and the plan drawing that is the
+       plan being right. The numbers below only mean anything without one. */
+    const detail = await (await fetch('/api/v1/fixtures/' + bar.id)).json()
+    if (detail.channelList.some(c => c.modifier)) return 'none'
+
+    /* Place it and then make the screen re-read the plan, rather than depending
+       on whatever the block before left behind. */
+    await fetch('/api/v1/plan/fixtures/' + bar.id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ x: 2000, y: 2000 }),
+    })
+
+    const rail = (name) => [...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === name)
+    if (!rail('Patch')) {
+      return 'no rail here; items: '
+        + [...document.querySelectorAll('.rail-item')].map(b => JSON.stringify(b.textContent)).join(',')
+        + ' operator: ' + document.querySelector('.app')?.getAttribute('data-operator')
+    }
+    rail('Patch').click()
+    await new Promise(r => setTimeout(r, 700))
+    rail('Planta').click()
+    await new Promise(r => setTimeout(r, 1200))
+
+    const find = () => document.querySelector('.lamp[data-fixture="' + bar.id + '"]')
+    const lamp = find()
+    if (!lamp) return 'the lamp is not on the stage'
+
+    const box = lamp.getBoundingClientRect()
+    const tap = (type, x, y) => lamp.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, pointerId: 7, clientX: x, clientY: y,
+    }))
+
+    /* A tap chooses; it must not move the lamp. */
+    const before = lamp.style.left
+    tap('pointerdown', box.left + box.width / 2, box.top + box.height / 2)
+    tap('pointerup', box.left + box.width / 2, box.top + box.height / 2)
+    await new Promise(r => setTimeout(r, 500))
+
+    const chosen = find()
+    if (!chosen) {
+      return 'the lamp went away after the tap; on stage: '
+        + [...document.querySelectorAll('.lamp')].map(l => l.dataset.fixture).join(',')
+        + ' tray: ' + [...document.querySelectorAll('.tray-item')].map(t => t.textContent.trim()).join(',')
+    }
+    if (chosen.getAttribute('data-chosen') !== 'true') return 'the tap did not choose it'
+    if (chosen.style.left !== before) return 'the tap moved it'
+
+    const panel = document.querySelector('.selection')
+    if (!panel) return 'no panel for the chosen lamp'
+    if (!panel.textContent.includes(bar.name)) return 'the panel does not name it'
+
+    /* Full intensity first, or a colour would be scaled to nothing. */
+    const level = panel.querySelector('input[type=range]')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    setter.call(level, '255')
+    level.dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 700))
+
+    /* Then a colour, and the wire has to carry it. */
+    const swatches = [...panel.querySelectorAll('.swatch')]
+    const red = swatches.find(sw => sw.getAttribute('aria-label') === 'Poner #ff2d2d')
+    if (!red) return 'no red swatch'
+    red.click()
+    await new Promise(r => setTimeout(r, 900))
+
+    const live = await (await fetch('/api/v1/live')).json()
+    const held = new Map(live.values.filter(v => v.fixture === bar.id).map(v => [v.channel, v.value]))
+    if (held.get(bar.roles.red) !== 0xff) return 'red is not held: ' + JSON.stringify(live.values)
+    if (held.get(bar.roles.green) !== 0x2d) return 'green is wrong: ' + held.get(bar.roles.green)
+    if (bar.roles.white !== undefined && held.get(bar.roles.white) !== 0) {
+      return 'the white was left up, so that is pink'
+    }
+
+    /* And the lamp on screen agrees, which is the loop closing: the same roles
+       that resolved the colour into channels read it back off the frame. */
+    let painted = ''
+    for (let i = 0; i < 25; i++) {
+      await new Promise(r => setTimeout(r, 120))
+      painted = document.querySelector('.lamp[data-fixture="' + bar.id + '"]').style.background
+      /* split/join rather than a regex: inside this template literal a
+         backslash-s collapses to the letter s, so /\s/ strips letters and
+         nothing else. It has cost two assertions already. */
+      if (painted.split(' ').join('') === 'rgb(255,45,45)') break
+    }
+    if (painted.split(' ').join('') !== 'rgb(255,45,45)') {
+      return 'the lamp does not show what it is putting out: ' + painted
+    }
+
+    /* Letting go puts the channels down rather than leaving them latched. */
+    ;[...panel.querySelectorAll('button')].find(b => b.textContent.trim() === 'Soltar').click()
+    await new Promise(r => setTimeout(r, 900))
+    const after = await (await fetch('/api/v1/live')).json()
+    if (after.values.length !== 0) return 'letting go held on to ' + after.values.length
+
+    /* Tapping again lets the lamp go. */
+    const still = document.querySelector('.lamp[data-fixture="' + bar.id + '"]')
+    const b2 = still.getBoundingClientRect()
+    still.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 8, clientX: b2.left + 4, clientY: b2.top + 4 }))
+    still.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 8, clientX: b2.left + 4, clientY: b2.top + 4 }))
+    await new Promise(r => setTimeout(r, 500))
+    if (document.querySelector('.selection')) return 'tapping it again did not let it go'
+
+    await fetch('/api/v1/plan/fixtures/' + bar.id, { method: 'DELETE' })
+    return 'ok'
+  })()`)
+  check('lamps can be chosen on the plan and driven from it', worked === 'none' || worked === 'ok', worked)
+
+  /* The whole chain, with a real pointer at one end and held channels at the
+     other: press, drag, release on the intensity bar, then ask the daemon what
+     it is holding.
+
+     Everything else about faders in this suite drives the input through the
+     DOM, and that is precisely the path a broken control still satisfies: for
+     one release every fader in the app answered on a 32-pixel square in the
+     corner of its own track, drew the right number, and no assertion moved.
+     A pointer is the only thing that can tell the difference. */
+  const grabbed = await evaluate(`(async () => {
+    const plan = await (await fetch('/api/v1/plan')).json()
+    const lit = (plan.fixtures ?? []).find(f => f.resolved && f.roles?.intensity !== undefined)
+    if (!lit) return 'none'
+
+    // Put it on the plan if it is not already, so there is a lamp to choose.
+    if (lit.x === undefined || lit.x === null) {
+      await fetch('/api/v1/plan/fixtures/' + lit.id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: 2, y: 2 }),
+      })
+      await new Promise(r => setTimeout(r, 900))
+    }
+
+    const lamp = document.querySelector('.lamp[data-fixture="' + lit.id + '"]')
+    if (!lamp) return 'the lamp is not on the plan'
+    const b = lamp.getBoundingClientRect()
+    for (const type of ['pointerdown', 'pointerup']) {
+      lamp.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: 11, clientX: b.left + 4, clientY: b.top + 4,
+      }))
+    }
+    await new Promise(r => setTimeout(r, 700))
+
+    const track = document.querySelector('.selection .track')
+    if (!track) return 'no intensity bar in the panel'
+    const t = track.getBoundingClientRect()
+    return JSON.stringify({ id: lit.id, channel: lit.roles.intensity,
+      x: t.x, y: t.y, width: t.width, height: t.height })
+  })()`)
+
+  if (grabbed === 'none') {
+    check('an intensity bar can be dragged with a pointer', true, 'none')
+  } else {
+    let held = grabbed
+    try {
+      const box = JSON.parse(grabbed)
+      await dragAcross(box, 0.02, 0.6)
+      held = await evaluate(`(async () => {
+        const live = await (await fetch('/api/v1/live')).json()
+        const value = live.values.find(v => v.fixture === ${box.id}
+          && v.channel === ${box.channel})
+        if (!value) return 'the drag held nothing at all'
+        // 60% of the way along a 0-255 bar, give or take the thumb's own width.
+        if (value.value < 120 || value.value > 175) return 'held ' + value.value + ', wanted ~153'
+        await fetch('/api/v1/live', { method: 'DELETE' })
+        return 'ok'
+      })()`)
+    } catch (error) {
+      held = String(error).slice(0, 200)
+    }
+    check('an intensity bar can be dragged with a pointer', held === 'ok', held)
+  }
+
   /* The shell: where you are, and what is loaded.
    *
      The four views used to be four buttons in a row of nine, competing with
@@ -897,6 +1115,92 @@ try {
     return 'ok'
   })()`)
   check('a label reads as the section heading it always was', headings === 'none' || headings === 'ok', headings)
+
+  /* And the console is drawn as a screen rather than as somebody's pixel
+     positions: sections, a grid of equal controls, faders in a column of their
+     own. Their order survives it -- the grid flows in document order -- and so
+     does every widget, which is the part that matters. */
+  const drawn = await evaluate(`(async () => {
+    const board = document.querySelector('.board')
+    if (!board) return 'no board'
+
+    const vc = await (await fetch('/api/v1/vc')).json()
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+    const all = walk(vc).filter(w => w.type !== 'virtualconsole' && w.type !== 'frame')
+
+    /* Nothing may be lost by regrouping. A console rearranged for display that
+       drops a button is a console missing a cue on the night it matters. */
+    const labels = all.filter(w => w.type === 'label' && (w.caption || '').trim())
+    const others = all.filter(w => w.type !== 'label')
+    /* Only the top level: what is inside a frame is drawn by the frame. */
+    const top = [...document.querySelectorAll('.board .widget')]
+      .filter(w => w.parentElement?.closest('.widget.frame') === null)
+    const titles = document.querySelectorAll('.board .section').length
+
+    /* Every top-level label is a heading. One inside a frame is that frame's,
+       and is drawn by it. */
+    const topLabels = labels.filter(l =>
+      walk(vc).some(w => w === l) &&
+      (vc.children ?? []).some(f => (f.children ?? []).includes(l) || f === l))
+    if (labels.length > 0 && titles === 0) return 'no headings for ' + labels.length + ' labels'
+    if (titles < topLabels.length) return 'headings: ' + titles + ' of ' + topLabels.length
+    if (top.length === 0 && others.length > 0) return 'nothing was drawn'
+
+    /* Faders live in the column, not in the grid.
+     *
+       Asked of the screen rather than of the project: a frame draws its own
+       children with their own layout, so a fader inside one is that frame's
+       business and never reaches a section. Counting every fader in the tree
+       said the column was missing when it was simply not theirs. */
+    const loose = [...document.querySelectorAll('.board .widget.fader')]
+      .filter(f => f.closest('.widget.frame') === null)
+    if (loose.length > 0) {
+      if (!document.querySelector('.levels')) return 'no levels column for ' + loose.length + ' faders'
+      if (loose.some(f => f.closest('.levels') === null)) return 'a fader is loose in the grid'
+    }
+
+    /* The drawn track has to cover its own control.
+     *
+       A range that is smaller than the bar drawn over it is a fader that
+       answers on part of itself, and the part that does nothing looks exactly
+       like the part that does. Measured rather than assumed -- this is the
+       shape the pointer meets. */
+    const bar = loose.find(f => f.getAttribute('data-usable') === 'true')
+    if (bar) {
+      const input = bar.querySelector('input[type=range]')
+      const fill = bar.querySelector('.fill')
+      if (!fill || !bar.querySelector('.thumb')) return 'the fader has no drawn track'
+      if (getComputedStyle(input).opacity !== '0') return 'the range is drawn twice'
+
+      const t = bar.querySelector('.track').getBoundingClientRect()
+      const i = input.getBoundingClientRect()
+      if (i.width < t.width - 4 || i.height < t.height - 4) {
+        return 'the grab area is ' + Math.round(i.width) + 'x' + Math.round(i.height)
+          + ' inside a ' + Math.round(t.width) + 'x' + Math.round(t.height) + ' track'
+      }
+    }
+
+    /* Equal cards: the old flex rows stretched whatever was alone on a line,
+       so two colours left over from a row of eight became half-width slabs. */
+    const cards = [...document.querySelectorAll('.grid > .widget')]
+    if (cards.length > 2) {
+      const widths = new Set(cards.map(c => Math.round(c.getBoundingClientRect().width)))
+      if (widths.size > 3) return 'the cards are ' + widths.size + ' different widths'
+    }
+
+    /* Arranging brings the operator's rows back, because rows are what is
+       being arranged. */
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Ordenar')?.click()
+    await new Promise(r => setTimeout(r, 700))
+    if (document.querySelector('.board')) return 'arrange mode still draws the designed layout'
+    if (!document.querySelector('.row')) return 'arrange mode lost the rows'
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Listo'))?.click()
+    await new Promise(r => setTimeout(r, 700))
+    if (!document.querySelector('.board')) return 'the designed layout did not come back'
+
+    return 'ok'
+  })()`)
+  check('the console is drawn as sections, a grid and a column of faders', drawn === 'ok', drawn)
 
   /* Arranging by dragging, which is the gesture this console is used with far
      more than any other.
@@ -1052,12 +1356,25 @@ try {
     const painted = walk(vc).filter(w => w.background === '#ff8800')
     if (painted.length !== 1) return painted.length + ' widgets came back orange'
 
-    /* And it reaches the screen, which is a different question: the console
-       renders the colour through a custom property. */
+    /* And it reaches the screen, which is a different question.
+     *
+       Asking whether the custom property was set proves only that a string
+       arrived somewhere; the operator's question is whether the colour is
+       visible on the card. So this reads the pixels the stripe is actually
+       painted with -- the pill on a button, the inset edge on anything else --
+       and either one has to come back orange. */
     const drawn = [...document.querySelectorAll('.widget')]
-      .find(w => w.style.getPropertyValue('--widget-bg') === 'rgb(255, 136, 0)'
-              || w.style.getPropertyValue('--widget-bg') === '#ff8800')
+      .find(w => w.style.getPropertyValue('--tint') === 'rgb(255, 136, 0)'
+              || w.style.getPropertyValue('--tint') === '#ff8800')
     if (!drawn) return 'the colour did not reach the widget'
+
+    const orange = 'rgb(255, 136, 0)'
+    const pill = getComputedStyle(drawn, '::before').backgroundColor
+    const edge = getComputedStyle(drawn).backgroundImage
+    if (pill !== orange && !edge.includes(orange)) {
+      return 'the colour is set but not drawn on .' + drawn.className
+        + ': pill ' + pill + ', edge ' + edge
+    }
 
     /* Back to the default, which is not the same as picking a grey that
        matches: QLC+ writes "Default" and each theme renders it its own way. */
@@ -1338,6 +1655,88 @@ try {
     return 'ok'
   })()`)
   check('the app can be installed to a home screen', installable === 'ok', installable)
+
+  /* Every kind of widget shows the colour it was given.
+   *
+     The stripe is drawn as a background layer, which means any rule that sets
+     the `background` shorthand on a widget erases it -- and a card with no
+     stripe looks exactly like a card that was never given a colour, so there is
+     nothing to notice. It has happened three times: on the selected widget in
+     edit mode, on frames, on labels.
+
+     Rather than wait for a project that happens to have a coloured one of each,
+     this paints every widget on the screen and asks each of them back. The
+     colour is put on and taken off in the browser; nothing is written to the
+     project. */
+  const striped = await evaluate(`(async () => {
+    const orange = 'rgb(255, 136, 0)'
+    const bare = new Set()
+    let seen = 0
+
+    const sweep = () => {
+      const widgets = [...document.querySelectorAll('.widget')]
+      seen += widgets.length
+      for (const w of widgets) w.style.setProperty('--tint', orange)
+      for (const w of widgets) {
+        const pill = getComputedStyle(w, '::before').backgroundColor
+        const edge = getComputedStyle(w).backgroundImage
+        if (pill !== orange && !edge.includes(orange)) {
+          bare.add(w.className.split(' ').filter(c => c !== 'widget').join('.') || 'widget')
+        }
+      }
+      for (const w of widgets) w.style.removeProperty('--tint')
+    }
+
+    /* Both modes, because they do not draw the same set. A label is a section
+       heading while the console is being run and only becomes a widget again
+       while it is being arranged -- so a sweep of run mode alone never sees
+       one, and a label was one of the three that lost its stripe. */
+    sweep()
+    const arrange = [...document.querySelectorAll('button')]
+      .find(b => b.textContent.trim() === 'Ordenar')
+    if (arrange) {
+      arrange.click()
+      await new Promise(r => setTimeout(r, 900))
+      sweep()
+      const done = [...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Listo')
+      if (done) done.click()
+      await new Promise(r => setTimeout(r, 900))
+    }
+
+    if (seen === 0) return 'no widgets to look at'
+    return bare.size === 0 ? 'ok' : [...bare].join(', ') + ' draw no stripe'
+  })()`)
+  check('every kind of widget shows the colour it was given', striped === 'ok', striped)
+
+  /* One slider in the app, everywhere.
+   *
+     The rule this guards is the one that already broke once: a speed dial kept
+     the browser's range, and in a grid with no height to constrain it the thing
+     rendered as a tall vertical slider through the middle of a row of buttons.
+     Nothing failed -- it worked perfectly, it just looked like a different
+     program had been pasted in. So the check is structural rather than visual:
+     every range in the document is inside a drawn track, on every screen.
+
+     Walked across the views rather than asked once, because a control that only
+     appears in the show editor is exactly the one that gets missed. */
+  const bare = await evaluate(`(async () => {
+    const found = []
+    for (const view of ['Consola', 'Funciones', 'Patch', 'Planta']) {
+      const tab = [...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === view)
+      if (!tab) continue
+      tab.click()
+      await new Promise(r => setTimeout(r, 900))
+      for (const input of document.querySelectorAll('input[type=range]')) {
+        if (input.closest('.track') === null) {
+          found.push(view + ': ' + (input.getAttribute('aria-label') ?? input.className ?? '?'))
+        }
+      }
+    }
+    return found.length === 0 ? 'ok' : found.join(', ')
+  })()`)
+  check('every slider in the app is the same drawn control', bare === 'ok', bare)
 
   check('no errors in the console', consoleErrors.length === 0, consoleErrors.join(' | '))
 } catch (error) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanFixture } from './api'
-import { colourOf } from './plan'
+import { colourOf, colourValues } from './plan'
 
 /**
  * What colour a lamp is showing, from the frame on the wire.
@@ -83,5 +83,52 @@ describe('colourOf', () => {
 
   it('says nothing about a fixture with no channels it understands', () => {
     expect(colourOf(fixture({}), frame({ 0: 255 }))).toBeNull()
+  })
+})
+
+/**
+ * And the other direction: a colour resolved into the channel values that make
+ * it. Same roles, same file, so the two cannot drift apart — which is the whole
+ * reason the plan can both paint a lamp and drive it.
+ */
+describe('colourValues', () => {
+  const rgbw = fixture({ roles: { red: 0, green: 1, blue: 2, white: 3, intensity: 4 } })
+
+  it('drives red, green and blue', () => {
+    expect(colourValues(rgbw, { r: 255, g: 40, b: 0 })).toContainEqual({ channel: 0, value: 255 })
+    expect(colourValues(rgbw, { r: 255, g: 40, b: 0 })).toContainEqual({ channel: 1, value: 40 })
+  })
+
+  it('takes the white down with it', () => {
+    // Red asked for on a bar whose white is still up is pink, and nobody asked
+    // for pink.
+    expect(colourValues(rgbw, { r: 255, g: 0, b: 0 })).toContainEqual({ channel: 3, value: 0 })
+  })
+
+  it('leaves the dimmer alone: colour and intensity are separate questions', () => {
+    expect(colourValues(rgbw, { r: 255, g: 0, b: 0 }).some((v) => v.channel === 4)).toBe(false)
+  })
+
+  it('inverts for a subtractive fixture', () => {
+    const cmy = fixture({ roles: { cyan: 0, magenta: 1, yellow: 2 } })
+    expect(colourValues(cmy, { r: 255, g: 0, b: 0 })).toEqual([
+      { channel: 0, value: 0 },
+      { channel: 1, value: 255 },
+      { channel: 2, value: 255 },
+    ])
+  })
+
+  it('says nothing at all for a fixture with no colour to mix', () => {
+    // A plain dimmer cannot be made red, and pretending otherwise would send
+    // values to channels that mean something else.
+    expect(colourValues(fixture({ roles: { intensity: 0 } }), { r: 255, g: 0, b: 0 })).toEqual([])
+  })
+
+  it('round-trips through the reader it is the inverse of', () => {
+    const values = colourValues(rgbw, { r: 200, g: 100, b: 20 })
+    const bytes = new Uint8Array(512)
+    for (const v of values) bytes[v.channel] = v.value
+    bytes[4] = 255 // dimmer at full, so nothing is scaled away
+    expect(colourOf(rgbw, { 1: bytes })).toBe('rgb(200, 100, 20)')
   })
 })

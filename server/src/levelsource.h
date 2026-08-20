@@ -112,6 +112,29 @@ public:
     /** The slider id a channels group is held under. */
     static quint32 channelGroupSlider(quint32 groupId) { return 0xFE000000u | (groupId & 0xFFFFFFu); }
 
+    /**
+     * Absolute values held on individual channels, outside any function.
+     *
+     * This is a simple desk: a handful of channels pinned at exact values,
+     * each its own, which is what "these four lamps, this colour" is once the
+     * colour has been resolved into channels. A level slider cannot express it
+     * -- it holds every channel it owns at ONE value, which is right for an
+     * intensity group and wrong for red 255, green 40, blue 0.
+     *
+     * Held under an owner id of its own, so it merges with the console's
+     * faders the way any two sources do rather than fighting them for a slot.
+     */
+    void setLiveValue(quint32 fixtureId, quint32 channel, uchar value);
+
+    /** What is being held live right now, so a client can be told rather than
+     *  having to remember. */
+    QList<QPair<Channel, uchar>> liveValues() const;
+
+    /** Let go of everything held live. The caller is responsible for putting
+     *  the channels somewhere sane afterwards -- see EngineHost::releaseLive,
+     *  and the note there about why letting go is not the same as zeroing. */
+    void clearLive();
+
     /** A button, so a function it starts can be scaled by the submasters above
      *  it in the same way a fader is. */
     void defineButton(quint32 widgetId, quint32 functionId, const Scope &submasters);
@@ -207,6 +230,14 @@ private:
      *  mutex held. */
     void writePlaybacks(MasterTimer *timer);
 
+    /** Put the live desk's absolute values on the wire. Call with the mutex
+     *  held. */
+    void writeLive(const QList<Universe *> &universes);
+
+    /** The owner id the live desk's faders are held under. Its own space, like
+     *  the channels groups': widget ids come from the console and start at 0. */
+    static constexpr quint32 LIVE_OWNER = 0xFD000000u;
+
     Doc *m_doc = nullptr;
 
     mutable QMutex m_mutex;
@@ -236,6 +267,11 @@ private:
     /** Which submasters enclose each widget. */
     QHash<quint32, Scope> m_scopes;
     bool m_submastersDirty = false;
+
+    /** The live desk: absolute values on individual channels, and whether the
+     *  next tick still has to put them out. */
+    QHash<Channel, uchar> m_live;
+    bool m_liveDirty = false;
 
     QHash<quint32, QList<PadHead>> m_pads;
     QHash<quint32, QPair<double, double>> m_positions;

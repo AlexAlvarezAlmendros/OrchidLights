@@ -918,6 +918,67 @@ int EngineHost::forgetFixture(quint32 fixtureId)
 }
 
 /*****************************************************************************
+ * The live desk
+ *****************************************************************************/
+
+bool EngineHost::setLiveValues(const QList<QPair<LevelSource::Channel, uchar>> &values,
+                               QString &errorMessage)
+{
+    if (m_levels == nullptr)
+    {
+        errorMessage = QStringLiteral("The engine is not running");
+        return false;
+    }
+
+    /* Everything checked before anything is written: half a colour applied is
+       a lamp nobody asked for, and it is worse than a refusal because it looks
+       like a choice. */
+    for (const auto &entry : values)
+    {
+        const Fixture *fixture = m_doc->fixture(entry.first.first);
+        if (fixture == nullptr)
+        {
+            errorMessage = QStringLiteral("No fixture with id %1").arg(entry.first.first);
+            return false;
+        }
+
+        if (entry.first.second >= fixture->channels())
+        {
+            errorMessage = QStringLiteral("\"%1\" has %2 channels, so it has no channel %3")
+                               .arg(fixture->name())
+                               .arg(fixture->channels())
+                               .arg(entry.first.second);
+            return false;
+        }
+    }
+
+    for (const auto &entry : values)
+        m_levels->setLiveValue(entry.first.first, entry.first.second, entry.second);
+
+    return true;
+}
+
+void EngineHost::releaseLive()
+{
+    if (m_levels == nullptr)
+        return;
+
+    const QList<QPair<LevelSource::Channel, uchar>> held = m_levels->liveValues();
+
+    m_levels->clearLive();
+
+    QList<LevelSource::Channel> channels;
+    for (const auto &entry : held)
+        channels.append(entry.first);
+
+    /* Zeroed, not merely dropped. The engine puts intensity channels back to
+       zero on its own every tick, but a gobo wheel or a colour wheel stays
+       exactly where it was left -- and the desk that could move it is the one
+       just let go of. */
+    releaseLevels(channels);
+}
+
+/*****************************************************************************
  * Channels groups
  *****************************************************************************/
 

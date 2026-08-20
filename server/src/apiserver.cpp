@@ -30,6 +30,7 @@
 
 #include "apiserver.h"
 #include "enginehost.h"
+#include "levelsource.h"
 #include "jsonview.h"
 #include "livefeed.h"
 #include "virtualconsole.h"
@@ -127,6 +128,26 @@ namespace
         }
 
         return true;
+    }
+
+    /**
+     * Never keep this one.
+     *
+     * The entry document names the hashed bundle, so a browser that serves it
+     * from cache runs whatever bundle it named the day it was cached -- against
+     * today's API. That is the failure the service worker's own comment warns
+     * about, and it happened anyway because nothing here said not to cache the
+     * one file that must not be: no headers at all means the browser applies
+     * its own heuristic, and the heuristic for a document with no dates is to
+     * keep it.
+     *
+     * "no-cache" is not "do not store": it stores it and revalidates every
+     * time, which is exactly right for a small file that changes with every
+     * build.
+     */
+    void noCache(QHttpServerResponse &response)
+    {
+        response.setHeader("Cache-Control", "no-cache, must-revalidate");
     }
 
     /** A command was queued on the engine. Deliberately carries no state: see
@@ -238,8 +259,10 @@ void ApiServer::registerRoutes()
     else
     {
         m_server->route("/", [webRoot]() {
-            return QHttpServerResponse::fromFile(QDir(webRoot).absoluteFilePath(
-                QStringLiteral("index.html")));
+            QHttpServerResponse page = QHttpServerResponse::fromFile(
+                QDir(webRoot).absoluteFilePath(QStringLiteral("index.html")));
+            noCache(page);
+            return page;
         });
 
         /* The three files a browser needs at the root to install the app: the
@@ -272,6 +295,7 @@ void ApiServer::registerRoutes()
 
                 QHttpServerResponse response = QHttpServerResponse::fromFile(path);
                 response.setHeader("Content-Type", type.toUtf8());
+                noCache(response);
                 return response;
             });
         }
@@ -289,7 +313,13 @@ void ApiServer::registerRoutes()
             if (QFileInfo::exists(path) == false)
                 return jsonError(StatusCode::NotFound, QStringLiteral("No such asset"));
 
-            return QHttpServerResponse::fromFile(path);
+            /* Vite puts the content hash in the name, so this exact file can
+               never change: caching it for a year is not a gamble, it is the
+               whole point of the hash, and it is what makes a reload on a
+               venue's wifi instant. */
+            QHttpServerResponse asset = QHttpServerResponse::fromFile(path);
+            asset.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+            return asset;
         });
     }
 
@@ -1258,6 +1288,100 @@ void ApiServer::registerRoutes()
         }
 
         return QHttpServerResponse(body);
+    });
+
+    /* The live desk: absolute values pinned on individual channels.
+     *
+     * This is what makes the plan a place to work rather than a place to look.
+     * Selecting four lamps and giving them a colour is, once the colour has
+     * been resolved into channels, exactly this: a handful of channels held at
+     * exact values, each its own.
+     *
+     * Deliberately generic. The interface already knows which channel of a
+     * fixture is its red -- GET /plan reports the roles, and the same map is
+     * what paints the plan -- so resolving a colour into channels happens once,
+     * in the place that also reads them back. A second mapping on this side
+     * would be a second thing to drift.
+     *
+     * It writes nothing to the document: this is a desk, not an edit. Nothing
+     * here survives a reload, and it says so by holding no state anybody has to
+     * remember to save.
+     */
+    m_server->route("/api/v1/live", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray values;
+        for (const auto &entry : m_engine->levels()->liveValues())
+        {
+            QJsonObject one;
+            one["fixture"] = qint64(entry.first.first);
+            one["channel"] = qint64(entry.first.second);
+            one["value"] = int(entry.second);
+            values.append(one);
+        }
+
+        QJsonObject body;
+        body["values"] = values;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/live", QHttpServerRequest::Method::Put,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        if (body.value("values").isArray() == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send a \"values\" array of "
+                                            "{\"fixture\": id, \"channel\": n, \"value\": 0-255}"));
+        }
+
+        QList<QPair<LevelSource::Channel, uchar>> values;
+
+        for (const QJsonValue &entry : body.value("values").toArray())
+        {
+            const QJsonObject one = entry.toObject();
+            const QJsonValue fixture = one.value("fixture");
+            const QJsonValue channel = one.value("channel");
+            const QJsonValue value = one.value("value");
+
+            if (fixture.isDouble() == false || channel.isDouble() == false
+                || value.isDouble() == false || fixture.toInt(-1) < 0 || channel.toInt(-1) < 0
+                || value.toInt(-1) < 0 || value.toInt(256) > 255)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Every value needs a non-negative \"fixture\" and "
+                                                "\"channel\", and a \"value\" from 0 to 255"));
+            }
+
+            values.append(qMakePair(qMakePair(quint32(fixture.toInt()), quint32(channel.toInt())),
+                                    uchar(value.toInt())));
+        }
+
+        QString error;
+        if (m_engine->setLiveValues(values, error) == false)
+            return jsonError(StatusCode::BadRequest, error);
+
+        QJsonObject response;
+        response["held"] = values.count();
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/live", QHttpServerRequest::Method::Delete,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        m_engine->releaseLive();
+
+        QJsonObject response;
+        response["held"] = 0;
+        return QHttpServerResponse(response);
     });
 
     /* The plan: where each fixture stands, and what colour it is right now.

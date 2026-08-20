@@ -186,6 +186,48 @@ assert "note" not in body, ("and should not claim to be unreadable", body)
 ' || fail "GET body of a Show"
 curl -sf -X DELETE --max-time 5 "$BASE/functions/$SHOW" > /dev/null || true
 
+# ---------------------------------------------------------------------------
+# What may be cached and what may never be.
+# ---------------------------------------------------------------------------
+#
+# The entry document names the hashed bundle, so a browser that keeps it runs
+# whatever bundle it named the day it was cached -- against today's API. With no
+# headers at all the browser applies its own heuristic, and the heuristic for a
+# document with no dates is to keep it: an interface rebuilt and reloaded showed
+# the old one, and nothing anywhere said why.
+
+header() {
+    curl -sf -D- -o /dev/null --max-time 5 "$1" | tr -d '\r' | grep -i '^cache-control:' || true
+}
+
+INDEX_CACHE=$(header "http://127.0.0.1:$PORT/")
+case "$INDEX_CACHE" in
+    *no-cache*) ;;
+    *) fail "the entry document is cacheable (${INDEX_CACHE:-no Cache-Control at all})" ;;
+esac
+
+for root in /sw.js /manifest.webmanifest; do
+    ROOT_CACHE=$(header "http://127.0.0.1:$PORT$root")
+    case "$ROOT_CACHE" in
+        *no-cache*) ;;
+        # These only exist once the interface has been built.
+        '') curl -sf -o /dev/null --max-time 5 "http://127.0.0.1:$PORT$root" \
+                && fail "$root is cacheable and it names what to run" ;;
+        *) fail "$root is cacheable (${ROOT_CACHE})" ;;
+    esac
+done
+
+# And the other way: a file whose name carries its own content hash can never
+# change, so a year is right and anything less is a reload nobody needed.
+ASSET=$(curl -sf --max-time 5 "http://127.0.0.1:$PORT/" | grep -oE 'assets/[^"]+\.js' | head -1)
+if [ -n "$ASSET" ]; then
+    ASSET_CACHE=$(header "http://127.0.0.1:$PORT/$ASSET")
+    case "$ASSET_CACHE" in
+        *immutable*) ;;
+        *) fail "the hashed assets are not cached (${ASSET_CACHE:-no Cache-Control at all})" ;;
+    esac
+fi
+
 # Blackout is the button every desk has; it must stop everything.
 curl -sf -X POST --max-time 5 "$BASE/blackout" > /dev/null || fail "POST /blackout"
 for _ in $(seq 1 25); do
