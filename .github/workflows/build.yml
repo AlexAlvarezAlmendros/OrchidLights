@@ -194,6 +194,9 @@ jobs:
       - name: Shutdown smoke test (signals, token-gated route, last frame on the wire)
         run: ./server/test/shutdown-smoke.sh orchidlightsd
 
+      - name: Auth smoke test (guarded daemon, connect screen, token handover)
+        run: ./server/test/auth-smoke.sh orchidlightsd resources/samples/Sample.qxw
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

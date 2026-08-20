@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { type FunctionState, type PlanFixture, type PlanState, api } from './api'
 import { Slider } from './slider'
+import { authHeaders } from './token'
 
 /** A handful of colours worth reaching for without a picker: the ones a rig
  *  gets asked for by name. A full picker belongs in the scene editor, where a
@@ -64,6 +65,11 @@ export function Plan({
      came up and then jumped. Placing a rig that way is guesswork -- you find
      out where you put something after you have put it. */
   const [drag, setDrag] = useState<{ id: number; x: number; y: number } | null>(null)
+  /* The background image, fetched rather than pointed at: an <img src> cannot
+     carry the Authorization header, so on a token-guarded daemon it would 401
+     into a silently missing backdrop. A blob URL keeps the pixels and the
+     auth path together. */
+  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null)
   /* Which lamps you are working on. The plan stops being a picture of the rig
      the moment you can point at part of it and say "these". */
   const [chosen, setChosen] = useState<number[]>([])
@@ -86,6 +92,28 @@ export function Plan({
   useEffect(() => {
     reload()
   }, [reload, revision])
+
+  /* Above the early return on purpose: hooks must run on every render, and
+     a hook that appears only once the plan has loaded is React error #310 --
+     which took the whole app down the first time the plan opened. */
+  useEffect(() => {
+    if (plan === null || plan.background === false) {
+      setBackgroundUrl(null)
+      return
+    }
+    let revoked: string | null = null
+    fetch('/api/v1/plan/background', { headers: authHeaders() })
+      .then((response) => (response.ok ? response.blob() : null))
+      .then((blob) => {
+        if (blob === null) return
+        revoked = URL.createObjectURL(blob)
+        setBackgroundUrl(revoked)
+      })
+      .catch(() => setBackgroundUrl(null))
+    return () => {
+      if (revoked !== null) URL.revokeObjectURL(revoked)
+    }
+  }, [plan])
 
   if (plan === null) return <p className="hint">Leyendo la planta…</p>
 
@@ -247,9 +275,7 @@ export function Plan({
             setDrag(null)
           }}
         >
-          {plan.background && (
-            <img className="plan-background" src="/api/v1/plan/background" alt="" />
-          )}
+          {backgroundUrl !== null && <img className="plan-background" src={backgroundUrl} alt="" />}
 
           {placed.map((fixture) => (
             <Lamp
