@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window. The page it shows is the daemon's own web interface, which talks to the daemon over HTTP with its token; the shell exposes nothing extra to it.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

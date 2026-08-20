@@ -422,3 +422,57 @@ jobs:
           name: OrchidLights-x86_64.AppImage
           path: OrchidLights-x86_64.AppImage
           if-no-files-found: error
+
+  desktop:
+    name: Desktop shell (Tauri, Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The shell wraps the daemon, so the daemon is built here too -- the
+      # smoke test is about the pair, not about Rust compiling.
+      - name: Install build dependencies
+        run: |
+          ./install-deps.sh
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev librsvg2-dev xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build the web interface
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build the daemon
+        run: |
+          cmake -S . -B build -G Ninja -Dserver=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Lint the shell
+        working-directory: desktop/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+
+      - name: Build the shell
+        working-directory: desktop/src-tauri
+        run: cargo build
+
+      # xvfb because WebKitGTK needs a display even to fail politely; the
+      # assertions themselves are all from outside (HTTP, /proc, signals).
+      - name: Shell smoke test
+        run: xvfb-run -a desktop/test/shell-smoke.sh

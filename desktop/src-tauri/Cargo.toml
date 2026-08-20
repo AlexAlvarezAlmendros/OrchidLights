@@ -1,0 +1,30 @@
+[package]
+name = "orchidlights-desktop"
+version = "0.1.0"
+description = "OrchidLights desktop shell: the engine daemon in a native window"
+edition = "2021"
+license = "Apache-2.0"
+
+# The shell is deliberately dumb: it owns the daemon's process, the window and
+# nothing else. Every feature of the desk itself lives in the daemon and the
+# web interface, where a phone on the venue network gets it too.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+# Blocking HTTP is all the shell needs: readiness polls and one shutdown POST.
+# A full async client would be the heaviest dependency in the binary.
+ureq = "2"
+# SIGTERM must run the same orderly shutdown as the window's close button: a
+# logout or a kill delivered to the shell must not orphan a daemon that keeps
+# driving the rig with its window gone.
+signal-hook = "0.3"
+
+[profile.release]
+# The shell should stay a small binary next to a large daemon.
+strip = true
+lto = true
+codegen-units = 1
