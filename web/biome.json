@@ -11,9 +11,7 @@
         "noLabelWithoutControl": {
           "level": "error",
           "options": {
-            "inputComponents": [
-              "Slider"
-            ]
+            "inputComponents": ["Slider"]
           }
         }
       }
@@ -32,8 +30,6 @@
     }
   },
   "files": {
-    "ignore": [
-      "dist"
-    ]
+    "ignore": ["dist"]
   }
 }

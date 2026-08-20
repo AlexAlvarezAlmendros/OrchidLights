@@ -85,6 +85,17 @@ public:
 
     const ApiAuth &auth() const { return m_auth; }
 
+signals:
+    /**
+     * A client with the token asked the daemon to exit.
+     *
+     * Emitted after the response has gone out, so the caller learns the
+     * request was accepted before the process starts dying. main() owns what
+     * "exiting" means (stop functions, optionally zero the rig, quit) -- the
+     * server only relays the request.
+     */
+    void shutdownRequested();
+
 private:
     void registerRoutes();
 

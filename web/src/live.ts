@@ -37,6 +37,12 @@ export interface LiveHandlers {
     state: { enabled: boolean; capturing: boolean; unavailable?: string },
   ) => void
   onUniverse?: (universe: number, channels: Uint8Array) => void
+  /** Blackout engaged or released -- by us or by anyone. */
+  onBlackout?: (on: boolean) => void
+  /** The daemon refused something this client sent. Surfaced, not swallowed:
+   *  a press that did nothing and said nothing teaches the operator that the
+   *  desk is broken. */
+  onError?: (message: string) => void
 }
 
 export class Live {
@@ -118,6 +124,16 @@ export class Live {
         case 'changed':
           this.handlers.onChanged?.(message.what ?? ['project'])
           break
+        case 'blackout':
+          this.handlers.onBlackout?.(message.on === true)
+          break
+        case 'error':
+          this.handlers.onError?.(String(message.message ?? 'La mesa rechazó la orden'))
+          break
+        case 'subscribed':
+          // An acknowledgement, deliberately unused: the effect of a
+          // subscription is the frames themselves arriving.
+          break
       }
     })
 
@@ -140,6 +156,11 @@ export class Live {
 
   toggle(id: number, running: boolean): void {
     this.send({ type: 'function', id, action: running ? 'stop' : 'start' })
+  }
+
+  /** Hold-to-light: start on press, stop on release. */
+  flash(id: number, on: boolean): void {
+    this.send({ type: 'function', id, action: on ? 'start' : 'stop' })
   }
 
   setSpeedDial(id: number, milliseconds: number): void {

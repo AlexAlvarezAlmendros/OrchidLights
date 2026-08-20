@@ -89,6 +89,25 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(m_engine, &EngineHost::consoleChanged, this, &LiveFeed::onConsoleChanged);
     connect(m_engine, &EngineHost::projectReplaced, this, &LiveFeed::onProjectReplaced);
 
+    /* Blackout, pushed rather than polled. The button that engages it lives on
+       every screen, so every screen has to see it flip -- an operator watching
+       a phone that still says "en vivo" while the desk is dark reads that as
+       the phone being broken, not as a stale cache. */
+    connect(doc->inputOutputMap(), &InputOutputMap::blackoutChanged, this,
+            [this](bool on) {
+        QJsonObject message;
+        message["type"] = "blackout";
+        message["on"] = on;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+    });
+
     /* External controls, passed straight through rather than coalesced into the
        flush.
      *

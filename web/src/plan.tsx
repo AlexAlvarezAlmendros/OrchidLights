@@ -35,12 +35,21 @@ export function Plan({
   universes,
   functions,
   running,
+  blackout,
+  onBlackout,
   onToggle,
   onError,
 }: {
   revision: number
   /** The latest frame of each universe, 1-based, as the feed delivers it. */
   universes: Record<number, Uint8Array>
+  /** Whether the rig is blacked out. The frames this view colours lamps from
+   *  are the engine's post-GM values, which keep the old look during a
+   *  blackout while the plugins send zeros -- so without this flag the plan
+   *  paints a lit rig over a dark venue and somebody goes looking for a fault
+   *  that is not there. */
+  blackout: boolean
+  onBlackout: () => void
   /** The show's own cues, for the dock along the bottom. Driving a rig is not
    *  only pointing at lamps: most of a pase is firing what somebody built. */
   functions: FunctionState[]
@@ -252,7 +261,7 @@ export function Plan({
               across={across}
               deep={deep}
               chosen={chosen.includes(fixture.id)}
-              colour={colourOf(fixture, universes)}
+              colour={blackout ? null : colourOf(fixture, universes)}
               onGrab={(event) => {
                 pending.current = { id: fixture.id, x: event.clientX, y: event.clientY }
               }}
@@ -379,9 +388,11 @@ export function Plan({
           <button
             type="button"
             className="cue blackout"
-            onClick={() => api.blackout(true).then(() => undefined, fail)}
+            data-active={blackout}
+            aria-pressed={blackout}
+            onClick={onBlackout}
           >
-            <span className="cue-name">BLACKOUT</span>
+            <span className="cue-name">{blackout ? 'SALIR' : 'BLACKOUT'}</span>
           </button>
         </div>
       )}
@@ -399,7 +410,9 @@ export function Plan({
                 key={fixture.id}
                 type="button"
                 className="tray-item"
-                style={{ borderColor: colourOf(fixture, universes) ?? undefined }}
+                style={{
+                  borderColor: blackout ? undefined : (colourOf(fixture, universes) ?? undefined),
+                }}
                 onClick={() =>
                   api
                     .setPlanPosition(fixture.id, {

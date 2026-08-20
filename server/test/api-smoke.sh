@@ -303,4 +303,13 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" 
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST --max-time 5 "$AUTH_BASE/blackout")
 [ "$CODE" = "401" ] || fail "an unauthenticated blackout answered $CODE, expected 401"
 
+# A universe created with a name keeps it. The route used to ignore its body:
+# the universe appeared as "Universe N" and the typed name was quietly gone.
+NAMED=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+        -d '{"name":"Truss frontal"}' --max-time 5 "$AUTH_BASE/universes")
+echo "$NAMED" | grep -q '"universes"' || fail "POST /universes with a name failed: $NAMED"
+
+curl -s -H "Authorization: Bearer $TOKEN" --max-time 5 "$AUTH_BASE/universes" \
+    | grep -q '"Truss frontal"' || fail "the universe's name did not survive creation"
+
 echo "API smoke test passed."

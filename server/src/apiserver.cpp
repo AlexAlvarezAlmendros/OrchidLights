@@ -348,6 +348,7 @@ void ApiServer::registerRoutes()
         body["functions"] = doc->functions().count();
         body["universes"] = int(doc->inputOutputMap()->universesCount());
         body["runningFunctions"] = doc->masterTimer()->runningFunctions();
+        body["blackout"] = doc->inputOutputMap()->blackout();
 
         return QHttpServerResponse(body);
     });
@@ -2064,9 +2065,28 @@ void ApiServer::registerRoutes()
         if (denied(request))
             return unauthorized();
 
+        /* The name travels in the same request that creates the universe.
+           This route used to ignore its body, which cost nothing visible: the
+           universe appeared, named "Universe N", and the name the operator
+           typed was quietly gone. */
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const QString name = asked.value(QStringLiteral("name")).toString();
+
+        const DocWriter::Result added = DocWriter::addUniverse(doc);
+        if (added.ok && name.isEmpty() == false)
+        {
+            const int index = int(doc->inputOutputMap()->universesCount()) - 1;
+            const DocWriter::Result named = DocWriter::renameUniverse(doc, index, name);
+            if (named.ok == false)
+            {
+                QJsonObject body;
+                return writeResult(named, body);
+            }
+        }
+
         QJsonObject body;
-        body["universes"] = int(doc->inputOutputMap()->universesCount()) + 1;
-        return writeResult(DocWriter::addUniverse(doc), body);
+        body["universes"] = int(doc->inputOutputMap()->universesCount());
+        return writeResult(added, body);
     });
 
     m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Delete,
@@ -2289,5 +2309,29 @@ void ApiServer::registerRoutes()
         QJsonObject body;
         body["blackout"] = false;
         return QHttpServerResponse(body);
+    });
+
+    /* Not `denied`: the token is demanded even on loopback, where the rest of
+       the API deliberately works without one. Killing the desk is in a
+       different class from using it, and the strict check is what keeps
+       "anything on this machine may run lights" from becoming "anything that
+       can open a socket may stop the show". The desktop shell holds the token;
+       a phone on the venue network does not. */
+    m_server->route("/api/v1/shutdown", QHttpServerRequest::Method::Post,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        /* Accepted, not done: the response has to leave before the process
+           starts dying, so the emission is queued behind this handler. */
+        QMetaObject::invokeMethod(this, [this]() {
+            emit shutdownRequested();
+        }, Qt::QueuedConnection);
+
+        QJsonObject body;
+        body["shuttingDown"] = true;
+        QHttpServerResponse response(body, StatusCode::Accepted);
+        noCache(response);
+        return response;
     });
 }

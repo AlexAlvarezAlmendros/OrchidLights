@@ -115,24 +115,35 @@ bool ApiAuth::matches(const QByteArray &presented) const
     return secureEquals(presented, m_token);
 }
 
+namespace
+{
+    QByteArray bearerOf(const QHttpServerRequest &request)
+    {
+        for (const auto &header : request.headers())
+        {
+            if (header.first.toLower() != QByteArrayLiteral("authorization"))
+                continue;
+
+            const QByteArray value = header.second.trimmed();
+            if (value.startsWith("Bearer ") == false)
+                continue;
+
+            return value.mid(7).trimmed();
+        }
+
+        return QByteArray();
+    }
+}
+
 bool ApiAuth::authorize(const QHttpServerRequest &request) const
 {
     if (m_required == false)
         return true;
 
-    QByteArray presented;
-    for (const auto &header : request.headers())
-    {
-        if (header.first.toLower() != QByteArrayLiteral("authorization"))
-            continue;
+    return matches(bearerOf(request));
+}
 
-        const QByteArray value = header.second.trimmed();
-        if (value.startsWith("Bearer ") == false)
-            continue;
-
-        presented = value.mid(7).trimmed();
-        break;
-    }
-
-    return matches(presented);
+bool ApiAuth::authorizeStrict(const QHttpServerRequest &request) const
+{
+    return matches(bearerOf(request));
 }

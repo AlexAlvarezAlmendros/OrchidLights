@@ -1,0 +1,60 @@
+<!DOCTYPE Workspace>
+<!--
+  A console whose buttons are not all Toggle.
+
+  QLC+ writes four button actions, and three of them carry no function of
+  their own: Blackout and StopAll act on the whole desk, and Flash holds a
+  function up only while pressed. For one release the interface drew all four
+  identically and pressed them all as toggles - a Blackout button started a
+  function that does not exist, the daemon said so, and the error was
+  swallowed. This file keeps each action being what its project says it is.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator><Name>OrchidLights</Name><Version>0.1.0</Version></Creator>
+ <Engine>
+  <InputOutputMap><Universe Name="Universe 1" ID="0"/></InputOutputMap>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic</Model>
+   <Mode>1 Channel</Mode>
+   <ID>0</ID>
+   <Name>Dimmer</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>1</Channels>
+  </Fixture>
+  <Function ID="1" Type="Scene" Name="Luz de trabajo">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,255</FixtureVal>
+  </Function>
+  <Function ID="2" Type="Scene" Name="Segunda escena">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,128</FixtureVal>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <Button Caption="Alterna" ID="10">
+    <WindowState Visible="True" X="10" Y="10" Width="120" Height="60"/>
+    <Function ID="1"/>
+    <Action>Toggle</Action>
+   </Button>
+   <Button Caption="Ráfaga" ID="11">
+    <WindowState Visible="True" X="150" Y="10" Width="120" Height="60"/>
+    <Function ID="1"/>
+    <Action>Flash</Action>
+   </Button>
+   <Button Caption="Apagón" ID="12">
+    <WindowState Visible="True" X="290" Y="10" Width="120" Height="60"/>
+    <Function ID="4294967295"/>
+    <Action>Blackout</Action>
+   </Button>
+   <Button Caption="Todo quieto" ID="13">
+    <WindowState Visible="True" X="430" Y="10" Width="120" Height="60"/>
+    <Function ID="4294967295"/>
+    <Action>StopAll</Action>
+   </Button>
+  </Frame>
+ </VirtualConsole>
+</Workspace>
