@@ -251,6 +251,72 @@ body {
   box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
 }
 
+/* The locked door. Everything behind it needs the token, so it covers
+   everything -- a console that half-renders and half-refuses reads as broken
+   rather than as locked. */
+.gate {
+  /* A native <dialog>, laid out by us: the UA gives it margins, borders and
+     its own background that would fight the full-screen cover. */
+  margin: 0;
+  border: none;
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  color: inherit;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 1rem;
+}
+
+.gate-card {
+  width: min(92vw, 24rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.4rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.gate-card h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: -0.01em;
+}
+
+.gate-card p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.gate-card code {
+  font-size: 0.8em;
+}
+
+.gate-card input {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  padding: 0 0.8rem;
+  font-size: 1rem;
+}
+
+.gate-card button {
+  min-height: 44px;
+  font-weight: 650;
+}
+
 /* Blackout engaged: the button stays lit in its own colour so the state is
    visible from across the room, not just in the label text. */
 .showbar button.danger[data-active="true"] {

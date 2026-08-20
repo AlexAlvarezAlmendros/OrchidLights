@@ -1,4 +1,5 @@
 /** REST client. Same origin as the page, so no base URL and no CORS. */
+import { authHeaders } from './token'
 
 export interface FunctionState {
   id: number
@@ -279,8 +280,24 @@ export interface Status {
   blackout: boolean
 }
 
+/** Thrown on a 401 so the shell can tell "the daemon wants a token" apart
+ *  from every other failure and show the connect screen instead of a toast. */
+export class Unauthorized extends Error {
+  constructor() {
+    super('El daemon pide un token')
+    this.name = 'Unauthorized'
+  }
+}
+
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  const response = await fetch(path, {
+    ...init,
+    /* Every request carries the token this client holds -- one place, so a
+       route added later cannot forget it. On loopback without a token the
+       spread adds nothing and the daemon does not mind. */
+    headers: { ...authHeaders(), ...(init?.headers ?? {}) },
+  })
+  if (response.status === 401) throw new Unauthorized()
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string }
     throw new Error(body.error ?? `${response.status} ${response.statusText}`)

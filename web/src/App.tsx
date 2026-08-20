@@ -6,6 +6,7 @@ import {
   type WidgetPatch,
   api,
 } from './api'
+import { Unauthorized } from './api'
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
 import { AudioTriggers } from './audiotriggers'
 import { CueList } from './cuelist'
@@ -28,6 +29,7 @@ import { Plan } from './plan'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
 import { Slider } from './slider'
+import { getToken, setToken } from './token'
 import type { View } from './views'
 import { CREATABLE, placeBelow } from './widgets'
 import { XYPad } from './xypad'
@@ -73,6 +75,10 @@ export function App() {
      WS command, a lost connection. A press that does nothing and says nothing
      teaches the operator the desk is broken. */
   const [toast, setToast] = useState<string | null>(null)
+  /* The daemon wants a token this client does not hold. Not an error state: a
+     phone arriving at a --listen-all desk by bare URL lands here by design,
+     types the token once, and never sees this again. */
+  const [needToken, setNeedToken] = useState(false)
   const [levels, setLevels] = useState<Record<number, number>>({})
   /* Channels groups, kept apart from the console's faders on purpose: a group
      and a widget can both be number 3 and have nothing to do with each other. */
@@ -139,6 +145,15 @@ export function App() {
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
+
+  /* Stuck in 'auth' means the daemon asked and this client had no good
+     answer. The successful handshake passes through the same state for
+     milliseconds, so it only counts after it has settled. */
+  useEffect(() => {
+    if (connection !== 'auth') return
+    const timer = setTimeout(() => setNeedToken(true), 1500)
+    return () => clearTimeout(timer)
+  }, [connection])
 
   /* A toast is a moment, not a state: it clears itself so the next problem is
      legible, and touching nothing else. */
@@ -211,7 +226,7 @@ export function App() {
       },
     })
     live.current = feed
-    feed.connect()
+    feed.connect(getToken() ?? undefined)
 
     api
       .project()
@@ -248,7 +263,13 @@ export function App() {
       // shows are driven straight from the function list.
       .catch(() => setVc(null))
 
-    api.functions().then(setFunctions).catch(setErrorMessage)
+    api
+      .functions()
+      .then(setFunctions)
+      .catch((e: unknown) => {
+        if (e instanceof Unauthorized) setNeedToken(true)
+        else setErrorMessage(e)
+      })
     api
       .fixtures()
       .then(setFixtures)
@@ -740,6 +761,41 @@ export function App() {
           <p className="toast" role="alert">
             {toast}
           </p>
+        )}
+
+        {/* Full-screen on purpose: nothing behind it works without the token,
+            and a console that half-renders and half-refuses reads as broken
+            rather than as locked. */}
+        {needToken && (
+          <dialog className="gate" open aria-label="Conectar con la mesa">
+            <form
+              className="gate-card"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const field = event.currentTarget.elements.namedItem('token') as HTMLInputElement
+                if (field.value.trim() === '') return
+                setToken(field.value)
+                /* A full reload rather than surgical refetches: every request
+                   and the feed must retry with the new token, and boot already
+                   knows how to bring everything up in order. */
+                window.location.reload()
+              }}
+            >
+              <h2>Conectar con la mesa</h2>
+              <p>
+                Este daemon pide un token. Está en el archivo <code>~/.orchidlights/api-token</code>{' '}
+                de la máquina que lo ejecuta.
+              </p>
+              <input
+                name="token"
+                type="password"
+                autoComplete="off"
+                placeholder="Token"
+                aria-label="Token de acceso"
+              />
+              <button type="submit">Conectar</button>
+            </form>
+          </dialog>
         )}
 
         {view === 'console' && (pages.length > 1 || framePages > 1) && (
