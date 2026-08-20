@@ -24,6 +24,8 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSet>
+#include <QEventLoop>
+#include <QTimer>
 
 #include "enginehost.h"
 #include "installpaths.h"
@@ -62,6 +64,31 @@ EngineHost::~EngineHost()
         m_doc->masterTimer()->unregisterDMXSource(m_levels);
 
     delete m_levels;
+}
+
+void EngineHost::shutDown(bool zeroOutput)
+{
+    if (m_doc == nullptr || m_running == false)
+        return;
+
+    m_doc->masterTimer()->stopAllFunctions();
+
+    if (zeroOutput)
+    {
+        /* Blackout zeroes the universes on the next timer tick; the tick runs
+           in the timer's own thread at 50 Hz. Spinning the local event loop for
+           a handful of ticks is what turns "we asked for dark" into "the zeroed
+           frame left through the plugins" -- the only version an ArtNet node on
+           the other end can tell apart. */
+        m_doc->inputOutputMap()->setBlackout(true);
+
+        QEventLoop settle;
+        QTimer::singleShot(120, &settle, &QEventLoop::quit);
+        settle.exec();
+    }
+
+    m_doc->masterTimer()->stop();
+    m_running = false;
 }
 
 bool EngineHost::start(const Options &options, QString &errorMessage)

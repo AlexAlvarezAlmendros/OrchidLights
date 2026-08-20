@@ -20,8 +20,15 @@
 #include <QCommandLineParser>
 #include <QDesktopServices>
 #include <QGuiApplication>
+#include <QSocketNotifier>
 #include <QTextStream>
 #include <QUrl>
+
+#ifdef Q_OS_UNIX
+#include <sys/socket.h>
+#include <csignal>
+#include <unistd.h>
+#endif
 
 #include "enginehost.h"
 #include "apiserver.h"
@@ -34,6 +41,41 @@
 
 namespace
 {
+#ifdef Q_OS_UNIX
+    /* The one legal bridge between a signal handler and Qt.
+     *
+       A handler runs between any two instructions of the program, so it may
+       touch nothing of Qt's -- no event loop, no allocation, no locks. It may
+       write to a socket, and a QSocketNotifier on the other end turns that
+       byte into an ordinary event in the main thread, where shutting the
+       engine down is safe. Without this, SIGTERM simply kills the process
+       mid-tick and the rig latches whatever frame was last on the wire.
+     */
+    int signalPipe[2] = { -1, -1 };
+
+    void onSignal(int)
+    {
+        const char byte = 1;
+        // The return value is unusable here; if the write fails the process
+        // is going down the hard way regardless.
+        (void)!::write(signalPipe[0], &byte, sizeof(byte));
+    }
+
+    bool installSignalBridge()
+    {
+        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, signalPipe) != 0)
+            return false;
+
+        struct sigaction action = {};
+        action.sa_handler = onSignal;
+        ::sigemptyset(&action.sa_mask);
+        action.sa_flags = SA_RESTART;
+
+        return ::sigaction(SIGTERM, &action, nullptr) == 0
+            && ::sigaction(SIGINT, &action, nullptr) == 0;
+    }
+#endif
+
     void report(QTextStream &out, const EngineHost &engine)
     {
         out << "Fixture library: " << engine.manufacturerCount() << " manufacturers" << Qt::endl;
@@ -189,6 +231,14 @@ int main(int argc, char **argv)
         QStringLiteral("Demand the bearer token even on loopback."));
     parser.addOption(requireAuthOption);
 
+    QCommandLineOption zeroOnExitOption(
+        QStringLiteral("zero-on-exit"),
+        QStringLiteral("On shutdown, send a zeroed frame before exiting, so "
+                       "the rig goes dark instead of latching the last look. "
+                       "Off by default: walking away from a daemon mid-show "
+                       "should not black out the venue."));
+    parser.addOption(zeroOnExitOption);
+
     parser.process(app);
 
     QTextStream out(stdout);
@@ -271,6 +321,38 @@ int main(int argc, char **argv)
     }
 
     out << Qt::endl << "API listening on " << api.url() << Qt::endl;
+
+    /* Every deliberate way out funnels through here: SIGTERM/SIGINT from the
+       shell or a supervisor, and POST /api/v1/shutdown from a client holding
+       the token. One path, so "did it stop the functions first" is not a
+       question with per-exit answers. */
+    const bool zeroOnExit = parser.isSet(zeroOnExitOption);
+    const auto exitCleanly = [&engine, &app, zeroOnExit]() {
+        engine.shutDown(zeroOnExit);
+        app.quit();
+    };
+
+    QObject::connect(&api, &ApiServer::shutdownRequested, &app, exitCleanly);
+
+#ifdef Q_OS_UNIX
+    if (installSignalBridge())
+    {
+        auto *notifier = new QSocketNotifier(signalPipe[1], QSocketNotifier::Read, &app);
+        QObject::connect(notifier, &QSocketNotifier::activated, &app,
+                         [notifier, exitCleanly]() {
+            char byte = 0;
+            (void)!::read(notifier->socket(), &byte, sizeof(byte));
+            // One shot: a second signal while winding down must not re-enter.
+            notifier->setEnabled(false);
+            exitCleanly();
+        });
+    }
+    else
+    {
+        err << "WARNING: could not install signal handlers; "
+               "a TERM will exit without stopping the engine." << Qt::endl;
+    }
+#endif
 
     if (api.auth().isRequired())
     {

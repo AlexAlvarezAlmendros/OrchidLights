@@ -275,6 +275,8 @@ export interface Status {
   universes: number
   runningFunctions: number
   outputPlugins: string[]
+  /** Whether the rig is blacked out right now. */
+  blackout: boolean
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {

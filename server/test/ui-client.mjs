@@ -1709,6 +1709,118 @@ try {
   })()`)
   check('every kind of widget shows the colour it was given', striped === 'ok', striped)
 
+  /* The four button actions, each doing what its project says.
+   *
+     For one release all four were pressed as toggles: a Blackout button
+     started function 4294967295, the daemon answered `error`, and the client
+     dropped the message. Skips ('none') on projects without action buttons --
+     vc-actions.qxw is the one that has them all. */
+  const actions = await evaluate(`(async () => {
+    const byCaption = (text) => [...document.querySelectorAll('.widget.button')]
+      .find(b => b.textContent.trim() === text)
+    const status = async () => (await (await fetch('/api/v1/status')).json())
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+
+    /* Whatever an earlier test was doing, this one is about pressing, and
+       pressing happens in run mode. */
+    const done = [...document.querySelectorAll('button')]
+      .find(b => b.textContent.trim().startsWith('Listo'))
+    if (done) {
+      done.click()
+      await wait(800)
+    }
+
+    const flash = byCaption('Ráfaga')
+    const black = byCaption('Apagón')
+    const stopAll = byCaption('Todo quieto')
+    if (!flash && !black && !stopAll) return 'none'
+    if (!flash || !black || !stopAll) return 'only some action buttons drew'
+
+    /* Flash: light while held, out on release. */
+    const before = await status()
+    flash.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 21 }))
+    await wait(700)
+    const during = await status()
+    if (during.runningFunctions !== before.runningFunctions + 1) {
+      return 'flash press did not start the scene: before=' + before.runningFunctions
+        + ' during=' + during.runningFunctions + ' class=' + flash.className
+    }
+    flash.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 21 }))
+    await wait(700)
+    if ((await status()).runningFunctions !== 0) return 'flash release left the scene running'
+
+    /* Blackout: the desk goes dark, the button says so, and pressing it again
+       brings the desk back -- the half that used to be impossible. */
+    black.click()
+    await wait(700)
+    if ((await status()).blackout !== true) return 'the blackout button did not black out'
+    if (black.getAttribute('aria-pressed') !== 'true') return 'blackout engaged but its button does not show it'
+    black.click()
+    await wait(700)
+    if ((await status()).blackout !== false) return 'pressing it again did not release the blackout'
+
+    /* Stop-all: everything running stops with one press. */
+    const toggle = byCaption('Alterna')
+    if (toggle) {
+      toggle.click()
+      await wait(700)
+      if ((await status()).runningFunctions === 0) return 'could not start something to stop'
+      stopAll.click()
+      await wait(900)
+      if ((await status()).runningFunctions !== 0) return 'stop-all left something running'
+    }
+
+    return 'ok'
+  })()`)
+  check('button actions act as their project says', actions === 'none' || actions === 'ok', actions)
+
+  /* The top-bar blackout is a toggle that tells the truth on every screen. */
+  const blackoutBar = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const find = () => [...document.querySelectorAll('.showbar button')]
+      .find(b => b.textContent.includes('BLACKOUT') || b.textContent.includes('SALIR DE BLACKOUT'))
+    const button = find()
+    if (!button) return 'no blackout button in the bar'
+
+    button.click()
+    await wait(700)
+    const engaged = await (await fetch('/api/v1/status')).json()
+    if (engaged.blackout !== true) return 'the bar button did not engage blackout'
+    if (!find().textContent.includes('SALIR')) return 'engaged, but the button still reads BLACKOUT'
+
+    find().click()
+    await wait(700)
+    const released = await (await fetch('/api/v1/status')).json()
+    if (released.blackout !== false) return 'could not leave blackout from the bar'
+    if (find().textContent.includes('SALIR')) return 'released, but the button still reads SALIR'
+    return 'ok'
+  })()`)
+  check('blackout can be entered and left from the bar', blackoutBar === 'ok', blackoutBar)
+
+  /* The daemon's refusals reach the operator's eyes.
+   *
+     A press that does nothing and says nothing teaches the operator the desk
+     is broken -- this exact class of message used to be dropped on the floor
+     in the WS client. The trigger is real: a button whose function was
+     deleted still draws (the console says it exists), pressing it is refused,
+     and the refusal must surface. */
+  const surfaced = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const toggle = [...document.querySelectorAll('.widget.button')]
+      .find(b => b.textContent.trim() === 'Alterna')
+    if (!toggle) return 'none'
+
+    const gone = await fetch('/api/v1/functions/1?force=true', { method: 'DELETE' })
+    if (!gone.ok) return 'could not delete the function: ' + gone.status
+    await wait(700)
+
+    toggle.click()
+    await wait(900)
+    const toast = document.querySelector('.toast')
+    return toast ? 'ok' : 'the refusal never reached the screen'
+  })()`)
+  check('a refused press is said out loud', surfaced === 'none' || surfaced === 'ok', surfaced)
+
   /* One slider in the app, everywhere.
    *
      The rule this guards is the one that already broke once: a speed dial kept

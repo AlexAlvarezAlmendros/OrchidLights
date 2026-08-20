@@ -65,6 +65,14 @@ export function App() {
     () => (localStorage.getItem('orchid.theme') as Theme | null) ?? 'stage',
   )
   const [error, setError] = useState<string | null>(null)
+  /* The daemon's word, not this client's memory of pressing the button:
+     seeded from /status and kept fresh by the feed, so a blackout engaged
+     from a phone shows up here too. */
+  const [blackout, setBlackout] = useState(false)
+  /* One transient line for things that went wrong out-of-band -- a rejected
+     WS command, a lost connection. A press that does nothing and says nothing
+     teaches the operator the desk is broken. */
+  const [toast, setToast] = useState<string | null>(null)
   const [levels, setLevels] = useState<Record<number, number>>({})
   /* Channels groups, kept apart from the console's faders on purpose: a group
      and a widget can both be number 3 and have nothing to do with each other. */
@@ -132,6 +140,14 @@ export function App() {
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
 
+  /* A toast is a moment, not a state: it clears itself so the next problem is
+     legible, and touching nothing else. */
+  useEffect(() => {
+    if (toast === null) return
+    const timer = setTimeout(() => setToast(null), 6000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
   useEffect(() => {
     const feed = new Live({
       onFunctions: setFunctions,
@@ -150,6 +166,8 @@ export function App() {
       onPad: (id, x, y) => setPads((current) => ({ ...current, [id]: { x, y } })),
       onSpectrum: (bands, volume) => setSpectrum({ bands, volume }),
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
+      onBlackout: setBlackout,
+      onError: setToast,
       /* Somebody else edited the show. Re-read what they touched rather than
          patching a local copy from the message: the daemon decides what a
          change means, and two clients guessing at it is how they drift. */
@@ -204,6 +222,12 @@ export function App() {
       .vc()
       .then((console_) => {
         setVc(console_)
+        // The one field of /status the console needs at boot; the feed keeps
+        // it fresh afterwards.
+        api
+          .status()
+          .then((status) => setBlackout(status.blackout === true))
+          .catch(() => undefined)
         // Seed the faders from the values the project was saved with, so the
         // interface opens showing the desk as the show left it.
         const seeded: Record<number, number> = {}
@@ -252,6 +276,26 @@ export function App() {
   )
 
   const toggle = useCallback((id: number) => live.current?.toggle(id, running.has(id)), [running])
+
+  const flash = useCallback((id: number, on: boolean) => live.current?.flash(id, on), [])
+
+  /* The two button actions that have no function behind them. Stop-all walks
+     the running set through the same stop path a tap uses -- the daemon's
+     stop-everything call arrives with F6, and until then this is the honest
+     version, not a dead control. */
+  const buttonAction = useCallback(
+    (action: 'Blackout' | 'StopAll') => {
+      if (action === 'Blackout') {
+        api.blackout(!blackout).then(
+          (state) => setBlackout(state.blackout),
+          (e: unknown) => setToast(e instanceof Error ? e.message : String(e)),
+        )
+        return
+      }
+      for (const id of running) live.current?.toggle(id, true)
+    },
+    [blackout, running],
+  )
 
   const setSpeed = useCallback((id: number, milliseconds: number) => {
     setLevels((current) => ({ ...current, [id]: milliseconds }))
@@ -667,15 +711,36 @@ export function App() {
               </button>
             </>
           )}
-          {mode !== 'run' && dirty && (
+          {/* Reachable whenever there is something to save. It used to hide
+              outside the console's edit modes, which left every other screen
+              -- patch a fixture, edit a function -- with the "sin guardar"
+              notice and no way to act on it. */}
+          {dirty && (
             <button type="button" onClick={persist}>
               Guardar
             </button>
           )}
-          <button type="button" className="danger" onClick={() => api.blackout(true)}>
-            BLACKOUT
+          <button
+            type="button"
+            className="danger"
+            data-active={blackout}
+            aria-pressed={blackout}
+            onClick={() =>
+              api.blackout(!blackout).then(
+                (state) => setBlackout(state.blackout),
+                (e: unknown) => setToast(e instanceof Error ? e.message : String(e)),
+              )
+            }
+          >
+            {blackout ? 'SALIR DE BLACKOUT' : 'BLACKOUT'}
           </button>
         </header>
+
+        {toast !== null && (
+          <p className="toast" role="alert">
+            {toast}
+          </p>
+        )}
 
         {view === 'console' && (pages.length > 1 || framePages > 1) && (
           <nav className="pages">
@@ -772,6 +837,8 @@ export function App() {
               universes={frames}
               functions={functions}
               running={running}
+              blackout={blackout}
+              onBlackout={() => buttonAction('Blackout')}
               onToggle={toggle}
               onError={setPlanError}
             />
@@ -820,6 +887,7 @@ export function App() {
                   running={running}
                   allFunctions={functions}
                   onToggle={toggle}
+                  desk={{ blackout, onFlash: flash, onAction: buttonAction }}
                   onCueList={cueList}
                   pads={pads}
                   onPad={movePad}
@@ -865,6 +933,14 @@ export function App() {
   )
 }
 
+/** What a button needs beyond its own function: the desk-wide actions.
+ *  Bundled so the plumbing through Surface and NestedFrame stays one prop. */
+interface DeskActions {
+  blackout: boolean
+  onFlash: (id: number, on: boolean) => void
+  onAction: (action: 'Blackout' | 'StopAll') => void
+}
+
 function Surface({
   rows,
   running,
@@ -891,11 +967,13 @@ function Surface({
   selecting,
   selected,
   onSelect,
+  desk,
 }: {
   rows: Row[]
   running: Set<number>
   allFunctions: FunctionState[]
   onToggle: (id: number) => void
+  desk: DeskActions
   onCueList: (chaser: number, action: CueAction, index?: number) => void
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
@@ -945,6 +1023,7 @@ function Surface({
         running={running}
         allFunctions={allFunctions}
         onToggle={onToggle}
+        desk={desk}
         onCueList={onCueList}
         pads={pads}
         onPad={onPad}
@@ -1044,6 +1123,7 @@ function Surface({
                 running={running}
                 allFunctions={allFunctions}
                 onToggle={onToggle}
+                desk={desk}
                 onCueList={onCueList}
                 pads={pads}
                 onPad={onPad}
@@ -1121,6 +1201,7 @@ function Widget({
   running,
   allFunctions,
   onToggle,
+  desk,
   onCueList,
   pads,
   onPad,
@@ -1147,6 +1228,7 @@ function Widget({
   running: Set<number>
   allFunctions: FunctionState[]
   onToggle: (id: number) => void
+  desk: DeskActions
   onCueList: (chaser: number, action: CueAction, index?: number) => void
   pads: Record<number, { x: number; y: number }>
   onPad: (id: number, x: number, y: number) => void
@@ -1293,21 +1375,79 @@ function Widget({
     return <div className="widget label">{widget.caption}</div>
   }
 
-  if (widget.type === 'button' && widget.functionId !== undefined) {
-    const id = widget.functionId
-    return (
-      <button
-        type="button"
-        className="widget button"
-        style={style}
-        data-tint={tint !== undefined}
-        data-running={running.has(id)}
-        aria-pressed={running.has(id)}
-        onClick={() => onToggle(id)}
-      >
-        {widget.caption || `#${id}`}
-      </button>
-    )
+  if (widget.type === 'button') {
+    const action = widget.action ?? 'Toggle'
+
+    /* Blackout and stop-all carry no function of their own: QLC+ writes the
+       invalid-id sentinel there. Before this branch they fell through to the
+       toggle path and started a function that does not exist -- the daemon
+       said so, and the error was dropped on the floor. */
+    if (action === 'Blackout' || action === 'StopAll') {
+      const active = action === 'Blackout' && desk.blackout
+      return (
+        <button
+          type="button"
+          className="widget button"
+          style={style}
+          data-tint={tint !== undefined}
+          data-running={active}
+          aria-pressed={active}
+          onClick={() => desk.onAction(action)}
+        >
+          {widget.caption || (action === 'Blackout' ? 'Blackout' : 'Parar todo')}
+        </button>
+      )
+    }
+
+    if (widget.functionId !== undefined) {
+      const id = widget.functionId
+
+      if (action === 'Flash') {
+        /* Held, not latched: light while the finger is down. Releasing
+           anywhere -- including off the button -- lets go, because a flash
+           that sticks because the pointer slipped is a stuck light on stage. */
+        return (
+          <button
+            type="button"
+            className="widget button"
+            style={style}
+            data-tint={tint !== undefined}
+            data-running={running.has(id)}
+            aria-pressed={running.has(id)}
+            onPointerDown={(e) => {
+              /* Capture is the enhancement -- releasing off the button still
+                 lets go -- and it must never gate the action: a synthetic
+                 pointer (tests, some assistive tech) has no capturable id and
+                 throws. */
+              try {
+                e.currentTarget.setPointerCapture(e.pointerId)
+              } catch {
+                // The pointerup listener still covers the common case.
+              }
+              desk.onFlash(id, true)
+            }}
+            onPointerUp={() => desk.onFlash(id, false)}
+            onPointerCancel={() => desk.onFlash(id, false)}
+          >
+            {widget.caption || `#${id}`}
+          </button>
+        )
+      }
+
+      return (
+        <button
+          type="button"
+          className="widget button"
+          style={style}
+          data-tint={tint !== undefined}
+          data-running={running.has(id)}
+          aria-pressed={running.has(id)}
+          onClick={() => onToggle(id)}
+        >
+          {widget.caption || `#${id}`}
+        </button>
+      )
+    }
   }
 
   if (widget.type === 'audiotriggers') {
@@ -1383,6 +1523,7 @@ function Widget({
         running={running}
         allFunctions={allFunctions}
         onToggle={onToggle}
+        desk={desk}
         onCueList={onCueList}
         pads={pads}
         onPad={onPad}
@@ -1427,6 +1568,7 @@ function NestedFrame({
   style,
   running,
   allFunctions,
+  desk,
   onToggle,
   onCueList,
   pads,
@@ -1443,6 +1585,7 @@ function NestedFrame({
   style: React.CSSProperties
   running: Set<number>
   allFunctions: FunctionState[]
+  desk: DeskActions
   onToggle: (id: number) => void
   onCueList: (chaser: number, action: CueAction, index?: number) => void
   pads: Record<number, { x: number; y: number }>
@@ -1502,6 +1645,7 @@ function NestedFrame({
                 running={running}
                 allFunctions={allFunctions}
                 onToggle={onToggle}
+                desk={desk}
                 onCueList={onCueList}
                 pads={pads}
                 onPad={onPad}

@@ -72,6 +72,20 @@ public:
      */
     bool start(const Options &options, QString &errorMessage);
 
+    /**
+     * Wind the engine down on purpose.
+     *
+     * Without this, the only exit is the process dying mid-tick, which leaves
+     * the rig holding whatever frame happened to be last -- ArtNet nodes and
+     * DMX interfaces latch, so "the daemon stopped" looks like "the lights
+     * froze on". Stops every function; with zeroOutput it also engages
+     * blackout and waits for the zeroed frame to actually reach the plugins
+     * before returning, so a venue going dark is a fact, not a race.
+     *
+     * Safe to call more than once; after it the engine no longer runs.
+     */
+    void shutDown(bool zeroOutput);
+
     /** Load a project into the running engine. */
     bool loadProject(const QString &fileName, QString &errorMessage);
 

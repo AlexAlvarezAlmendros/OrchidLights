@@ -55,6 +55,16 @@ public:
     bool authorize(const QHttpServerRequest &request) const;
 
     /**
+     * True only when the request carries the token, whatever setRequired says.
+     *
+     * For the routes that reach the disk or kill the process: on loopback the
+     * rest of the API deliberately works without a token, but "anything on
+     * this machine can use the desk" must never grow into "anything that can
+     * reach this socket can read my files or shut me down".
+     */
+    bool authorizeStrict(const QHttpServerRequest &request) const;
+
+    /**
      * True when presented is the token, compared in constant time.
      *
      * Exposed because a browser cannot set an Authorization header on a

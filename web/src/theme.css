@@ -232,6 +232,32 @@ body {
   font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
 }
 
+/* The out-of-band complaint. Floating, so it needs no room in any layout, and
+   brief -- it clears itself. */
+.toast {
+  position: fixed;
+  top: max(0.75rem, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  margin: 0;
+  max-width: min(92vw, 34rem);
+  padding: 0.55rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-raised));
+  color: var(--text);
+  font-size: 0.85rem;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+
+/* Blackout engaged: the button stays lit in its own colour so the state is
+   visible from across the room, not just in the label text. */
+.showbar button.danger[data-active="true"] {
+  background: color-mix(in srgb, var(--danger) 22%, var(--surface));
+  color: var(--danger);
+}
+
 .chip .dot {
   display: inline-block;
   width: 6px;

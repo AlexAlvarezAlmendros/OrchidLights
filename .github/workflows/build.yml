@@ -191,6 +191,9 @@ jobs:
       - name: Smoke test - the web API drives the engine
         run: ./server/test/api-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      - name: Shutdown smoke test (signals, token-gated route, last frame on the wire)
+        run: ./server/test/shutdown-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:
@@ -298,6 +301,7 @@ jobs:
           command -v google-chrome > /dev/null \
             || { echo "::error::no Chrome on the runner; the UI test would skip"; exit 1; }
 
+          ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-actions.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-references.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-frames.qxw
           ./server/test/ui-smoke.sh orchidlightsd server/test/data/vc-matrix.qxw
