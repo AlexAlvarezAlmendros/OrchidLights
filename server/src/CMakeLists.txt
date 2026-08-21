@@ -4,6 +4,8 @@ add_executable(${module_name}
     main.cpp
     apiauth.cpp apiauth.h
     audiotriggers.cpp audiotriggers.h
+    inputrouter.cpp inputrouter.h
+    widgetactions.cpp widgetactions.h
     apiserver.cpp apiserver.h
     consolelayout.cpp consolelayout.h
     docwriter.cpp docwriter.h

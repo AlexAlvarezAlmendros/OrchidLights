@@ -22,6 +22,7 @@ import {
   api,
 } from './api'
 import type { VcWidget } from './layout'
+import { keySequenceOf } from './teclas'
 
 const ACTIONS = [
   { value: 'Toggle', label: 'Alternar' },
@@ -587,6 +588,52 @@ function ExternalInput({
         </button>
       </div>
 
+      {bound && widget.type === 'button' && (
+        <div className="fields">
+          {/* What the control's LED gets in each state -- MIDI wings light
+              their buttons from these two numbers. */}
+          <label className="field">
+            <span>LED apagado</span>
+            <input
+              type="number"
+              min={0}
+              max={255}
+              defaultValue={bound.lower ?? 0}
+              onBlur={(e) => {
+                const raw = Number(e.target.value)
+                onApply({
+                  input: {
+                    universe: bound.universe,
+                    channel: bound.channel,
+                    lower: Number.isNaN(raw) || raw === 0 ? null : Math.min(255, Math.max(0, raw)),
+                  },
+                })
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>LED encendido</span>
+            <input
+              type="number"
+              min={0}
+              max={255}
+              defaultValue={bound.upper ?? 255}
+              onBlur={(e) => {
+                const raw = Number(e.target.value)
+                onApply({
+                  input: {
+                    universe: bound.universe,
+                    channel: bound.channel,
+                    upper:
+                      Number.isNaN(raw) || raw === 255 ? null : Math.min(255, Math.max(0, raw)),
+                  },
+                })
+              }}
+            />
+          </label>
+        </div>
+      )}
+
       {/* An input universe with nothing patched into it never reports
           anything, and a button that waits forever looks broken rather than
           unpatched. */}
@@ -595,6 +642,64 @@ function ExternalInput({
           Si no llega nada, comprueba que hay una entrada parcheada en Patch → Universos.
         </p>
       )}
+
+      {widget.type === 'button' && <KeyBinding widget={widget} busy={busy} onApply={onApply} />}
     </details>
+  )
+}
+
+/**
+ * The keyboard shortcut, captured rather than typed: press the key you mean.
+ * Stored as QKeySequence text so the .qxw stays legible to QLC+ itself.
+ */
+function KeyBinding({
+  widget,
+  busy,
+  onApply,
+}: {
+  widget: VcWidget
+  busy: boolean
+  onApply: (patch: WidgetPatch) => Promise<void>
+}) {
+  const [capturing, setCapturing] = useState(false)
+
+  useEffect(() => {
+    if (!capturing) return
+    const grab = (event: KeyboardEvent) => {
+      const sequence = keySequenceOf(event)
+      if (sequence === null) return
+      event.preventDefault()
+      event.stopPropagation()
+      setCapturing(false)
+      onApply({ key: sequence })
+    }
+    /* Capture phase, so the app's own runtime bindings never see the press
+       that was meant to DEFINE one. */
+    window.addEventListener('keydown', grab, true)
+    return () => window.removeEventListener('keydown', grab, true)
+  }, [capturing, onApply])
+
+  return (
+    <div className="fields">
+      <label className="field">
+        <span>Tecla</span>
+        <output>{widget.key ?? 'Sin asignar'}</output>
+      </label>
+      <button
+        type="button"
+        aria-pressed={capturing}
+        disabled={busy}
+        onClick={() => setCapturing((on) => !on)}
+      >
+        {capturing ? 'Pulsa la tecla…' : 'Capturar'}
+      </button>
+      <button
+        type="button"
+        disabled={busy || widget.key === undefined}
+        onClick={() => onApply({ key: null })}
+      >
+        Quitar
+      </button>
+    </div>
   )
 }

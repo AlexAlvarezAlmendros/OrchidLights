@@ -53,7 +53,10 @@ cp "$SOURCE" "$WORK/$NAME"
 # so the branch is covered by hand and by audioplay-smoke.sh.
 read -r -a EXTRA <<< "${ORCHID_TEST_ARGS:-}"
 
-"$DAEMON" --port "$PORT" --no-output "${EXTRA[@]+"${EXTRA[@]}"}" "$WORK/$NAME" \
+# WITH output plugins: the external-input chapters patch the Loopback line to
+# press widgets by wire. Nothing binds a port until a patch asks for it, and
+# no test project carries one, so the load is quiet.
+"$DAEMON" --port "$PORT" "${EXTRA[@]+"${EXTRA[@]}"}" "$WORK/$NAME" \
     > "$WORK/daemon.log" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT

@@ -229,6 +229,45 @@ DocWriter::Result DocWriter::setOutputPatch(Doc *doc, int index, const QString &
     return Result::success();
 }
 
+DocWriter::Result DocWriter::setFeedbackPatch(Doc *doc, int index, const QString &pluginName,
+                                              const QString &outputName)
+{
+    QString error;
+    const int engine = engineIndex(doc, index, error);
+    if (engine < 0)
+        return Result::failure(error);
+
+    InputOutputMap *map = doc->inputOutputMap();
+
+    if (pluginName.isEmpty())
+    {
+        map->setOutputPatch(quint32(engine), QString(), QString(), QString(), 0, true);
+        doc->setModified();
+        return Result::success();
+    }
+
+    if (map->outputPluginNames().contains(pluginName) == false)
+    {
+        return Result::failure(QStringLiteral("No output plugin named \"%1\". Available: %2")
+                                   .arg(pluginName, map->outputPluginNames().join(QStringLiteral(", "))));
+    }
+
+    const QStringList lines = map->pluginOutputs(pluginName);
+    quint32 line = 0;
+    if (lineExists(lines, outputName, line) == false)
+    {
+        return Result::failure(QStringLiteral("Plugin \"%1\" has no output \"%2\". Available: %3")
+                                   .arg(pluginName, outputName, lines.join(QStringLiteral(" | "))));
+    }
+
+    if (map->setOutputPatch(quint32(engine), pluginName, QString(), lines.at(int(line)), line,
+                            true) == false)
+        return Result::failure(QStringLiteral("The engine refused the feedback patch"));
+
+    doc->setModified();
+    return Result::success();
+}
+
 DocWriter::Result DocWriter::setInputPatch(Doc *doc, int index, const QString &pluginName,
                                            const QString &inputName, const QString &profileName)
 {

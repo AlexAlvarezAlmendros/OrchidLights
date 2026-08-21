@@ -78,6 +78,15 @@ struct VcWidget
     quint32 inputUniverse = 0;
     quint32 inputChannel = 0;
 
+    /** Custom feedback values for the bound control (a MIDI LED's off/on).
+     *  The file only writes them when they differ from 0/255. */
+    uchar feedbackLower = 0;
+    uchar feedbackUpper = 255;
+
+    /** The keyboard shortcut bound to this widget (QKeySequence text, e.g.
+     *  "Ctrl+F1"), empty when none. */
+    QString key;
+
     /** Function a button drives, or the one a playback slider rides. */
     bool hasFunction = false;
     quint32 functionId = 0;

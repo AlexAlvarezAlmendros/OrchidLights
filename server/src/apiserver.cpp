@@ -2174,6 +2174,19 @@ void ApiServer::registerRoutes()
                 return jsonError(StatusCode::BadRequest, result.error);
         }
 
+        /* Where this universe's feedback goes out: the motorized faders and
+           LEDs of whatever is patched as its input. Cleared with an empty
+           plugin, like the output. */
+        if (patch.contains("feedback"))
+        {
+            const QJsonObject feedback = patch.value("feedback").toObject();
+            const DocWriter::Result result =
+                DocWriter::setFeedbackPatch(doc, index, feedback.value("plugin").toString(),
+                                            feedback.value("line").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
         return QHttpServerResponse(JsonView::universes(doc));
     });
 
@@ -2469,6 +2482,15 @@ void ApiServer::registerRoutes()
         body["channelMode"] = state.channelMode;
         body["valueMode"] = state.valueMode;
         body["visible"] = state.visible;
+        if (state.hasInput)
+        {
+            QJsonObject input;
+            input["universe"] = qint64(state.inputUniverse);
+            input["channel"] = qint64(state.inputChannel);
+            body["input"] = input;
+        }
+        else
+            body["input"] = QJsonValue::Null;
         return QHttpServerResponse(body);
     });
 
@@ -2499,12 +2521,54 @@ void ApiServer::registerRoutes()
             return jsonError(StatusCode::BadRequest, errorMessage);
         }
 
+        /* The external control bound to the big fader. {universe, channel}
+           binds, null unbinds, absent leaves it alone -- the same contract a
+           widget's input patch uses. */
+        if (asked.contains(QStringLiteral("input")))
+        {
+            const QJsonValue input = asked.value(QStringLiteral("input"));
+            bool ok = false;
+            if (input.isNull())
+                ok = m_engine->setGrandMasterInput(false, 0, 0, errorMessage);
+            else if (input.isObject())
+            {
+                const QJsonObject bound = input.toObject();
+                const int universe = bound.value(QStringLiteral("universe")).toInt(-1);
+                const int channel = bound.value(QStringLiteral("channel")).toInt(-1);
+                if (universe < 0 || channel < 0)
+                {
+                    return jsonError(StatusCode::BadRequest,
+                                     QStringLiteral("An input needs a non-negative "
+                                                    "\"universe\" and \"channel\""));
+                }
+                ok = m_engine->setGrandMasterInput(true, quint32(universe),
+                                                   quint32(channel), errorMessage);
+            }
+            else
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("\"input\" is {\"universe\": n, "
+                                                "\"channel\": n} or null"));
+            }
+            if (ok == false)
+                return jsonError(StatusCode::BadRequest, errorMessage);
+        }
+
         const EngineHost::GrandMasterState state = m_engine->grandMaster();
         QJsonObject body;
         body["value"] = state.value;
         body["channelMode"] = state.channelMode;
         body["valueMode"] = state.valueMode;
         body["visible"] = state.visible;
+        if (state.hasInput)
+        {
+            QJsonObject input;
+            input["universe"] = qint64(state.inputUniverse);
+            input["channel"] = qint64(state.inputChannel);
+            body["input"] = input;
+        }
+        else
+            body["input"] = QJsonValue::Null;
         return QHttpServerResponse(body);
     });
 

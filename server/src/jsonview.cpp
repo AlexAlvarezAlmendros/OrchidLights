@@ -166,6 +166,15 @@ QJsonObject JsonView::universe(const Universe *universe, int index)
         json["input"] = in;
     }
 
+    const OutputPatch *feedback = universe->feedbackPatch();
+    if (feedback != nullptr && feedback->isPatched())
+    {
+        QJsonObject fb;
+        fb["plugin"] = feedback->pluginName();
+        fb["line"] = feedback->outputName();
+        json["feedback"] = fb;
+    }
+
     /* Passthrough sends what arrives on the input straight back out. Worth
        reporting, because a universe in passthrough ignores the desk and an
        operator staring at unresponsive lights has no other way to find out. */
@@ -709,8 +718,17 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
         QJsonObject input;
         input["universe"] = qint64(widget.inputUniverse);
         input["channel"] = qint64(widget.inputChannel);
+        /* Only when custom: the absent case IS 0/255, and writing the
+           defaults would invite clients to send them back and dirty files. */
+        if (widget.feedbackLower != 0)
+            input["lower"] = int(widget.feedbackLower);
+        if (widget.feedbackUpper != 255)
+            input["upper"] = int(widget.feedbackUpper);
         json["input"] = input;
     }
+
+    if (widget.key.isEmpty() == false)
+        json["key"] = widget.key;
 
     if (widget.hasFunction)
         json["functionId"] = qint64(widget.functionId);
