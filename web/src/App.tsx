@@ -29,7 +29,7 @@ import { Plan } from './plan'
 import { ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
-import { resolveClose } from './shell'
+import { resolveClose, takePendingOpen } from './shell'
 import { Slider } from './slider'
 import { getToken, setToken } from './token'
 import type { View } from './views'
@@ -166,21 +166,30 @@ export function App() {
      window, or a second launch in a terminal -- and so a browser, which never
      receives them, needs no other code path removed or faked. */
   useEffect(() => {
-    const onOpenRequest = (event: Event) => {
-      const path = String((event as CustomEvent).detail ?? '')
-      if (path === '') return
-      if (dirty && !window.confirm('Hay cambios sin guardar que se perderán. ¿Abrir igualmente?'))
-        return
-      api
-        .openProjectPath(path)
+    /* Pull, don't catch: the shell PARKS the path and pings, and this pulls
+       it -- on the ping, and once on mount, which is what makes a request
+       that arrived while the splash was still up (or before React mounted)
+       impossible to lose. The pull consumes, so mount+ping never double-open. */
+    const claim = () => {
+      takePendingOpen()
+        .then((path) => {
+          if (path === null) return
+          if (
+            dirty &&
+            !window.confirm('Hay cambios sin guardar que se perderán. ¿Abrir igualmente?')
+          )
+            return
+          return api.openProjectPath(path)
+        })
         .catch((e: unknown) => setToast(e instanceof Error ? e.message : String(e)))
     }
     const onCloseRequest = () => setCloseAsk(true)
 
-    window.addEventListener('orchid-open-request', onOpenRequest)
+    claim()
+    window.addEventListener('orchid-open-ping', claim)
     window.addEventListener('orchid-close-request', onCloseRequest)
     return () => {
-      window.removeEventListener('orchid-open-request', onOpenRequest)
+      window.removeEventListener('orchid-open-ping', claim)
       window.removeEventListener('orchid-close-request', onCloseRequest)
     }
   }, [dirty])

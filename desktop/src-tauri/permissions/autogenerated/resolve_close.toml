@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-close"
+description = "Enables the resolve_close command without any pre-configured scope."
+commands.allow = ["resolve_close"]
+
+[[permission]]
+identifier = "deny-resolve-close"
+description = "Denies the resolve_close command without any pre-configured scope."
+commands.deny = ["resolve_close"]

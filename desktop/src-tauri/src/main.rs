@@ -30,6 +30,16 @@ struct ShellState {
     token: Option<String>,
 }
 
+/// An open request waiting for the page to be ready to take it.
+///
+/// Pushing the path in with a one-shot eval loses it whenever the event fires
+/// before the page has mounted its listeners -- a cold WebKit on a CI box
+/// showed exactly that. So the shell PARKS the request and pings; the page
+/// pulls it with `take_pending_open`, which consumes under the lock, making
+/// double delivery (mount pull + ping pull) structurally impossible.
+#[derive(Default)]
+struct PendingOpen(std::sync::Mutex<Option<String>>);
+
 /// Native "open a project" dialog. The webview holds no dialog permission of
 /// its own: the page asks the shell, the shell asks the operator.
 #[tauri::command]
@@ -56,6 +66,13 @@ async fn pick_save_file(app: tauri::AppHandle) -> Option<String> {
             let _ = send.send(picked);
         });
     receive.recv().ok().flatten().map(|path| path.to_string())
+}
+
+/// The page collects a parked open request. Consuming: whoever asks first
+/// gets it, everyone after gets None.
+#[tauri::command]
+fn take_pending_open(pending: tauri::State<PendingOpen>) -> Option<String> {
+    pending.0.lock().expect("pending lock").take()
 }
 
 /// The page answered the close question. `save` already happened (the page
@@ -106,8 +123,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             pick_open_file,
             pick_save_file,
+            take_pending_open,
             resolve_close
         ])
+        .manage(PendingOpen::default())
         .setup(move |app| {
             let handle = app.handle().clone();
 
@@ -185,20 +204,19 @@ fn main() {
         .expect("la carcasa no pudo arrancar");
 }
 
-/// Hand a project path to the page as the same event every open uses.
+/// Hand a project path to the page: park it, then ping.
 ///
-/// The path travels as JSON so nothing an operator names a file can break out
-/// of the string and into the page.
+/// The ping carries nothing; the page pulls the path with a command. A parked
+/// request also survives the page not existing yet at all -- the app pulls on
+/// mount -- and a newer request simply replaces an unclaimed older one, which
+/// is what dropping two files in a row should mean.
 fn forward_open_request(app: &tauri::AppHandle, path: &Path) {
-    let Some(window) = app.get_webview_window("main") else {
-        return;
-    };
-    let Ok(encoded) = serde_json::to_string(&path.to_string_lossy()) else {
-        return;
-    };
-    let _ = window.eval(format!(
-        "window.dispatchEvent(new CustomEvent('orchid-open-request', {{ detail: {encoded} }}))"
-    ));
+    if let Some(pending) = app.try_state::<PendingOpen>() {
+        *pending.0.lock().expect("pending lock") = Some(path.to_string_lossy().into_owned());
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.eval("window.dispatchEvent(new CustomEvent('orchid-open-ping'))");
+    }
 }
 
 /// Whether the daemon holds unsaved edits. `false` when it cannot say --

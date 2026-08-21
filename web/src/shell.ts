@@ -43,6 +43,16 @@ export async function pickProjectToSave(): Promise<string | null> {
   return typeof path === 'string' ? path : null
 }
 
+/** Collect a parked open request from the shell, if any. Consuming: asking
+ *  twice yields the path once. The shell parks instead of pushing because a
+ *  one-shot event fired before the page mounted is simply lost. */
+export async function takePendingOpen(): Promise<string | null> {
+  const tauri = internals()
+  if (tauri === null) return null
+  const path = await tauri.invoke('take_pending_open')
+  return typeof path === 'string' && path !== '' ? path : null
+}
+
 /** The page's answer to the close question was "go": the shell takes the
  *  daemon down tidy and ends. Saving, if asked for, already happened -- the
  *  page saves through the daemon, where saving lives. */
