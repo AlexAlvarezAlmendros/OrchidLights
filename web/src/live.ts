@@ -39,6 +39,13 @@ export interface LiveHandlers {
   onUniverse?: (universe: number, channels: Uint8Array) => void
   /** Blackout engaged or released -- by us or by anyone. */
   onBlackout?: (on: boolean) => void
+  /** The Grand Master moved or changed mode -- by anyone. */
+  onGrandMaster?: (state: {
+    value: number
+    channelMode: string
+    valueMode: string
+    visible: boolean
+  }) => void
   /** The dirty flag flipped -- an edit landed, or a save (anyone's) cleaned
    *  it. Both edges travel: a banner that says "sin guardar" after the
    *  desktop saved reads as a desk that lost the edits. */
@@ -130,6 +137,14 @@ export class Live {
           break
         case 'blackout':
           this.handlers.onBlackout?.(message.on === true)
+          break
+        case 'grandmaster':
+          this.handlers.onGrandMaster?.({
+            value: Number(message.value ?? 255),
+            channelMode: String(message.channelMode ?? 'Intensity'),
+            valueMode: String(message.valueMode ?? 'Reduce'),
+            visible: message.visible !== false,
+          })
           break
         case 'project':
           this.handlers.onProject?.(message.dirty === true, String(message.name ?? ''))

@@ -6,6 +6,7 @@ import {
   type WidgetPatch,
   api,
 } from './api'
+import type { GrandMasterState } from './api'
 import { Unauthorized } from './api'
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
 import { AudioTriggers } from './audiotriggers'
@@ -23,6 +24,7 @@ import {
   pagesOf,
 } from './layout'
 import { type Connection, Live } from './live'
+import { GrandMasterDock, StopAll } from './maestro'
 import { MatrixWidget } from './matrix'
 import { Nav } from './nav'
 import { Plan } from './plan'
@@ -73,6 +75,7 @@ export function App() {
      seeded from /status and kept fresh by the feed, so a blackout engaged
      from a phone shows up here too. */
   const [blackout, setBlackout] = useState(false)
+  const [grandMaster, setGrandMaster] = useState<GrandMasterState | null>(null)
   /* One transient line for things that went wrong out-of-band -- a rejected
      WS command, a lost connection. A press that does nothing and says nothing
      teaches the operator the desk is broken. */
@@ -151,6 +154,19 @@ export function App() {
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
+
+  /* The panic shortcut, the same combination QLC+ uses. In the desktop shell
+     a global shortcut covers the app being unfocused; this one covers every
+     browser. */
+  useEffect(() => {
+    const panic = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !event.ctrlKey || !event.shiftKey) return
+      event.preventDefault()
+      api.stopAll(0).catch(() => undefined)
+    }
+    window.addEventListener('keydown', panic)
+    return () => window.removeEventListener('keydown', panic)
+  }, [])
 
   /* Stuck in 'auth' means the daemon asked and this client had no good
      answer. The successful handshake passes through the same state for
@@ -237,6 +253,7 @@ export function App() {
       onSpectrum: (bands, volume) => setSpectrum({ bands, volume }),
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
       onBlackout: setBlackout,
+      onGrandMaster: setGrandMaster,
       onError: setToast,
       onProject: (isDirty) => {
         setDirty(isDirty)
@@ -310,6 +327,10 @@ export function App() {
           .status()
           .then((status) => setBlackout(status.blackout === true))
           .catch(() => undefined)
+        api
+          .grandMaster()
+          .then(setGrandMaster)
+          .catch(() => setGrandMaster(null))
         // Seed the faders from the values the project was saved with, so the
         // interface opens showing the desk as the show left it.
         const seeded: Record<number, number> = {}
@@ -748,6 +769,8 @@ export function App() {
             </span>
           </div>
 
+          <GrandMasterDock state={grandMaster} onState={setGrandMaster} onError={setToast} />
+
           <span className="chip" data-state={connection}>
             <span className="dot" />
             {connection === 'open'
@@ -812,6 +835,7 @@ export function App() {
               Guardar
             </button>
           )}
+          <StopAll running={running.size} onError={setToast} />
           <button
             type="button"
             className="danger"

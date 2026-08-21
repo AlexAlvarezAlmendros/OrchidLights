@@ -192,21 +192,23 @@ bool Universe::monitor() const
 
 void Universe::slotGMValueChanged()
 {
+    for (int i = 0; i < m_intensityChannels.size(); ++i)
     {
-        for (int i = 0; i < m_intensityChannels.size(); ++i)
-        {
-            int channel = m_intensityChannels.at(i);
-            updatePostGMValue(channel);
-        }
+        int channel = m_intensityChannels.at(i);
+        updatePostGMValue(channel);
     }
 
-    if (m_grandMaster->channelMode() == GrandMaster::AllChannels)
+    /* Non-intensity channels are recomputed unconditionally.
+     *
+       The old guard only touched them while the mode WAS AllChannels, so
+       switching AllChannels -> Intensity mid-show left every pan, gobo and
+       colour wheel stuck at its scaled value until something else moved it.
+       This is the fix grandmaster.h's header comment asks for; recomputing a
+       channel the GM no longer applies to simply restores its own value. */
+    for (int i = 0; i < m_nonIntensityChannels.size(); ++i)
     {
-        for (int i = 0; i < m_nonIntensityChannels.size(); ++i)
-        {
-            int channel = m_nonIntensityChannels.at(i);
-            updatePostGMValue(channel);
-        }
+        int channel = m_nonIntensityChannels.at(i);
+        updatePostGMValue(channel);
     }
 }
 

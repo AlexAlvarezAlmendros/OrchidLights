@@ -44,6 +44,7 @@
 #include "audioplugincache.h"
 #include "audiorenderer.h"
 #include "inputoutputmap.h"
+#include "grandmaster.h"
 #include "mastertimer.h"
 #include "channelsgroup.h"
 #include "function.h"
@@ -234,6 +235,97 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
     return true;
 }
 
+EngineHost::GrandMasterState EngineHost::grandMaster() const
+{
+    GrandMasterState state;
+    InputOutputMap *map = m_doc->inputOutputMap();
+    state.value = map->grandMasterValue();
+    state.channelMode = GrandMaster::channelModeToString(map->grandMasterChannelMode());
+    state.valueMode = GrandMaster::valueModeToString(map->grandMasterValueMode());
+    state.visible = VcPatch::readGrandMaster(m_preserved.sections).visible;
+    return state;
+}
+
+bool EngineHost::setGrandMaster(int value, const QString &channelMode,
+                                const QString &valueMode, int visible,
+                                QString &errorMessage)
+{
+    InputOutputMap *map = m_doc->inputOutputMap();
+
+    /* Validated before anything is applied: a request that is half nonsense
+       must not half-happen. */
+    if (channelMode.isEmpty() == false && channelMode != QStringLiteral("Intensity")
+        && channelMode != QStringLiteral("All"))
+    {
+        errorMessage = QStringLiteral("channelMode must be \"Intensity\" or \"All\"");
+        return false;
+    }
+    if (valueMode.isEmpty() == false && valueMode != QStringLiteral("Reduce")
+        && valueMode != QStringLiteral("Limit"))
+    {
+        errorMessage = QStringLiteral("valueMode must be \"Reduce\" or \"Limit\"");
+        return false;
+    }
+    if (value > 255)
+    {
+        errorMessage = QStringLiteral("value must be 0..255");
+        return false;
+    }
+
+    if (value >= 0)
+        map->setGrandMasterValue(uchar(value));
+    if (channelMode.isEmpty() == false)
+        map->setGrandMasterChannelMode(GrandMaster::stringToChannelMode(channelMode));
+    if (valueMode.isEmpty() == false)
+        map->setGrandMasterValueMode(GrandMaster::stringToValueMode(valueMode));
+
+    /* The modes and visibility persist with the show; the value does not.
+       Written only when they changed, so moving the big fader all night never
+       marks the project dirty. */
+    if (channelMode.isEmpty() == false || valueMode.isEmpty() == false || visible >= 0)
+    {
+        /* Persisted changes join the console's undo history, exactly like a
+           widget edit: flipping the mode materializes <Properties><GrandMaster>
+           in projects that never carried them, and undo is what puts the
+           bytes back -- the round-trip guard in CI is what proved a
+           semantic restore is not a textual one. */
+        rememberConsole();
+
+        VcPatch::GrandMasterSettings settings = VcPatch::readGrandMaster(m_preserved.sections);
+        if (channelMode.isEmpty() == false)
+            settings.channelMode = channelMode;
+        if (valueMode.isEmpty() == false)
+            settings.valueMode = valueMode;
+        if (visible >= 0)
+            settings.visible = visible != 0;
+
+        const VcPatch::Result written =
+            VcPatch::writeGrandMaster(m_preserved.sections, settings);
+        if (written.ok == false)
+        {
+            /* A project with no console yet: nowhere to persist, but the
+               runtime change above is real. Say so instead of failing. */
+            errorMessage.clear();
+        }
+        else
+        {
+            m_doc->setModified();
+            emit consoleChanged();
+        }
+    }
+
+    emit grandMasterChanged();
+    return true;
+}
+
+void EngineHost::stopEverything(int fadeMs)
+{
+    if (fadeMs > 0)
+        m_doc->masterTimer()->fadeAndStopAll(fadeMs);
+    else
+        m_doc->masterTimer()->stopAllFunctions();
+}
+
 void EngineHost::armAutosave()
 {
     if (m_autosave != nullptr)
@@ -254,6 +346,11 @@ void EngineHost::newProject()
        is how a blank workspace gets written over last night's show. */
     m_projectPath.clear();
     m_preserved = WorkspaceLoader::Preserved();
+
+    /* A fresh show gets QLC+'s defaults, not the last project's habits. */
+    m_doc->inputOutputMap()->setGrandMasterChannelMode(GrandMaster::Intensity);
+    m_doc->inputOutputMap()->setGrandMasterValueMode(GrandMaster::Reduce);
+    m_doc->inputOutputMap()->setGrandMasterValue(255);
 
     if (m_levels != nullptr)
         m_levels->forgetEverything();
@@ -512,6 +609,17 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
     if (ok)
     {
         m_projectPath = QFileInfo(fileName).absoluteFilePath();
+
+        /* The console's Grand Master settings, applied to the engine that
+           enforces them. Preserved-but-unread was the worst of both: the file
+           kept saying Limit/All and the desk quietly ran Reduce/Intensity. */
+        const VcPatch::GrandMasterSettings gm =
+            VcPatch::readGrandMaster(m_preserved.sections);
+        m_doc->inputOutputMap()->setGrandMasterChannelMode(
+            GrandMaster::stringToChannelMode(gm.channelMode));
+        m_doc->inputOutputMap()->setGrandMasterValueMode(
+            GrandMaster::stringToValueMode(gm.valueMode));
+        m_doc->inputOutputMap()->setGrandMasterValue(255);
 
         /* Default the writable directory to wherever the show already lives,
            which is where an operator expects "save" to put it. */

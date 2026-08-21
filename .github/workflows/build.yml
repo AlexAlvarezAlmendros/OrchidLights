@@ -200,6 +200,9 @@ jobs:
       - name: Project smoke test (open/save-as by path, recents, autosave, recovery)
         run: ./server/test/project-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      - name: Grand master smoke test (scaling on the wire, hot mode switch, fade-and-stop)
+        run: ./server/test/grandmaster-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

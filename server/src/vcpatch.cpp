@@ -999,3 +999,92 @@ int VcPatch::forgetFixture(QStringList &sections, quint32 fixtureId)
 
     return removed;
 }
+
+VcPatch::GrandMasterSettings VcPatch::readGrandMaster(const QStringList &sections)
+{
+    GrandMasterSettings settings;
+
+    int index = -1;
+    XmlNode console;
+    if (openConsole(sections, index, console).ok == false)
+        return settings;
+
+    for (const XmlNode &child : console.children)
+    {
+        if (child.name != QStringLiteral("Properties"))
+            continue;
+
+        for (const XmlNode &property : child.children)
+        {
+            if (property.name != QStringLiteral("GrandMaster"))
+                continue;
+
+            settings.channelMode =
+                property.attribute(QStringLiteral("ChannelMode"), settings.channelMode);
+            settings.valueMode =
+                property.attribute(QStringLiteral("ValueMode"), settings.valueMode);
+            if (property.hasAttribute(QStringLiteral("Visible")))
+                settings.visible = property.attribute(QStringLiteral("Visible")) != QStringLiteral("0");
+        }
+    }
+
+    return settings;
+}
+
+VcPatch::Result VcPatch::writeGrandMaster(QStringList &sections,
+                                          const GrandMasterSettings &settings)
+{
+    int index = -1;
+    XmlNode console;
+
+    const Result opened = openConsole(sections, index, console);
+    if (opened.ok == false)
+        return opened;
+
+    /* Find or create <Properties>, then <GrandMaster> inside it. Created at
+       the end of their parents, which is where QLC+ writes them, so its next
+       save does not reshuffle the file. */
+    XmlNode *properties = nullptr;
+    for (XmlNode &child : console.children)
+    {
+        if (child.name == QStringLiteral("Properties"))
+        {
+            properties = &child;
+            break;
+        }
+    }
+    if (properties == nullptr)
+    {
+        XmlNode created;
+        created.name = QStringLiteral("Properties");
+        console.children.append(created);
+        properties = &console.children.last();
+    }
+
+    XmlNode *master = nullptr;
+    for (XmlNode &property : properties->children)
+    {
+        if (property.name == QStringLiteral("GrandMaster"))
+        {
+            master = &property;
+            break;
+        }
+    }
+    if (master == nullptr)
+    {
+        XmlNode created;
+        created.name = QStringLiteral("GrandMaster");
+        properties->children.append(created);
+        master = &properties->children.last();
+    }
+
+    /* Only these three; whatever else QLC+ put on the node -- the input
+       binding, the slider mode -- is not ours to rewrite. */
+    master->setAttribute(QStringLiteral("ChannelMode"), settings.channelMode);
+    master->setAttribute(QStringLiteral("ValueMode"), settings.valueMode);
+    master->setAttribute(QStringLiteral("Visible"),
+                         settings.visible ? QStringLiteral("1") : QStringLiteral("0"));
+
+    sections[index] = XmlTree::toXml(console);
+    return Result::success();
+}

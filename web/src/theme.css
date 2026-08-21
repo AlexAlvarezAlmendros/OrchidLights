@@ -251,6 +251,105 @@ body {
   box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
 }
 
+/* The Grand Master: a badge with the number, a floating panel with the fader
+   and its two modes. Lit whenever it is holding the rig below full, because a
+   dimmed GM someone forgot is the classic "why is everything at half" hour. */
+.gm {
+  position: relative;
+}
+
+.gm-badge {
+  min-height: 38px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.gm-badge[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.gm-panel {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 40;
+  width: min(92vw, 20rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 45%);
+}
+
+.gm-panel .field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.gm-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+/* The panic pair: the button and its little fade menu. */
+.stopall {
+  position: relative;
+  display: flex;
+}
+
+.stopall > .danger {
+  min-height: 38px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.stopall-more {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  padding: 0 0.45rem;
+  min-width: 0;
+}
+
+.stopall-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem;
+  min-width: 12rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 45%);
+}
+
+.stopall-menu button {
+  justify-content: flex-start;
+  text-align: left;
+  min-height: 40px;
+  border: none;
+  background: transparent;
+  font-size: 0.85rem;
+}
+
+.stopall-menu button:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
 /* The project menu: the show's name is the trigger, the list floats under it. */
 .projectmenu {
   position: relative;

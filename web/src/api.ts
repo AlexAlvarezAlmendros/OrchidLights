@@ -277,6 +277,15 @@ export interface RecentProject {
   exists: boolean
 }
 
+export interface GrandMasterState {
+  value: number
+  /** "Intensity" | "All" -- QLC+'s own strings, verbatim. */
+  channelMode: string
+  /** "Reduce" | "Limit" */
+  valueMode: string
+  visible: boolean
+}
+
 export interface Status {
   name: string
   version: string
@@ -640,6 +649,22 @@ export const api = {
     }),
   recoverAutosave: () =>
     json<{ path: string; modified: boolean }>('/api/v1/project/recover', { method: 'POST' }),
+  grandMaster: () => json<GrandMasterState>('/api/v1/grandmaster'),
+  setGrandMaster: (patch: Partial<GrandMasterState>) =>
+    json<GrandMasterState>('/api/v1/grandmaster', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  /** Stop every running function; with fadeMs, fade them out first. The
+   *  panic button -- distinct from blackout, which silences the rig without
+   *  ending anything. */
+  stopAll: (fadeMs = 0) =>
+    json<{ stopping: number; fadeMs: number }>('/api/v1/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fadeMs }),
+    }),
   blackout: (on: boolean) =>
     json<{ blackout: boolean }>('/api/v1/blackout', { method: on ? 'POST' : 'DELETE' }),
 }

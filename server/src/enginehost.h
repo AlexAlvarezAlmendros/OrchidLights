@@ -73,6 +73,32 @@ public:
     bool start(const Options &options, QString &errorMessage);
 
     /**
+     * The Grand Master, read and driven.
+     *
+     * The engine always had one -- every frame the daemon ever sent was
+     * post-GM -- but nothing exposed it, so it sat at full and QLC+ projects
+     * that relied on Limit or AllChannels ran differently here, silently.
+     * Settings persist in the console's <Properties>; the VALUE does not
+     * survive a restart, matching QLC+ (a desk that comes up half-dimmed
+     * because of last night is a desk somebody debugs in the dark).
+     */
+    struct GrandMasterState
+    {
+        int value = 255;
+        QString channelMode; /**< "Intensity" | "All" */
+        QString valueMode;   /**< "Reduce" | "Limit" */
+        bool visible = true;
+    };
+    GrandMasterState grandMaster() const;
+    /** Apply and persist. Empty strings leave a mode as it is; value < 0
+     *  leaves the level alone. Returns false on an unknown mode string. */
+    bool setGrandMaster(int value, const QString &channelMode, const QString &valueMode,
+                        int visible, QString &errorMessage);
+
+    /** Stop every running function; with fadeMs > 0, fade them out first. */
+    void stopEverything(int fadeMs);
+
+    /**
      * Wind the engine down on purpose.
      *
      * Without this, the only exit is the process dying mid-tick, which leaves
@@ -320,6 +346,9 @@ public:
     SeenInput lastInput() const { return m_lastInput; }
 
 signals:
+    /** The Grand Master moved or changed mode -- by any client. */
+    void grandMasterChanged();
+
     /** An external control moved. Carried live because learning a binding means
      *  watching for the next thing the operator touches. */
     void inputSeen(quint32 universe, quint32 channel, uchar value);

@@ -57,3 +57,4 @@ build-*
 .codex
 .claude
 .agents
+*.autosave.qxw
