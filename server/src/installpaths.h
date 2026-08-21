@@ -66,6 +66,9 @@ public:
     /** Shipped channel modifier templates. Empty when none was found. */
     static QString modifierTemplates();
 
+    /** The colour filter collections (.qxcf): the gel books. */
+    static QString colorFilters();
+
     /** Shipped input profiles. Empty when none was found. */
     static QString inputProfiles();
 

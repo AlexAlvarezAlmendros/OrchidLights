@@ -2908,3 +2908,41 @@ button.linkish.left {
 .organization .usage {
   flex-basis: 100%;
 }
+
+/* The audio silhouette and the channel tools. */
+.waveform {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 64px;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.waveform span {
+  flex: 1;
+  min-width: 1px;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  border-radius: 1px;
+}
+
+.channel-tools {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+}
+
+.channel-tools summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.channel-tools .fields {
+  margin-top: 0.5rem;
+}
+
+.hint[data-warn="true"] {
+  color: #ff8f66;
+}

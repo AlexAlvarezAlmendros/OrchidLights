@@ -451,22 +451,17 @@ function FunctionEditor({
       <Organization fn={fn} onApply={apply} />
 
       {body?.type === 'Scene' && (
-        <SceneValues fn={fn} body={body} fixtures={fixtures} onApply={apply} />
+        <>
+          <SceneValues fn={fn} body={body} fixtures={fixtures} onApply={apply} />
+          <ChannelTools fn={fn} body={body} fixtures={fixtures} onApply={apply} />
+        </>
       )}
       {body?.type === 'Chaser' && (
         <ChaserSteps fn={fn} body={body} functions={functions} onApply={apply} />
       )}
       {body?.type === 'EFX' && <EfxBody fn={fn} body={body} fixtures={fixtures} onApply={apply} />}
       {body?.type === 'RGBMatrix' && <MatrixBody fn={fn} body={body} onApply={apply} />}
-      {body?.type === 'Script' && (
-        <TextBody
-          label="Programa"
-          value={body.data ?? ''}
-          rows={8}
-          placeholder={'wait:1000\nsetfixture:0 ch:0 val:255'}
-          onApply={(data) => apply(() => api.setBody(fn.id, { data }))}
-        />
-      )}
+      {body?.type === 'Script' && <ScriptBody fn={fn} body={body} onApply={apply} />}
       {body?.type === 'Audio' && (
         <>
           <TextBody
@@ -491,6 +486,7 @@ function FunctionEditor({
             />
           </label>
           <AudioOutput fn={fn} body={body} onApply={apply} />
+          <Waveform fn={fn} source={body.source ?? ''} />
         </>
       )}
       {body?.type === 'Video' && (
@@ -1517,6 +1513,364 @@ function Organization({
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * The script editor: the engine's own tokenizer says WHICH lines it refuses,
+ * and the command menu spares remembering the grammar. Checked on demand, not
+ * per keystroke -- half a line is wrong only for a moment.
+ */
+function ScriptBody({
+  fn,
+  body,
+  onApply,
+}: {
+  fn: FunctionState
+  body: FunctionBody
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [draft, setDraft] = useState(body.data ?? '')
+  const [errors, setErrors] = useState<number[] | null>(null)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the id on purpose
+  useEffect(() => {
+    setDraft(body.data ?? '')
+    setErrors(null)
+  }, [fn.id])
+
+  const COMMANDS = [
+    'startfunction:<id>',
+    'stopfunction:<id>',
+    'wait:1000',
+    'waitkey:SPACE',
+    'setfixture:<id> ch:0 val:255',
+    'blackout:on',
+    'blackout:off',
+    'random:<min>,<max>',
+    'systemcommand:/ruta arg:valor',
+  ]
+
+  return (
+    <div className="field">
+      <span>Programa</span>
+      <textarea
+        rows={8}
+        value={draft}
+        placeholder={'wait:1000\nsetfixture:0 ch:0 val:255'}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== (body.data ?? '')) onApply(() => api.setBody(fn.id, { data: draft }))
+        }}
+      />
+      <div className="fields">
+        <select
+          value=""
+          aria-label="Insertar comando"
+          onChange={(e) => {
+            if (e.target.value === '') return
+            setDraft((current) =>
+              current === '' ? e.target.value : `${current}\n${e.target.value}`,
+            )
+          }}
+        >
+          <option value="">Insertar comando…</option>
+          {COMMANDS.map((command) => (
+            <option key={command} value={command}>
+              {command}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() =>
+            api
+              .scriptCheck(draft)
+              .then((result) => setErrors(result.errors))
+              .catch(() => setErrors(null))
+          }
+        >
+          Comprobar sintaxis
+        </button>
+        {errors !== null && (
+          <span className="hint" data-warn={errors.length > 0}>
+            {errors.length === 0
+              ? 'Sin errores.'
+              : `El motor rechaza ${errors.length === 1 ? 'la línea' : 'las líneas'} ${errors.join(', ')}.`}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** The audio file's silhouette: peaks straight from the daemon's decoders. */
+function Waveform({ fn, source }: { fn: FunctionState; source: string }) {
+  const [wave, setWave] = useState<number[] | null>(null)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetched when the source changes
+  useEffect(() => {
+    setWave(null)
+    if (source === '') return
+    let live = true
+    api
+      .waveform(fn.id, 200)
+      .then((result) => live && setWave(result.points))
+      .catch(() => live && setWave(null))
+    return () => {
+      live = false
+    }
+  }, [fn.id, source])
+
+  if (wave === null) return null
+
+  return (
+    <div className="waveform" aria-label="Forma de onda">
+      {wave.map((peak, index) => (
+        // The slot is the identity: 200 fixed buckets over the file.
+        // biome-ignore lint/suspicious/noArrayIndexKey: the index is the bucket
+        <span key={index} style={{ height: `${Math.max(2, peak)}%` }} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The channel tools: whole kinds of channel at once, through the fixture's
+ * own definition. The gels come from the daemon's colour books, and applying
+ * one writes the EXACT RGB the book names.
+ */
+function ChannelTools({
+  fn,
+  body,
+  fixtures,
+  onApply,
+}: {
+  fn: FunctionState
+  body: FunctionBody
+  fixtures: FixtureState[]
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [fixtureId, setFixtureId] = useState<number | null>(fixtures[0]?.id ?? null)
+  const [detail, setDetail] = useState<FixtureDetail | null>(null)
+  const [books, setBooks] = useState<{ name: string; colors: { name: string; rgb: string }[] }[]>(
+    [],
+  )
+
+  useEffect(() => {
+    api
+      .colorFilters()
+      .then((r) => setBooks(r.filters))
+      .catch(() => setBooks([]))
+  }, [])
+
+  useEffect(() => {
+    if (fixtureId === null) return
+    let live = true
+    api
+      .fixture(fixtureId)
+      .then((d) => live && setDetail(d))
+      .catch(() => live && setDetail(null))
+    return () => {
+      live = false
+    }
+  }, [fixtureId])
+
+  const channelsOf = (groups: string[], nameHint?: RegExp) =>
+    (detail?.channelList ?? []).filter(
+      (c) => (c.group !== undefined && groups.includes(c.group)) || nameHint?.test(c.name) === true,
+    )
+
+  const applyAll = (entries: { channel: number; value: number }[]) => {
+    if (fixtureId === null || entries.length === 0) return
+    onApply(async () => {
+      for (const entry of entries)
+        await api.setSceneValue(fn.id, fixtureId, entry.channel, entry.value)
+    })
+  }
+
+  /* RGB by channel NAME within the colour group: the definition names them
+     Red/Green/Blue, and a gel is meaningless applied to a colour wheel. */
+  const rgb = {
+    r: (detail?.channelList ?? []).find((c) => /^red/i.test(c.name)),
+    g: (detail?.channelList ?? []).find((c) => /^green/i.test(c.name)),
+    b: (detail?.channelList ?? []).find((c) => /^blue/i.test(c.name)),
+  }
+  const applyColor = (hex: string) => {
+    if (!rgb.r || !rgb.g || !rgb.b) return
+    const value = Number.parseInt(hex.slice(1), 16)
+    applyAll([
+      { channel: rgb.r.index, value: (value >> 16) & 255 },
+      { channel: rgb.g.index, value: (value >> 8) & 255 },
+      { channel: rgb.b.index, value: value & 255 },
+    ])
+  }
+
+  const intensity = channelsOf(['Intensity']).filter(
+    (c) => !/^(red|green|blue|white|amber|uv)/i.test(c.name),
+  )
+  const pan = channelsOf(['Pan']).filter((c) => !/fine/i.test(c.name))
+  const tilt = channelsOf(['Tilt']).filter((c) => !/fine/i.test(c.name))
+  const shutter = channelsOf(['Shutter'])
+
+  const others = fixtures.filter((f) => f.id !== fixtureId && f.model === detail?.model)
+
+  return (
+    <details className="channel-tools">
+      <summary>Herramientas de canal</summary>
+
+      <div className="fields">
+        <label className="field">
+          <span>Fixture</span>
+          <select
+            value={fixtureId ?? ''}
+            onChange={(e) => setFixtureId(e.target.value === '' ? null : Number(e.target.value))}
+          >
+            {fixtures.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {intensity.length > 0 && (
+          <label className="field">
+            <span>Intensidad</span>
+            <Slider
+              min={0}
+              max={255}
+              defaultValue={0}
+              aria-label="Intensidad del fixture"
+              onPointerUp={(e) =>
+                applyAll(
+                  intensity.map((c) => ({
+                    channel: c.index,
+                    value: Number((e.target as HTMLInputElement).value),
+                  })),
+                )
+              }
+            />
+          </label>
+        )}
+
+        {rgb.r && rgb.g && rgb.b && (
+          <label className="field">
+            <span>Color</span>
+            <input
+              type="color"
+              aria-label="Color del fixture"
+              onBlur={(e) => applyColor(e.target.value)}
+            />
+          </label>
+        )}
+      </div>
+
+      {rgb.r && rgb.g && rgb.b && books.length > 0 && (
+        <div className="fields">
+          {books.map((book) => (
+            <label className="field grow-field" key={book.name}>
+              <span>Gelatinas · {book.name}</span>
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value !== '') applyColor(e.target.value)
+                }}
+              >
+                <option value="">— elegir gel —</option>
+                {book.colors.map((color) => (
+                  <option key={`${color.name}${color.rgb}`} value={color.rgb}>
+                    {color.name} ({color.rgb})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+
+      {(pan.length > 0 || tilt.length > 0) && (
+        <div className="fields">
+          {pan.length > 0 && (
+            <label className="field">
+              <span>Pan</span>
+              <Slider
+                min={0}
+                max={255}
+                defaultValue={128}
+                aria-label="Pan"
+                onPointerUp={(e) =>
+                  applyAll(
+                    pan.map((c) => ({
+                      channel: c.index,
+                      value: Number((e.target as HTMLInputElement).value),
+                    })),
+                  )
+                }
+              />
+            </label>
+          )}
+          {tilt.length > 0 && (
+            <label className="field">
+              <span>Tilt</span>
+              <Slider
+                min={0}
+                max={255}
+                defaultValue={128}
+                aria-label="Tilt"
+                onPointerUp={(e) =>
+                  applyAll(
+                    tilt.map((c) => ({
+                      channel: c.index,
+                      value: Number((e.target as HTMLInputElement).value),
+                    })),
+                  )
+                }
+              />
+            </label>
+          )}
+        </div>
+      )}
+
+      {shutter.length > 0 && (
+        <div className="fields">
+          <span className="field-head">Shutter</span>
+          <button
+            type="button"
+            onClick={() => applyAll(shutter.map((c) => ({ channel: c.index, value: 255 })))}
+          >
+            Abierto
+          </button>
+          <button
+            type="button"
+            onClick={() => applyAll(shutter.map((c) => ({ channel: c.index, value: 0 })))}
+          >
+            Cerrado
+          </button>
+        </div>
+      )}
+
+      {others.length > 0 && (
+        <div className="fields">
+          <button
+            type="button"
+            title={`Copia los valores de este fixture en la escena a ${others.length} del mismo modelo`}
+            onClick={() => {
+              const mine = (body.values ?? []).filter((v) => v.fixture === fixtureId)
+              if (mine.length === 0) return
+              onApply(async () => {
+                for (const twin of others) {
+                  for (const value of mine)
+                    await api.setSceneValue(fn.id, twin.id, value.channel, value.value)
+                }
+              })
+            }}
+          >
+            Copiar a los {others.length} del mismo modelo
+          </button>
+        </div>
+      )}
+    </details>
   )
 }
 

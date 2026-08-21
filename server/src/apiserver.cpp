@@ -47,6 +47,10 @@
 #include "show.h"
 #include "track.h"
 #include "showfunction.h"
+#include "script.h"
+#include "audio.h"
+#include "audiodecoder.h"
+#include <QXmlStreamReader>
 #include "rgbalgorithm.h"
 #include "qlcfixturedefcache.h"
 #include "qlcfixturemode.h"
@@ -1151,6 +1155,83 @@ void ApiServer::registerRoutes()
         QJsonObject response;
         response["id"] = qint64(newId);
         return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    /* The waveform: peak per bucket over the whole file, 0-100. Decoded with
+       the same plugins that will play it, so what the editor draws is what
+       the show will hear -- or exactly the silence it will not. */
+    m_server->route("/api/v1/functions/<arg>/waveform", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const Function *function = doc->function(id);
+        if (function == nullptr || function->type() != Function::AudioType)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No audio function with that id"));
+
+        const Audio *audio = qobject_cast<const Audio *>(function);
+        const QString source = audio->getSourceFileName();
+        if (source.isEmpty() || QFileInfo::exists(source) == false)
+            return jsonError(StatusCode::Conflict,
+                             QStringLiteral("The audio file is not on this machine: %1").arg(source));
+
+        const QUrlQuery query(request.url());
+        int points = query.queryItemValue(QStringLiteral("points")).toInt();
+        if (points <= 0)
+            points = 200;
+        points = qMin(points, 2000);
+
+        AudioDecoder *decoder = doc->audioPluginCache()->getDecoderForFile(source);
+        if (decoder == nullptr)
+            return jsonError(StatusCode::Conflict,
+                             QStringLiteral("No decoder can read %1").arg(source));
+
+        /* One pass, S16 assumed: every shipped decoder emits S16LE. Peaks are
+           bucketed by byte position against the total estimated from the
+           duration, so a short read still yields a full-length silhouette. */
+        const AudioParameters parameters = decoder->audioParameters();
+        const qint64 totalMs = decoder->totalTime();
+        const qint64 bytesPerSecond =
+            qint64(parameters.sampleRate()) * parameters.channels() * 2;
+        const qint64 totalBytes = qMax(qint64(1), totalMs * bytesPerSecond / 1000);
+
+        QVector<int> peaks(points, 0);
+        QByteArray chunk(32768, 0);
+        qint64 position = 0;
+        for (;;)
+        {
+            const qint64 got = decoder->read(chunk.data(), chunk.size());
+            if (got <= 0)
+                break;
+            const qint16 *samples = reinterpret_cast<const qint16 *>(chunk.constData());
+            const int count = int(got / 2);
+            for (int i = 0; i < count; i++)
+            {
+                const qint64 byteAt = position + qint64(i) * 2;
+                int bucket = int(byteAt * points / totalBytes);
+                if (bucket >= points)
+                    bucket = points - 1;
+                const int value = qAbs(int(samples[i]));
+                if (value > peaks[bucket])
+                    peaks[bucket] = value;
+            }
+            position += got;
+        }
+        delete decoder;
+
+        QJsonArray wave;
+        for (int peak : peaks)
+            wave.append(peak * 100 / 32767);
+
+        QJsonObject body;
+        body["points"] = wave;
+        body["duration"] = qint64(totalMs);
+        return QHttpServerResponse(body);
     });
 
     /* Bake: the matrix frozen into a Scene + Sequence pair, exactly like
@@ -2601,6 +2682,91 @@ void ApiServer::registerRoutes()
         response["path"] = path;
         response["size"] = qint64(data.size());
         return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    /* The gel books: colour filter collections shipped with the daemon. Read
+       per request -- they are a handful of small XML files -- and served with
+       names, because a gel without its name is just a hex code. */
+    m_server->route("/api/v1/colorfilters", QHttpServerRequest::Method::Get,
+                    [denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray books;
+        const QString directory = InstallPaths::colorFilters();
+        if (directory.isEmpty() == false)
+        {
+            for (const QFileInfo &info :
+                 QDir(directory).entryInfoList({QStringLiteral("*.qxcf")}, QDir::Files))
+            {
+                QFile file(info.absoluteFilePath());
+                if (file.open(QIODevice::ReadOnly) == false)
+                    continue;
+
+                QXmlStreamReader reader(&file);
+                QString bookName = info.baseName();
+                QJsonArray colors;
+                while (reader.readNextStartElement() || reader.atEnd() == false)
+                {
+                    if (reader.isStartElement() == false)
+                    {
+                        if (reader.atEnd())
+                            break;
+                        continue;
+                    }
+                    if (reader.name() == QStringLiteral("Name")
+                        && colors.isEmpty() && reader.prefix().isEmpty())
+                    {
+                        const QString text = reader.readElementText();
+                        if (text.isEmpty() == false)
+                            bookName = text;
+                    }
+                    else if (reader.name() == QStringLiteral("Color"))
+                    {
+                        QJsonObject color;
+                        color["name"] =
+                            reader.attributes().value(QStringLiteral("Name")).toString();
+                        color["rgb"] =
+                            reader.attributes().value(QStringLiteral("RGB")).toString();
+                        colors.append(color);
+                        reader.skipCurrentElement();
+                    }
+                }
+                file.close();
+
+                if (colors.isEmpty())
+                    continue;
+                QJsonObject book;
+                book["name"] = bookName;
+                book["colors"] = colors;
+                books.append(book);
+            }
+        }
+
+        QJsonObject body;
+        body["filters"] = books;
+        return QHttpServerResponse(body);
+    });
+
+    /* The script checker: the engine's own tokenizer, run on whatever text
+       arrives, answering WHICH lines it refuses. Stateless -- nothing is
+       created or modified. */
+    m_server->route("/api/v1/script/check", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        Script probe(doc);
+        probe.setData(asked.value(QStringLiteral("data")).toString());
+
+        QJsonArray lines;
+        for (int line : probe.syntaxErrorsLines())
+            lines.append(line);
+
+        QJsonObject body;
+        body["errors"] = lines;
+        return QHttpServerResponse(body);
     });
 
     m_server->route("/api/v1/projects", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {

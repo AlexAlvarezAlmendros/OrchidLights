@@ -158,6 +158,16 @@ QString InstallPaths::rgbScripts()
                        QStringLiteral("*.js"));
 }
 
+QString InstallPaths::colorFilters()
+{
+    /* COLORFILTERSDIR only exists under #ifdef QMLUI in qlcconfig.h, so the
+       compiled candidate is derived from the fixtures directory it always
+       sits next to. */
+    return shippedData(QFileInfo(QString(FIXTUREDIR)).path() + QStringLiteral("/colorfilters"),
+                       QStringLiteral("colorfilters"),
+                       QStringLiteral("*.qxcf"));
+}
+
 QString InstallPaths::modifierTemplates()
 {
     return shippedData(QLCModifiersCache::systemTemplateDirectory().absolutePath(),
