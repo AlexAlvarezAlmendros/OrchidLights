@@ -215,6 +215,9 @@ jobs:
       - name: Chaser smoke test (per-step fades measured, reorder persisted, sequence values)
         run: ./server/test/chaser-smoke.sh orchidlightsd
 
+      - name: RGB matrix smoke test (blend and control on the wire, 5 colours, bake)
+        run: ./server/test/rgbmatrix-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:
