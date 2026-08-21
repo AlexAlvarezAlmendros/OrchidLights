@@ -4,22 +4,69 @@
 //! points a webview at it, and takes it down cleanly when the window goes.
 //! The window is one more client of the same origin the phones on the venue
 //! network use -- nothing of the desk itself lives here.
+//!
+//! That principle decides who does what in the project cycle too. The shell
+//! contributes exactly the pieces a browser cannot have -- native file
+//! dialogs, files dropped from the file manager, a second launch carrying a
+//! path -- and every one of them funnels into the SAME web code paths a
+//! browser uses (`orchid-open-request` events, the daemon's token-gated
+//! routes). The interface asks the questions; the shell moves the process.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod layout;
 mod sidecar;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use sidecar::{Shared, Sidecar};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt, FilePath};
 
 struct ShellState {
     sidecar: Shared,
     token: Option<String>,
+}
+
+/// Native "open a project" dialog. The webview holds no dialog permission of
+/// its own: the page asks the shell, the shell asks the operator.
+#[tauri::command]
+async fn pick_open_file(app: tauri::AppHandle) -> Option<String> {
+    let (send, receive) = std::sync::mpsc::channel::<Option<FilePath>>();
+    app.dialog()
+        .file()
+        .add_filter("Proyectos QLC+ / OrchidLights", &["qxw"])
+        .pick_file(move |picked| {
+            let _ = send.send(picked);
+        });
+    receive.recv().ok().flatten().map(|path| path.to_string())
+}
+
+/// Native "save as" dialog, same contract.
+#[tauri::command]
+async fn pick_save_file(app: tauri::AppHandle) -> Option<String> {
+    let (send, receive) = std::sync::mpsc::channel::<Option<FilePath>>();
+    app.dialog()
+        .file()
+        .add_filter("Proyectos QLC+ / OrchidLights", &["qxw"])
+        .set_file_name("proyecto.qxw")
+        .save_file(move |picked| {
+            let _ = send.send(picked);
+        });
+    receive.recv().ok().flatten().map(|path| path.to_string())
+}
+
+/// The page answered the close question. `save` already happened (the page
+/// saves through the daemon, where saving lives); all that is left here is
+/// the process: take the daemon down tidy and end.
+#[tauri::command]
+fn resolve_close(app: tauri::AppHandle) {
+    if let Some(state) = app.try_state::<ShellState>() {
+        state.sidecar.shut_down(state.token.as_deref());
+    }
+    app.exit(0);
 }
 
 fn main() {
@@ -30,13 +77,37 @@ fn main() {
         .map(PathBuf::from);
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // A second launch means "bring me the desk", not "give me two".
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            // A second launch means "bring me the desk", not "give me two" --
+            // and if it carried a project, the desk it brings is that one.
+            // The path resolves against the SECOND process's directory, which
+            // is what `orchidlights show.qxw` from some other terminal means.
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
+            let asked: Option<PathBuf> =
+                args.iter()
+                    .skip(1)
+                    .find(|arg| arg.ends_with(".qxw"))
+                    .map(|arg| {
+                        let candidate = Path::new(arg);
+                        if candidate.is_absolute() {
+                            candidate.to_path_buf()
+                        } else {
+                            Path::new(&cwd).join(candidate)
+                        }
+                    });
+            if let Some(path) = asked {
+                forward_open_request(app, &path);
+            }
         }))
+        .invoke_handler(tauri::generate_handler![
+            pick_open_file,
+            pick_save_file,
+            resolve_close
+        ])
         .setup(move |app| {
             let handle = app.handle().clone();
 
@@ -71,17 +142,80 @@ fn main() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // The daemon dies with its window, and dies tidy: the rig
-                // goes dark (--zero-on-exit) instead of latching the look.
-                if let Some(state) = window.app_handle().try_state::<ShellState>() {
-                    state.sidecar.shut_down(state.token.as_deref());
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                let app = window.app_handle();
+                let Some(state) = app.try_state::<ShellState>() else {
+                    return;
+                };
+
+                /* Unsaved edits make closing a question, and the page asks it
+                -- in the desk's own design, with the three answers a
+                two-button native dialog cannot offer. The page calls
+                `resolve_close` when the answer is "go". Asking is only
+                worth it when there is something to lose, so the daemon is
+                consulted first; if it cannot answer, there is nothing left
+                to protect and the close proceeds. */
+                if is_dirty(&state) {
+                    api.prevent_close();
+                    if let Some(view) = app.get_webview_window("main") {
+                        let _ = view
+                            .eval("window.dispatchEvent(new CustomEvent('orchid-close-request'))");
+                    }
+                    return;
+                }
+
+                // Clean: the daemon dies with its window, and dies tidy --
+                // the rig goes dark (--zero-on-exit), not latched on a look.
+                state.sidecar.shut_down(state.token.as_deref());
+            }
+            tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                // A .qxw from the file manager. The page decides what opening
+                // means (confirm over unsaved edits, then the daemon route).
+                if let Some(path) = paths.iter().find(|p| {
+                    p.extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("qxw"))
+                }) {
+                    forward_open_request(window.app_handle(), path);
                 }
             }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("la carcasa no pudo arrancar");
+}
+
+/// Hand a project path to the page as the same event every open uses.
+///
+/// The path travels as JSON so nothing an operator names a file can break out
+/// of the string and into the page.
+fn forward_open_request(app: &tauri::AppHandle, path: &Path) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(encoded) = serde_json::to_string(&path.to_string_lossy()) else {
+        return;
+    };
+    let _ = window.eval(format!(
+        "window.dispatchEvent(new CustomEvent('orchid-open-request', {{ detail: {encoded} }}))"
+    ));
+}
+
+/// Whether the daemon holds unsaved edits. `false` when it cannot say --
+/// a daemon that is gone has nothing left to protect.
+fn is_dirty(state: &ShellState) -> bool {
+    let url = format!("{}/api/v1/project", state.sidecar.base_url());
+    let mut request = ureq::get(&url).timeout(Duration::from_millis(900));
+    if let Some(token) = &state.token {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let Ok(response) = request.call() else {
+        return false;
+    };
+    let Ok(body) = response.into_json::<serde_json::Value>() else {
+        return false;
+    };
+    body.get("modified").and_then(|m| m.as_bool()) == Some(true)
 }
 
 /// Start the daemon, wait for it, hand the window over to it.

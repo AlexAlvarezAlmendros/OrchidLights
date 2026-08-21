@@ -29,6 +29,7 @@ import { Plan } from './plan'
 import { ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
+import { resolveClose } from './shell'
 import { Slider } from './slider'
 import { getToken, setToken } from './token'
 import type { View } from './views'
@@ -80,6 +81,10 @@ export function App() {
      phone arriving at a --listen-all desk by bare URL lands here by design,
      types the token once, and never sees this again. */
   const [needToken, setNeedToken] = useState(false)
+  /* The desktop shell asked "close with unsaved edits?" and the page owns the
+     question: three honest answers where a native two-button dialog offers
+     two. Null while nobody is closing. */
+  const [closeAsk, setCloseAsk] = useState(false)
   const [levels, setLevels] = useState<Record<number, number>>({})
   /* Channels groups, kept apart from the console's faders on purpose: a group
      and a widget can both be number 3 and have nothing to do with each other. */
@@ -156,11 +161,40 @@ export function App() {
     return () => clearTimeout(timer)
   }, [connection])
 
+  /* The shell's hand-offs. Both arrive as window events so the SAME page code
+     runs whether a path came from a native dialog, a file dropped on the
+     window, or a second launch in a terminal -- and so a browser, which never
+     receives them, needs no other code path removed or faked. */
+  useEffect(() => {
+    const onOpenRequest = (event: Event) => {
+      const path = String((event as CustomEvent).detail ?? '')
+      if (path === '') return
+      if (dirty && !window.confirm('Hay cambios sin guardar que se perderán. ¿Abrir igualmente?'))
+        return
+      api
+        .openProjectPath(path)
+        .catch((e: unknown) => setToast(e instanceof Error ? e.message : String(e)))
+    }
+    const onCloseRequest = () => setCloseAsk(true)
+
+    window.addEventListener('orchid-open-request', onOpenRequest)
+    window.addEventListener('orchid-close-request', onCloseRequest)
+    return () => {
+      window.removeEventListener('orchid-open-request', onOpenRequest)
+      window.removeEventListener('orchid-close-request', onCloseRequest)
+    }
+  }, [dirty])
+
   /* Closing a tab with unsaved edits gets the browser's own "are you sure".
      Only while dirty: registering it permanently would nag on every close. */
   useEffect(() => {
     if (!dirty) return
     const warn = (event: BeforeUnloadEvent) => {
+      /* Without a user gesture the browser refuses the panel anyway and logs
+         a warning about the attempt -- so asking is pure noise exactly when
+         nobody is there to answer. The suite's zero-console-errors net is
+         what caught this. */
+      if (navigator.userActivation?.hasBeenActive !== true) return
       event.preventDefault()
     }
     window.addEventListener('beforeunload', warn)
@@ -826,6 +860,38 @@ export function App() {
               Seguir con el archivo
             </button>
           </div>
+        )}
+
+        {/* Closing the desktop window over unsaved edits. Guardar y salir is
+            first because it is almost always the answer; Cancelar leaves
+            everything exactly as it was. */}
+        {closeAsk && (
+          <dialog className="gate" open aria-label="Cerrar con cambios sin guardar">
+            <div className="gate-card">
+              <h2>Hay cambios sin guardar</h2>
+              <p>¿Guardar el proyecto antes de salir?</p>
+              <button
+                type="button"
+                onClick={() =>
+                  api.saveProject().then(
+                    () => resolveClose(),
+                    (e: unknown) => {
+                      setCloseAsk(false)
+                      setToast(e instanceof Error ? e.message : String(e))
+                    },
+                  )
+                }
+              >
+                Guardar y salir
+              </button>
+              <button type="button" onClick={() => resolveClose()}>
+                Salir sin guardar
+              </button>
+              <button type="button" onClick={() => setCloseAsk(false)}>
+                Cancelar
+              </button>
+            </div>
+          </dialog>
         )}
 
         {/* Full-screen on purpose: nothing behind it works without the token,

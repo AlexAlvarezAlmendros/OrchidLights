@@ -42,3 +42,12 @@ export async function pickProjectToSave(): Promise<string | null> {
   const path = await tauri.invoke('pick_save_file')
   return typeof path === 'string' ? path : null
 }
+
+/** The page's answer to the close question was "go": the shell takes the
+ *  daemon down tidy and ends. Saving, if asked for, already happened -- the
+ *  page saves through the daemon, where saving lives. */
+export async function resolveClose(): Promise<void> {
+  const tauri = internals()
+  if (tauri === null) return
+  await tauri.invoke('resolve_close')
+}

@@ -84,7 +84,39 @@ TOKEN=$(cat "$TOKEN_FILE")
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/status")
 [ "$CODE" = "200" ] || fail "the token did not authorize ($CODE)"
 
-# 3. Closing the shell closes the daemon. SIGTERM to the shell plays the part
+# 3. A second launch carrying a project opens it in the FIRST instance -- the
+#    whole chain, through the real webview: single-instance forwards the path,
+#    the shell evals an orchid-open-request into the page, the page (holding
+#    the token from the fragment hand-off) calls the daemon's open route.
+PROJECT_ABS="$REPO/server/test/data/vc-actions.qxw"
+"$SHELL_BIN" "$PROJECT_ABS" > /tmp/shell-smoke-second.log 2>&1 || true
+LOADED=""
+for _ in $(seq 1 60); do
+    LOADED=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/project"         | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))" 2>/dev/null || true)
+    [ "$LOADED" = "vc-actions.qxw" ] && break
+    sleep 0.5
+done
+[ "$LOADED" = "vc-actions.qxw" ] || fail "the second launch did not open its project (got '$LOADED')"
+
+# And exactly one shell is running: the second was a messenger, not a window.
+# (pgrep -f matches whole command lines, so the daemon and this script must
+# not be caught; list-then-inspect keeps the check debuggable.)
+MATCHES=$(pgrep -f "orchidlights-desktop" || true)
+COUNT=0
+for pid in $MATCHES; do
+    args=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+    case "$args" in
+        *target/*/orchidlights-desktop*) COUNT=$((COUNT + 1)) ;;
+    esac
+done
+if [ "$COUNT" -gt 1 ]; then
+    for pid in $MATCHES; do
+        echo "match $pid: $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" >&2
+    done
+    fail "$COUNT shells alive; single-instance failed"
+fi
+
+# 4. Closing the shell closes the daemon. SIGTERM to the shell plays the part
 #    of the window's close button in a headless test.
 kill -TERM $SHELL_PID
 SHELL_STATUS=0
