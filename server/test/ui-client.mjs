@@ -77,6 +77,23 @@ ws.onmessage = (event) => {
     consoleErrors.push(message.params.entry.text)
   }
 
+  /* JavaScript dialogs get answered, the way the human they are for would.
+     Found the hard way: with unsaved edits and real user activation (the
+     pointer-driven fader tests count), the beforeunload guard makes
+     Page.reload raise a confirmation dialog -- and an unanswered dialog
+     stalls the reload's own response, hanging the suite at 900 s with no
+     failure to read. Accepting is the choice the assertion needs; a test that
+     wants the other answer can install its own handler. */
+  if (message.method === 'Page.javascriptDialogOpening') {
+    ws.send(
+      JSON.stringify({
+        id: nextId++,
+        method: 'Page.handleJavaScriptDialog',
+        params: { accept: true },
+      }),
+    )
+  }
+
   const resolve = pending.get(message.id)
   if (resolve) {
     pending.delete(message.id)
@@ -93,6 +110,9 @@ const send = (method, params = {}) =>
 
 await send('Runtime.enable')
 await send('Log.enable')
+// Without Page.enable the dialog-opening event never arrives, the answer
+// below never runs, and a beforeunload dialog stalls every load after it.
+await send('Page.enable')
 
 async function evaluate(expression) {
   const result = await send('Runtime.evaluate', {
