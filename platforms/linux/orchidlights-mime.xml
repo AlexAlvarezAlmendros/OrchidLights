@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- .qxw is QLC+'s workspace format, which OrchidLights reads and writes
+     byte-faithfully. Declaring our own type (rather than borrowing a QLC+
+     one) keeps a machine with both installed able to choose per-type. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-orchidlights-project">
+    <comment>Proyecto de iluminación OrchidLights / QLC+</comment>
+    <comment xml:lang="en">OrchidLights / QLC+ lighting project</comment>
+    <glob pattern="*.qxw"/>
+  </mime-type>
+</mime-info>
