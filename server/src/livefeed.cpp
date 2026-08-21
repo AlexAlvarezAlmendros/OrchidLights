@@ -92,6 +92,27 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(m_engine, &EngineHost::consoleChanged, this, &LiveFeed::onConsoleChanged);
     connect(m_engine, &EngineHost::projectReplaced, this, &LiveFeed::onProjectReplaced);
 
+    /* The dump counter rides BOTH desks' signals: what either desk holds is
+       what the dump would capture, and the button in the bar wears this
+       number. Missing one of the two is a button that refuses with a value
+       in hand. */
+    const auto broadcastDump = [this]() {
+        QJsonObject message;
+        message["type"] = "dump";
+        message["count"] = m_engine->dumpableValues().count();
+        message["bare"] = m_engine->bareHeldCount();
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+    };
+    connect(m_engine, &EngineHost::deskChanged, this,
+            [broadcastDump](quint32) { broadcastDump(); });
+    connect(m_engine, &EngineHost::liveChanged, this, broadcastDump);
+
     /* The Simple Desk's holdings, so two clients editing raw channels see
        each other's grips. The VALUES already travel in the frames; this
        message carries which channels are HELD, which the frames cannot say. */

@@ -649,6 +649,18 @@ export const api = {
     }),
   recoverAutosave: () =>
     json<{ path: string; modified: boolean }>('/api/v1/project/recover', { method: 'POST' }),
+  dumpState: () => json<{ count: number; bare: number; groups: string[] }>('/api/v1/dump'),
+  dumpToScene: (body: {
+    name?: string
+    sceneId?: number
+    nonZeroOnly?: boolean
+    groups?: string[]
+  }) =>
+    json<{ scene: number; written: number }>('/api/v1/dump', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   deskHeld: (universe: number) =>
     json<{ universe: number; held: Record<string, number> }>(`/api/v1/simpledesk/${universe}`),
   deskSet: (universe: number, values: Record<string, number>) =>

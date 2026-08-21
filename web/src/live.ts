@@ -39,6 +39,8 @@ export interface LiveHandlers {
   onUniverse?: (universe: number, channels: Uint8Array) => void
   /** Blackout engaged or released -- by us or by anyone. */
   onBlackout?: (on: boolean) => void
+  /** What a dump would capture changed. The button in the bar wears this. */
+  onDump?: (count: number, bare: number) => void
   /** The Simple Desk changed what it holds on a universe (1-based). */
   onSimpleDesk?: (universe: number, held: Record<string, number>) => void
   /** The Grand Master moved or changed mode -- by anyone. */
@@ -139,6 +141,9 @@ export class Live {
           break
         case 'blackout':
           this.handlers.onBlackout?.(message.on === true)
+          break
+        case 'dump':
+          this.handlers.onDump?.(Number(message.count ?? 0), Number(message.bare ?? 0))
           break
         case 'simpledesk':
           this.handlers.onSimpleDesk?.(Number(message.universe ?? 0), message.held ?? {})

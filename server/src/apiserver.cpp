@@ -2617,6 +2617,70 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
+    /* What a dump would capture, live: the button in the bar wears this
+       number. `bare` counts what the desk holds on unpatched addresses --
+       values a scene has no words for, said instead of silently shrunk. */
+    m_server->route("/api/v1/dump", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QList<EngineHost::DumpValue> values = m_engine->dumpableValues();
+        QSet<int> groups;
+        for (const EngineHost::DumpValue &value : values)
+            groups.insert(value.group);
+
+        QJsonArray kinds;
+        for (int group : groups)
+            kinds.append(QLCChannel::groupToString(QLCChannel::Group(group)));
+
+        QJsonObject body;
+        body["count"] = values.count();
+        body["bare"] = m_engine->bareHeldCount();
+        body["groups"] = kinds;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/dump", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const QString name = asked.value(QStringLiteral("name")).toString();
+        const quint32 sceneId = asked.contains(QStringLiteral("sceneId"))
+            ? quint32(asked.value(QStringLiteral("sceneId")).toDouble())
+            : Function::invalidId();
+        const bool nonZeroOnly = asked.value(QStringLiteral("nonZeroOnly")).toBool(false);
+
+        QList<int> groups;
+        for (const QJsonValue &entry : asked.value(QStringLiteral("groups")).toArray())
+        {
+            const QLCChannel::Group group =
+                QLCChannel::stringToGroup(entry.toString());
+            if (group == QLCChannel::NoGroup)
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Unknown channel group \"%1\"")
+                                     .arg(entry.toString()));
+            groups.append(int(group));
+        }
+
+        quint32 outSceneId = Function::invalidId();
+        int written = 0;
+        QString errorMessage;
+        if (m_engine->dumpToScene(name, sceneId, nonZeroOnly, groups, outSceneId,
+                                  written, errorMessage)
+            == false)
+        {
+            return jsonError(StatusCode::Conflict, errorMessage);
+        }
+
+        QJsonObject body;
+        body["scene"] = qint64(outSceneId);
+        body["written"] = written;
+        return QHttpServerResponse(body, StatusCode::Created);
+    });
+
     /* The keypad, parsed by the engine's own parser so "1 THRU 10 AT FULL"
        means here exactly what it means in QLC+ 5 -- including the relative
        commands, which read the universe's current values as their base. */
