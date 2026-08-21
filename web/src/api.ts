@@ -649,6 +649,29 @@ export const api = {
     }),
   recoverAutosave: () =>
     json<{ path: string; modified: boolean }>('/api/v1/project/recover', { method: 'POST' }),
+  deskHeld: (universe: number) =>
+    json<{ universe: number; held: Record<string, number> }>(`/api/v1/simpledesk/${universe}`),
+  deskSet: (universe: number, values: Record<string, number>) =>
+    json<{ universe: number; held: number }>(`/api/v1/simpledesk/${universe}/channels`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values }),
+    }),
+  deskReleaseChannel: (universe: number, channel: number) =>
+    json<{ released: number }>(`/api/v1/simpledesk/${universe}/channels/${channel}`, {
+      method: 'DELETE',
+    }),
+  deskReleaseUniverse: (universe: number) =>
+    json<{ released: number }>(`/api/v1/simpledesk/${universe}`, { method: 'DELETE' }),
+  deskKeypad: (universe: number, command: string) =>
+    json<{ universe: number; applied: { channel: number; value: number }[] }>(
+      `/api/v1/simpledesk/${universe}/keypad`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command }),
+      },
+    ),
   grandMaster: () => json<GrandMasterState>('/api/v1/grandmaster'),
   setGrandMaster: (patch: Partial<GrandMasterState>) =>
     json<GrandMasterState>('/api/v1/grandmaster', {

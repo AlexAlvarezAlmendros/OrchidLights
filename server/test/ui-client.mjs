@@ -1917,6 +1917,62 @@ try {
   })()`)
   check('STOP ALL is honest at rest and total in motion', stopAll === 'none' || stopAll === 'ok', stopAll)
 
+  /* The Mesa (Simple Desk) view: raw channels, held and released, verified
+     against the daemon -- the screen must show the engine's grip, not its
+     own memory of clicks. */
+  const mesa = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const tab = [...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === 'Mesa')
+    if (!tab) return 'no Mesa in the rail'
+    tab.click()
+    await wait(1200)
+
+    const grid = document.querySelector('.mesa-grid')
+    if (!grid) return 'the desk never drew'
+    const first = grid.querySelector('.mesa-channel')
+    if (!first) return 'no channels in the grid'
+
+    /* Hold channel 2 at 180 through the drawn slider. */
+    const second = grid.querySelectorAll('.mesa-channel')[1]
+    const slider = second.querySelector('input[type=range]')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    setter.call(slider, '180')
+    slider.dispatchEvent(new Event('change', { bubbles: true }))
+    await wait(700)
+
+    const held = await (await fetch('/api/v1/simpledesk/1')).json()
+    if (held.held['2'] !== 180) return 'the engine does not hold what the screen set: ' + JSON.stringify(held.held)
+    if (second.getAttribute('data-held') !== 'true') return 'held on the engine, not shown on the screen'
+
+    /* The release control appears only on held channels, and works. */
+    if (first.querySelector('.mesa-release')) return 'an unheld channel offers release'
+    const release = second.querySelector('.mesa-release')
+    if (!release) return 'the held channel offers no release'
+    release.click()
+    await wait(700)
+    const after = await (await fetch('/api/v1/simpledesk/1')).json()
+    if (after.held['2'] !== undefined) return 'release did not release'
+
+    /* The keypad drives the same engine. */
+    const field = document.querySelector('.mesa-keypad input')
+    if (!field) return 'no keypad'
+    setter.call(field, '5 AT 100')
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    ;[...document.querySelectorAll('.mesa-keypad button')]
+      .find(b => b.textContent.trim() === 'ENTER').click()
+    await wait(700)
+    const typed = await (await fetch('/api/v1/simpledesk/1')).json()
+    if (typed.held['5'] !== 100) return 'the keypad command never reached the engine'
+
+    await fetch('/api/v1/simpledesk/1', { method: 'DELETE' })
+    ;[...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === 'Consola')?.click()
+    await wait(700)
+    return 'ok'
+  })()`)
+  check('the desk holds, shows and releases through the engine', mesa === 'ok', mesa)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

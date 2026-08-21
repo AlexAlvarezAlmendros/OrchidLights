@@ -26,6 +26,7 @@ import {
 import { type Connection, Live } from './live'
 import { GrandMasterDock, StopAll } from './maestro'
 import { MatrixWidget } from './matrix'
+import { Mesa } from './mesa'
 import { Nav } from './nav'
 import { Plan } from './plan'
 import { ProjectMenu } from './proyecto'
@@ -76,6 +77,10 @@ export function App() {
      from a phone shows up here too. */
   const [blackout, setBlackout] = useState(false)
   const [grandMaster, setGrandMaster] = useState<GrandMasterState | null>(null)
+  /* What the Simple Desk holds, per universe. The authoritative copy is the
+     daemon's; this mirrors it via the feed so two hands on two screens see
+     each other's grips. */
+  const [deskHeld, setDeskHeld] = useState<Record<number, Record<string, number>>>({})
   /* One transient line for things that went wrong out-of-band -- a rejected
      WS command, a lost connection. A press that does nothing and says nothing
      teaches the operator the desk is broken. */
@@ -254,6 +259,8 @@ export function App() {
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
       onBlackout: setBlackout,
       onGrandMaster: setGrandMaster,
+      onSimpleDesk: (universe, held) =>
+        setDeskHeld((current) => ({ ...current, [universe]: held })),
       onError: setToast,
       onProject: (isDirty) => {
         setDirty(isDirty)
@@ -454,7 +461,7 @@ export function App() {
     const ids = [...new Set(fixtures.map((f) => f.universe))]
     if (ids.length === 0) return
 
-    if (view !== 'plan') {
+    if (view !== 'plan' && view !== 'desk') {
       live.current?.unsubscribe(ids)
       setFrames({})
       return
@@ -1049,7 +1056,19 @@ export function App() {
           </div>
         )}
 
-        {view === 'plan' ? (
+        {view === 'desk' ? (
+          <main className="console">
+            <Mesa
+              fixtures={fixtures}
+              frames={frames}
+              held={deskHeld}
+              onHeld={(universe, channels) =>
+                setDeskHeld((current) => ({ ...current, [universe]: channels }))
+              }
+              onError={setToast}
+            />
+          </main>
+        ) : view === 'plan' ? (
           <main className="console">
             {planError && <p className="editor-error">{planError}</p>}
             <Plan
