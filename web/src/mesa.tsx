@@ -10,6 +10,8 @@
  *
  * The values on screen are the frames off the wire, not an echo of what was
  * asked: what this desk shows is what the rig receives, grand master and all.
+ * That makes it the DMX monitor too: a fixture view groups the same frames
+ * by lamp, and every value can be read as raw DMX or as a percentage.
  *
  * The keypad speaks the engine's own grammar (`1 THRU 10 AT FULL`,
  * `500 -% 10`) through the daemon's parser, so a command means here exactly
@@ -17,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { type FixtureState, type UniverseState, api } from './api'
+import { type FixtureDetail, type FixtureState, type UniverseState, api } from './api'
 import { Slider } from './slider'
 
 const PER_PAGE = 96
@@ -47,6 +49,12 @@ export function Mesa({
       .catch(() => setUniverses([]))
   }, [])
   const [page, setPage] = useState(0)
+  const [mode, setMode] = useState<'canales' | 'fixtures'>('canales')
+  const [format, setFormat] = useState<'dmx' | 'pct'>('dmx')
+  const [addressing, setAddressing] = useState<'abs' | 'rel'>('abs')
+  /* Channel names, fetched lazily: only the detail route carries them, and
+     only the fixture view needs them. */
+  const [details, setDetails] = useState<Record<number, FixtureDetail>>({})
   const [command, setCommand] = useState('')
   const [history, setHistory] = useState<string[]>([])
   const commandField = useRef<HTMLInputElement | null>(null)
@@ -82,8 +90,22 @@ export function Mesa({
     return { byAddress, fixtures: here }
   }, [fixtures, universe])
 
+  useEffect(() => {
+    if (mode !== 'fixtures') return
+    for (const fixture of occupancy.fixtures) {
+      if (details[fixture.id] !== undefined) continue
+      api
+        .fixture(fixture.id)
+        .then((detail) => setDetails((current) => ({ ...current, [detail.id]: detail })))
+        .catch(fail)
+    }
+  }, [mode, occupancy.fixtures, details, fail])
+
   const frame = frames[universe]
   const heldHere = held[universe] ?? {}
+  /* Percent rounds HALF-DOWN from 255ths so 255 reads 100 and 128 reads 50,
+     matching what the reference monitor shows for the common values. */
+  const fmt = (value: number) => (format === 'pct' ? `${Math.round((value * 100) / 255)}%` : value)
 
   const setChannel = (channel: number, value: number) => {
     api.deskSet(universe, { [String(channel)]: value }).catch(fail)
@@ -141,7 +163,66 @@ export function Mesa({
           </select>
         </label>
 
-        {occupancy.fixtures.length > 0 && (
+        <fieldset className="mesa-modes" aria-label="Vista">
+          {(
+            [
+              ['canales', 'Canales'],
+              ['fixtures', 'Fixtures'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={mode === key}
+              onClick={() => setMode(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </fieldset>
+
+        <fieldset className="mesa-modes" aria-label="Formato de valor">
+          {(
+            [
+              ['dmx', 'DMX'],
+              ['pct', '%'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={format === key}
+              onClick={() => setFormat(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </fieldset>
+
+        {mode === 'fixtures' && (
+          <fieldset className="mesa-modes" aria-label="Numeración de canales">
+            {(
+              [
+                ['abs', 'Abs'],
+                ['rel', 'Rel'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={addressing === key}
+                title={
+                  key === 'abs' ? 'Direcciones DMX del universo' : 'Canal 1..n de cada fixture'
+                }
+                onClick={() => setAddressing(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </fieldset>
+        )}
+
+        {mode === 'canales' && occupancy.fixtures.length > 0 && (
           <label className="field">
             <span>Ir a</span>
             <select
@@ -175,62 +256,112 @@ export function Mesa({
         </button>
       </header>
 
-      <div className="mesa-grid">
-        {channels.map((index) => {
-          const address = index + 1
-          const value = frame?.[index] ?? 0
-          const holding = heldHere[String(address)] !== undefined
-          const occupant = occupancy.byAddress[index]
+      {mode === 'canales' && (
+        <div className="mesa-grid">
+          {channels.map((index) => {
+            const address = index + 1
+            const value = frame?.[index] ?? 0
+            const holding = heldHere[String(address)] !== undefined
+            const occupant = occupancy.byAddress[index]
 
-          return (
-            <div
-              key={address}
-              className="mesa-channel"
-              data-held={holding}
-              data-band={occupant?.band ?? 'none'}
-              title={occupant ? `${occupant.fixture.name}` : 'Sin fixture'}
-            >
-              <span className="mesa-address num">{address}</span>
-              <span className="mesa-value num">{value}</span>
-              <Slider
-                min={0}
-                max={255}
-                value={holding ? (heldHere[String(address)] ?? value) : value}
-                aria-label={`Canal ${address}`}
-                onChange={(e) => setChannel(address, Number(e.target.value))}
-              />
-              {/* Only a held channel offers release: an X on every channel
+            return (
+              <div
+                key={address}
+                className="mesa-channel"
+                data-held={holding}
+                data-band={occupant?.band ?? 'none'}
+                title={occupant ? `${occupant.fixture.name}` : 'Sin fixture'}
+              >
+                <span className="mesa-address num">{address}</span>
+                <span className="mesa-value num">{fmt(value)}</span>
+                <Slider
+                  min={0}
+                  max={255}
+                  value={holding ? (heldHere[String(address)] ?? value) : value}
+                  aria-label={`Canal ${address}`}
+                  onChange={(e) => setChannel(address, Number(e.target.value))}
+                />
+                {/* Only a held channel offers release: an X on every channel
                   would promise an undo the desk does not have for values it
                   never touched. */}
-              {holding && (
-                <button
-                  type="button"
-                  className="mesa-release"
-                  aria-label={`Soltar canal ${address}`}
-                  title="Soltar: la función de debajo vuelve a mandar"
-                  onClick={() => releaseChannel(address)}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          )
-        })}
-      </div>
+                {holding && (
+                  <button
+                    type="button"
+                    className="mesa-release"
+                    aria-label={`Soltar canal ${address}`}
+                    title="Soltar: la función de debajo vuelve a mandar"
+                    onClick={() => releaseChannel(address)}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {mode === 'fixtures' && (
+        <div className="mesa-fixtures">
+          {occupancy.fixtures.length === 0 && (
+            <p className="mesa-empty">Sin fixtures en este universo: no hay cajas que agrupar.</p>
+          )}
+          {occupancy.fixtures.map((fixture) => {
+            const detail = details[fixture.id]
+            return (
+              <section key={fixture.id} className="mesa-fixturebox">
+                <header>
+                  <strong>{fixture.name}</strong>
+                  <span className="num">@{fixture.address}</span>
+                </header>
+                <div className="mesa-fxchannels">
+                  {Array.from({ length: fixture.channels }, (_, index) => {
+                    const address = fixture.address + index
+                    const value = frame?.[address - 1] ?? 0
+                    const name = detail?.channelList[index]?.name
+                    return (
+                      /* A cell is a door back to the desk: clicking a channel
+                         opens the channel view on its page, hand on the fader. */
+                      <button
+                        key={address}
+                        type="button"
+                        className="mesa-fxchannel"
+                        data-held={heldHere[String(address)] !== undefined}
+                        title={`${name ?? `Canal ${index + 1}`} · DMX ${address}`}
+                        onClick={() => {
+                          setMode('canales')
+                          setPage(Math.floor((address - 1) / PER_PAGE))
+                        }}
+                      >
+                        <span className="mesa-address num">
+                          {addressing === 'abs' ? address : index + 1}
+                        </span>
+                        <span className="mesa-value num">{fmt(value)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      )}
 
       <footer className="mesa-foot">
-        <nav className="mesa-pages" aria-label="Páginas de canales">
-          {Array.from({ length: pageCount }, (_, i) => (
-            <button
-              key={`p${i * PER_PAGE}`}
-              type="button"
-              aria-pressed={i === page}
-              onClick={() => setPage(i)}
-            >
-              {i * PER_PAGE + 1}–{Math.min(512, (i + 1) * PER_PAGE)}
-            </button>
-          ))}
-        </nav>
+        {mode === 'canales' && (
+          <nav className="mesa-pages" aria-label="Páginas de canales">
+            {Array.from({ length: pageCount }, (_, i) => (
+              <button
+                key={`p${i * PER_PAGE}`}
+                type="button"
+                aria-pressed={i === page}
+                onClick={() => setPage(i)}
+              >
+                {i * PER_PAGE + 1}–{Math.min(512, (i + 1) * PER_PAGE)}
+              </button>
+            ))}
+          </nav>
+        )}
 
         <div className="mesa-keypad">
           <input

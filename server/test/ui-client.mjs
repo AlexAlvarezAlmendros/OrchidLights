@@ -1973,6 +1973,130 @@ try {
   })()`)
   check('the desk holds, shows and releases through the engine', mesa === 'ok', mesa)
 
+  /* The Mesa is the DMX monitor too: the same frames off the wire, read as
+     raw DMX or percent, and grouped by lamp in the fixture view. Nothing here
+     is a second data path -- every number is the stream the desk already
+     draws, which is why an injected desk value must appear in all three
+     readings. */
+  const monitor = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const tab = [...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === 'Mesa')
+    if (!tab) return 'no Mesa in the rail'
+    tab.click()
+    await wait(1000)
+
+    /* A known value on the wire, held by the desk itself. */
+    await fetch('/api/v1/simpledesk/1/channels', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: { '1': 255 } }),
+    })
+    await wait(900)
+
+    const cell = document.querySelector('.mesa-grid .mesa-channel .mesa-value')
+    if (!cell) return 'no channel values drawn'
+    if (cell.textContent.trim() !== '255') {
+      return 'channel 1 shows ' + cell.textContent + ', the wire says 255'
+    }
+
+    /* Percent is a reading of the same number, not another number. */
+    const pct = [...document.querySelectorAll('.mesa-modes button')]
+      .find(b => b.textContent.trim() === '%')
+    if (!pct) return 'no percent toggle'
+    pct.click()
+    await wait(400)
+    if (cell.textContent.trim() !== '100%') return 'percent shows ' + cell.textContent
+
+    /* The fixture view: one box per lamp of this universe, no more, no less. */
+    const fixturesBtn = [...document.querySelectorAll('.mesa-modes button')]
+      .find(b => b.textContent.trim() === 'Fixtures')
+    if (!fixturesBtn) return 'no fixtures toggle'
+    fixturesBtn.click()
+    await wait(900)
+
+    const fixtures = (await (await fetch('/api/v1/fixtures')).json())
+      .filter(f => f.universe === 1).sort((a, b) => a.address - b.address)
+    const boxes = document.querySelectorAll('.mesa-fixturebox')
+    if (boxes.length !== fixtures.length) {
+      return boxes.length + ' boxes for ' + fixtures.length + ' fixtures'
+    }
+    if (fixtures.length === 0) {
+      /* An empty universe must say so, not show a silent void. */
+      if (!document.querySelector('.mesa-empty')) return 'no fixtures and no explanation'
+    } else {
+      /* Abs reads the DMX address; Rel reads 1..n within the lamp. */
+      const firstCell = boxes[0].querySelector('.mesa-fxchannel .mesa-address')
+      if (firstCell.textContent.trim() !== String(fixtures[0].address)) {
+        return 'abs shows ' + firstCell.textContent + ' for address ' + fixtures[0].address
+      }
+      ;[...document.querySelectorAll('.mesa-modes button')]
+        .find(b => b.textContent.trim() === 'Rel').click()
+      await wait(300)
+      if (firstCell.textContent.trim() !== '1') return 'rel shows ' + firstCell.textContent
+
+      /* A cell is a door back to the desk: clicking opens the channel view. */
+      boxes[0].querySelector('.mesa-fxchannel').click()
+      await wait(400)
+      if (!document.querySelector('.mesa-grid')) return 'the cell did not open the channel view'
+    }
+
+    await fetch('/api/v1/simpledesk/1', { method: 'DELETE' })
+    return 'ok'
+  })()`)
+  check('the monitor reads the frames in DMX, percent and by fixture', monitor === 'ok', monitor)
+
+  /* The dump button: wears the live count, refuses when there is nothing a
+     scene could say, and freezes exactly the held value when pressed. */
+  const dump = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const badge = document.querySelector('.dump-badge')
+    if (!badge) return 'no dump button in the bar'
+
+    /* Open both hands first, so "nothing held" is a fact and not a hope. */
+    await fetch('/api/v1/live', { method: 'DELETE' })
+    await fetch('/api/v1/simpledesk/1', { method: 'DELETE' })
+    await wait(700)
+    if (!badge.disabled) return 'nothing to dump, yet the button invites a press'
+
+    const fixtures = await (await fetch('/api/v1/fixtures')).json()
+    if (fixtures.length === 0) return 'none'
+    const target = fixtures[0]
+    const before = new Set((await (await fetch('/api/v1/functions')).json())
+      .filter(f => f.type === 'Scene').map(f => f.id))
+
+    await fetch('/api/v1/live', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [{ fixture: target.id, channel: 0, value: 200 }] }),
+    })
+    await wait(900)
+
+    if (badge.disabled) return 'a value is held, yet the button refuses'
+    if (!badge.textContent.includes('1')) {
+      return 'the badge does not wear the count: ' + badge.textContent
+    }
+    badge.click()
+    await wait(400)
+    const panel = document.querySelector('.dump-panel')
+    if (!panel) return 'the badge opened no panel'
+    ;[...panel.querySelectorAll('button')].find(b => b.textContent.trim() === 'Volcar').click()
+    await wait(900)
+
+    const made = (await (await fetch('/api/v1/functions')).json())
+      .find(f => f.type === 'Scene' && !before.has(f.id))
+    if (!made) return 'no scene appeared'
+    const body = await (await fetch('/api/v1/functions/' + made.id + '/body')).json()
+    const value = body.values.find(v => v.fixture === target.id && v.channel === 0)
+    if (!value || value.value !== 200) {
+      return 'the scene does not carry the held value: ' + JSON.stringify(body.values)
+    }
+
+    /* Clean up the grip and the frozen scene. */
+    await fetch('/api/v1/live', { method: 'DELETE' })
+    await fetch('/api/v1/functions/' + made.id, { method: 'DELETE' })
+    return 'ok'
+  })()`)
+  check('the dump freezes exactly what is held', dump === 'ok' || dump === 'none', dump)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

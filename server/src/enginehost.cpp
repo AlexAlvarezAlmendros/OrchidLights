@@ -18,6 +18,7 @@
 */
 
 #include <functional>
+#include <algorithm>
 
 #include <QJsonObject>
 #include <QJsonArray>
@@ -322,6 +323,144 @@ bool EngineHost::setGrandMaster(int value, const QString &channelMode,
     }
 
     emit grandMasterChanged();
+    return true;
+}
+
+QList<EngineHost::DumpValue> EngineHost::dumpableValues() const
+{
+    QList<DumpValue> out;
+    /* Deduplicated by (fixture, channel): where the Simple Desk and the plan's
+       live desk both hold the same channel, the Simple Desk wins -- it is the
+       higher-priority fader on the wire, so it is also the truth here. */
+    QSet<quint64> seen;
+
+    const QHash<quint32, uchar> deskHeld = m_desk->heldEverywhere();
+    for (auto it = deskHeld.constBegin(); it != deskHeld.constEnd(); ++it)
+    {
+        const quint32 address = it.key();
+        const quint32 fixtureId = m_doc->fixtureForAddress(address);
+        if (fixtureId == Fixture::invalidId())
+            continue;
+        Fixture *fixture = m_doc->fixture(fixtureId);
+        if (fixture == nullptr)
+            continue;
+
+        const quint32 channel = (address & 0x01FF) - fixture->address();
+        const QLCChannel *qlcChannel = fixture->channel(channel);
+
+        DumpValue value;
+        value.fixture = fixtureId;
+        value.channel = channel;
+        value.value = it.value();
+        value.group = qlcChannel != nullptr ? int(qlcChannel->group()) : int(QLCChannel::NoGroup);
+        out.append(value);
+        seen.insert((quint64(fixtureId) << 32) | channel);
+    }
+
+    for (const auto &pair : m_levels->liveValues())
+    {
+        // LevelSource::Channel is (fixture id, channel index).
+        const quint32 fixtureId = pair.first.first;
+        const quint32 channelIndex = pair.first.second;
+        const quint64 key = (quint64(fixtureId) << 32) | channelIndex;
+        if (seen.contains(key))
+            continue;
+        Fixture *fixture = m_doc->fixture(fixtureId);
+        if (fixture == nullptr)
+            continue;
+        const QLCChannel *qlcChannel = fixture->channel(channelIndex);
+
+        DumpValue value;
+        value.fixture = fixtureId;
+        value.channel = channelIndex;
+        value.value = pair.second;
+        value.group = qlcChannel != nullptr ? int(qlcChannel->group()) : int(QLCChannel::NoGroup);
+        out.append(value);
+    }
+
+    return out;
+}
+
+int EngineHost::bareHeldCount() const
+{
+    int bare = 0;
+    const QHash<quint32, uchar> deskHeld = m_desk->heldEverywhere();
+    for (auto it = deskHeld.constBegin(); it != deskHeld.constEnd(); ++it)
+    {
+        if (m_doc->fixtureForAddress(it.key()) == Fixture::invalidId())
+            bare++;
+    }
+    return bare;
+}
+
+bool EngineHost::dumpToScene(const QString &name, quint32 sceneId, bool nonZeroOnly,
+                             const QList<int> &groups, quint32 &outSceneId, int &written,
+                             QString &errorMessage)
+{
+    QList<DumpValue> values = dumpableValues();
+
+    if (nonZeroOnly)
+    {
+        values.erase(std::remove_if(values.begin(), values.end(),
+                                    [](const DumpValue &v) { return v.value == 0; }),
+                     values.end());
+    }
+    if (groups.isEmpty() == false)
+    {
+        values.erase(std::remove_if(values.begin(), values.end(),
+                                    [&groups](const DumpValue &v) {
+                                        return groups.contains(v.group) == false;
+                                    }),
+                     values.end());
+    }
+
+    if (values.isEmpty())
+    {
+        errorMessage = QStringLiteral(
+            "Nothing to dump: the desk holds no values a scene can carry "
+            "(after the filters, at least)");
+        return false;
+    }
+
+    if (sceneId == Function::invalidId())
+    {
+        const DocWriter::Result made =
+            DocWriter::createFunction(m_doc, QStringLiteral("Scene"),
+                                      name.isEmpty() ? QStringLiteral("Volcado") : name,
+                                      outSceneId);
+        if (made.ok == false)
+        {
+            errorMessage = made.error;
+            return false;
+        }
+    }
+    else
+    {
+        Function *function = m_doc->function(sceneId);
+        if (function == nullptr || function->type() != Function::SceneType)
+        {
+            errorMessage = QStringLiteral("No scene with id %1").arg(sceneId);
+            return false;
+        }
+        outSceneId = sceneId;
+    }
+
+    written = 0;
+    for (const DumpValue &value : values)
+    {
+        const DocWriter::Result set = DocWriter::setSceneValue(
+            m_doc, outSceneId, value.fixture, value.channel, int(value.value));
+        if (set.ok)
+            written++;
+    }
+
+    if (written == 0)
+    {
+        errorMessage = QStringLiteral("No value could be written into the scene");
+        return false;
+    }
+
+    m_doc->setModified();
     return true;
 }
 
@@ -1222,6 +1361,7 @@ bool EngineHost::setLiveValues(const QList<QPair<LevelSource::Channel, uchar>> &
     for (const auto &entry : values)
         m_levels->setLiveValue(entry.first.first, entry.first.second, entry.second);
 
+    emit liveChanged();
     return true;
 }
 
@@ -1243,6 +1383,8 @@ void EngineHost::releaseLive()
        exactly where it was left -- and the desk that could move it is the one
        just let go of. */
     releaseLevels(channels);
+
+    emit liveChanged();
 }
 
 /*****************************************************************************

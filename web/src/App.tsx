@@ -36,6 +36,7 @@ import { resolveClose, takePendingOpen } from './shell'
 import { Slider } from './slider'
 import { getToken, setToken } from './token'
 import type { View } from './views'
+import { DumpButton } from './volcado'
 import { CREATABLE, placeBelow } from './widgets'
 import { XYPad } from './xypad'
 
@@ -81,6 +82,7 @@ export function App() {
      daemon's; this mirrors it via the feed so two hands on two screens see
      each other's grips. */
   const [deskHeld, setDeskHeld] = useState<Record<number, Record<string, number>>>({})
+  const [dump, setDump] = useState({ count: 0, bare: 0 })
   /* One transient line for things that went wrong out-of-band -- a rejected
      WS command, a lost connection. A press that does nothing and says nothing
      teaches the operator the desk is broken. */
@@ -259,6 +261,7 @@ export function App() {
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
       onBlackout: setBlackout,
       onGrandMaster: setGrandMaster,
+      onDump: (count, bare) => setDump({ count, bare }),
       onSimpleDesk: (universe, held) =>
         setDeskHeld((current) => ({ ...current, [universe]: held })),
       onError: setToast,
@@ -338,6 +341,10 @@ export function App() {
           .grandMaster()
           .then(setGrandMaster)
           .catch(() => setGrandMaster(null))
+        api
+          .dumpState()
+          .then((state) => setDump({ count: state.count, bare: state.bare }))
+          .catch(() => undefined)
         // Seed the faders from the values the project was saved with, so the
         // interface opens showing the desk as the show left it.
         const seeded: Record<number, number> = {}
@@ -776,6 +783,13 @@ export function App() {
             </span>
           </div>
 
+          <DumpButton
+            count={dump.count}
+            bare={dump.bare}
+            functions={functions}
+            onError={setToast}
+            onDone={setToast}
+          />
           <GrandMasterDock state={grandMaster} onState={setGrandMaster} onError={setToast} />
 
           <span className="chip" data-state={connection}>

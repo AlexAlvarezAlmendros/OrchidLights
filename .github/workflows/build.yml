@@ -206,6 +206,9 @@ jobs:
       - name: Simple desk smoke test (keypad grammar, bare wire, override vs functions)
         run: ./server/test/simpledesk-smoke.sh orchidlightsd
 
+      - name: Dump smoke test (both desks merged, filters exact in the .qxw, record-over)
+        run: ./server/test/dump-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

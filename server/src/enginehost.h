@@ -102,6 +102,37 @@ public:
     class SimpleDeskSource *desk() const { return m_desk; }
 
     /**
+     * What the dump would capture right now: everything the desk and the
+     * live desk are holding THAT A SCENE CAN SAY. A scene speaks in
+     * (fixture, channel); bare-wire values the Simple Desk holds on
+     * unpatched addresses have no words in that language and are counted
+     * separately, so the interface can say "2 quedan fuera" instead of
+     * quietly shrinking the dump.
+     */
+    struct DumpValue
+    {
+        quint32 fixture;
+        quint32 channel;
+        uchar value;
+        int group; /**< QLCChannel::Group of the channel. */
+    };
+    QList<DumpValue> dumpableValues() const;
+    /** Held on addresses no fixture owns; a scene cannot carry these. */
+    int bareHeldCount() const;
+
+    /**
+     * Write the current grip into a scene: a fresh one when sceneId is
+     * Function::invalidId(), merged into an existing one otherwise --
+     * merging is what "record over this look" means.
+     * `groups` filters by channel kind (empty keeps all); nonZeroOnly drops
+     * zeros. Fails when nothing would be written: an empty dump that
+     * "succeeds" makes an empty scene somebody trusts.
+     */
+    bool dumpToScene(const QString &name, quint32 sceneId, bool nonZeroOnly,
+                     const QList<int> &groups, quint32 &outSceneId, int &written,
+                     QString &errorMessage);
+
+    /**
      * Wind the engine down on purpose.
      *
      * Without this, the only exit is the process dying mid-tick, which leaves
@@ -354,6 +385,9 @@ signals:
 
     /** The Simple Desk changed what it holds on a universe (0-based). */
     void deskChanged(quint32 universe);
+
+    /** The live desk (the plan's per-fixture grips) changed what it holds. */
+    void liveChanged();
 
     /** An external control moved. Carried live because learning a binding means
      *  watching for the next thing the operator touches. */
