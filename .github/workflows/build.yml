@@ -479,3 +479,126 @@ jobs:
       # assertions themselves are all from outside (HTTP, /proc, signals).
       - name: Shell smoke test
         run: xvfb-run -a desktop/test/shell-smoke.sh
+
+  desktop-bundle:
+    name: Desktop bundle (deb + AppImage)
+    # Bundles are release artifacts, not per-PR noise: a PR is already covered
+    # by the desktop job's build+smoke, and this job costs a full extra
+    # Release build of daemon and shell.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          ./install-deps.sh
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf xvfb file
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build the web interface
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Stage the sidecar (daemon + plugins + fixtures + web)
+        run: ./desktop/scripts/collect-sidecar.sh
+
+      - name: Build the bundles
+        working-directory: desktop/src-tauri
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "1"
+        run: pnpm dlx @tauri-apps/cli@^2 build --bundles deb,appimage
+
+      # The deb, installed for real and driven from outside: the daemon must
+      # come up self-contained (fixtures, plugins, audio decoders all from the
+      # package) and die with its window.
+      - name: Install and smoke the deb
+        run: |
+          sudo apt-get install -y ./desktop/src-tauri/target/release/bundle/deb/OrchidLights_*_amd64.deb
+          xvfb-run -a bash -c '
+            set -eu
+            orchidlights-desktop > /tmp/shell.log 2>&1 &
+            SHELL_PID=$!
+            DP=""
+            for _ in $(seq 1 120); do
+              DP=$(pgrep -P "$SHELL_PID" orchidlightsd | head -1 || true)
+              [ -n "$DP" ] && break
+              kill -0 $SHELL_PID 2>/dev/null || { cat /tmp/shell.log; exit 1; }
+              sleep 0.5
+            done
+            [ -n "$DP" ] || { echo "no daemon"; exit 1; }
+            PORT=$(tr "\0" "\n" < /proc/$DP/cmdline | grep -A1 -- --port | tail -1)
+            for _ in $(seq 1 100); do
+              curl -sf "http://127.0.0.1:$PORT/api/v1/status" > /dev/null 2>&1 && break
+              sleep 0.3
+            done
+            STATUS=$(curl -sf "http://127.0.0.1:$PORT/api/v1/status")
+            echo "$STATUS" | python3 -c "
+          import json, sys
+          body = json.load(sys.stdin)
+          assert body[\"manufacturers\"] > 100, body
+          assert len(body[\"outputPlugins\"]) >= 10, body
+          assert len(body[\"audioFormats\"]) >= 5, body
+          "
+            kill -TERM $SHELL_PID
+            for _ in $(seq 1 40); do
+              kill -0 "$DP" 2>/dev/null || exit 0
+              sleep 0.25
+            done
+            echo "the daemon outlived its shell"; exit 1
+          '
+
+      # And the AppImage boots the same self-contained pair.
+      - name: Smoke the AppImage
+        run: |
+          AI=$(ls desktop/src-tauri/target/release/bundle/appimage/OrchidLights_*_amd64.AppImage)
+          chmod +x "$AI"
+          xvfb-run -a bash -c '
+            set -eu
+            APPIMAGE_EXTRACT_AND_RUN=1 "'"$AI"'" > /tmp/ai.log 2>&1 &
+            DP=""
+            for _ in $(seq 1 120); do
+              DP=$(pgrep -f "sidecar/bin/orchidlightsd" | head -1 || true)
+              [ -n "$DP" ] && break
+              sleep 0.5
+            done
+            [ -n "$DP" ] || { echo "no daemon"; cat /tmp/ai.log; exit 1; }
+            PORT=$(tr "\0" "\n" < /proc/$DP/cmdline | grep -A1 -- --port | tail -1)
+            for _ in $(seq 1 100); do
+              curl -sf "http://127.0.0.1:$PORT/api/v1/status" > /dev/null 2>&1 && break
+              sleep 0.3
+            done
+            curl -sf "http://127.0.0.1:$PORT/api/v1/status" | grep -q "\"manufacturers\"" || exit 1
+            SHELL_PID=$(ps -o ppid= -p "$DP" | tr -d " ")
+            kill -TERM "$SHELL_PID"
+            for _ in $(seq 1 40); do
+              kill -0 "$DP" 2>/dev/null || exit 0
+              sleep 0.25
+            done
+            echo "the daemon outlived its shell"; exit 1
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OrchidLights-desktop-linux
+          path: |
+            desktop/src-tauri/target/release/bundle/deb/OrchidLights_*_amd64.deb
+            desktop/src-tauri/target/release/bundle/appimage/OrchidLights_*_amd64.AppImage
+          if-no-files-found: error

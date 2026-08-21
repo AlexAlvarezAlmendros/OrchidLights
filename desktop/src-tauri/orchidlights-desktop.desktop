@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=OrchidLights
+GenericName=Lighting control
+GenericName[es]=Control de iluminación
+Comment=DMX lighting desk with a web interface for every device on the network
+Comment[es]=Mesa de iluminación DMX con interfaz web para cualquier dispositivo de la red
+Exec=orchidlights-desktop %f
+Icon=orchidlights-desktop
+Terminal=false
+Categories=AudioVideo;
+MimeType=application/x-orchidlights-project;
+Keywords=dmx;light;lighting;controller;artnet;sacn;e131;osc;midi;orchid;
