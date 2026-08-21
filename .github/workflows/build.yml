@@ -197,6 +197,9 @@ jobs:
       - name: Auth smoke test (guarded daemon, connect screen, token handover)
         run: ./server/test/auth-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      - name: Project smoke test (open/save-as by path, recents, autosave, recovery)
+        run: ./server/test/project-smoke.sh orchidlightsd resources/samples/Sample.qxw
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

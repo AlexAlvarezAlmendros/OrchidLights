@@ -77,6 +77,23 @@ ws.onmessage = (event) => {
     consoleErrors.push(message.params.entry.text)
   }
 
+  /* JavaScript dialogs get answered, the way the human they are for would.
+     Found the hard way: with unsaved edits and real user activation (the
+     pointer-driven fader tests count), the beforeunload guard makes
+     Page.reload raise a confirmation dialog -- and an unanswered dialog
+     stalls the reload's own response, hanging the suite at 900 s with no
+     failure to read. Accepting is the choice the assertion needs; a test that
+     wants the other answer can install its own handler. */
+  if (message.method === 'Page.javascriptDialogOpening') {
+    ws.send(
+      JSON.stringify({
+        id: nextId++,
+        method: 'Page.handleJavaScriptDialog',
+        params: { accept: true },
+      }),
+    )
+  }
+
   const resolve = pending.get(message.id)
   if (resolve) {
     pending.delete(message.id)
@@ -93,6 +110,9 @@ const send = (method, params = {}) =>
 
 await send('Runtime.enable')
 await send('Log.enable')
+// Without Page.enable the dialog-opening event never arrives, the answer
+// below never runs, and a beforeunload dialog stalls every load after it.
+await send('Page.enable')
 
 async function evaluate(expression) {
   const result = await send('Runtime.evaluate', {
@@ -1820,6 +1840,36 @@ try {
     return toast ? 'ok' : 'the refusal never reached the screen'
   })()`)
   check('a refused press is said out loud', surfaced === 'none' || surfaced === 'ok', surfaced)
+
+  /* The desktop shell's close question, answered by the page.
+   *
+     The shell (when there is one) prevents the close and dispatches
+     orchid-close-request; the page owns the dialog because a native two-button
+     dialog cannot offer the three honest answers. Browsers never receive the
+     event, so dispatching it synthetically is exactly how the shell path is
+     exercised without a shell: the dialog must appear with all three answers,
+     and Cancelar must put it away leaving everything as it was. */
+  const closeAsk = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    window.dispatchEvent(new CustomEvent('orchid-close-request'))
+    await wait(500)
+
+    const dialog = document.querySelector('dialog.gate[aria-label="Cerrar con cambios sin guardar"]')
+    if (!dialog) return 'the close question never appeared'
+
+    const labels = [...dialog.querySelectorAll('button')].map(b => b.textContent.trim())
+    for (const wanted of ['Guardar y salir', 'Salir sin guardar', 'Cancelar']) {
+      if (!labels.includes(wanted)) return 'missing answer: ' + wanted + ' (' + labels.join(', ') + ')'
+    }
+
+    ;[...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === 'Cancelar').click()
+    await wait(400)
+    if (document.querySelector('dialog.gate[aria-label="Cerrar con cambios sin guardar"]')) {
+      return 'Cancelar did not put the question away'
+    }
+    return 'ok'
+  })()`)
+  check('the close question offers its three answers', closeAsk === 'ok', closeAsk)
 
   /* One slider in the app, everywhere.
    *

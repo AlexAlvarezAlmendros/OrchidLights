@@ -265,6 +265,16 @@ export interface ProjectState {
   /** Edited since it was loaded or last saved. Nothing here writes to disk on
    *  its own, so this is the only warning there is. */
   modified: boolean
+  /** A recovery copy newer than the project, when one exists. Reported, never
+   *  auto-loaded: whether the crash's last thirty seconds beat the file is
+   *  the operator's call. */
+  autosave?: { name: string; savedAt: string }
+}
+
+export interface RecentProject {
+  path: string
+  name: string
+  exists: boolean
 }
 
 export interface Status {
@@ -600,6 +610,36 @@ export const api = {
     json<{ removed: string }>(`/api/v1/vc/widgets/${id}`, { method: 'DELETE' }),
 
   saveProject: () => json<{ path: string }>('/api/v1/project/save', { method: 'POST' }),
+  /* The disk-path routes: the daemon demands the token on these whatever the
+     loopback policy, so they only work from a client that holds it -- the
+     desktop shell, or a browser someone deliberately authorized. */
+  newProject: () => json<{ path: string }>('/api/v1/project/new', { method: 'POST' }),
+  openProjectPath: (path: string) =>
+    json<{ path: string; unresolved?: string }>('/api/v1/project/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }),
+  saveProjectAs: (path: string) =>
+    json<{ path: string }>('/api/v1/project/save-as', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }),
+  recentProjects: () => json<{ recents: RecentProject[] }>('/api/v1/project/recents'),
+  /* The phone-safe pair: names inside the projects directory, never paths. */
+  listProjects: () => json<{ directory: string; projects: string[] }>('/api/v1/projects'),
+  loadProject: (name: string) =>
+    json<{ path: string; unresolved?: string }>(
+      `/api/v1/project/load/${encodeURIComponent(name)}`,
+      { method: 'POST' },
+    ),
+  saveProjectNamed: (name: string) =>
+    json<{ path: string }>(`/api/v1/project/save/${encodeURIComponent(name)}`, {
+      method: 'POST',
+    }),
+  recoverAutosave: () =>
+    json<{ path: string; modified: boolean }>('/api/v1/project/recover', { method: 'POST' }),
   blackout: (on: boolean) =>
     json<{ blackout: boolean }>('/api/v1/blackout', { method: on ? 'POST' : 'DELETE' }),
 }

@@ -27,6 +27,8 @@
 #include <QJsonArray>
 #include <QWebSocket>
 
+#include <QFileInfo>
+
 #include "livefeed.h"
 #include "enginehost.h"
 #include "apiauth.h"
@@ -701,11 +703,26 @@ void LiveFeed::onFunctionListChanged()
 
 void LiveFeed::onProjectModified(bool modified)
 {
-    /* Only the rising edge. resetModified() fires on save and on load, and
-       neither is news: a save changed nothing a client is showing, and a load
-       announces itself separately. */
+    /* For the coalesced `changed` flush, only the rising edge matters:
+       resetModified() fires on save and load, and neither makes client data
+       stale. */
     if (modified)
         m_projectDirty = true;
+
+    /* The dirty FLAG itself travels on both edges, immediately. Every screen
+       shows "sin guardar", and a phone whose banner still says so after the
+       desktop saved reads as a desk that lost its edits. */
+    QJsonObject message;
+    message["type"] = "project";
+    message["dirty"] = modified;
+    message["name"] = QFileInfo(m_engine->projectPath()).fileName();
+    const QString payload =
+        QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+    for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+    {
+        if (it.value().authenticated)
+            it.key()->sendTextMessage(payload);
+    }
 }
 
 void LiveFeed::onFixturesChanged()

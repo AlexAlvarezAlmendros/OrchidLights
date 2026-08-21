@@ -26,6 +26,7 @@
 #include <QSet>
 #include <QEventLoop>
 #include <QTimer>
+#include <QDateTime>
 
 #include "enginehost.h"
 #include "installpaths.h"
@@ -203,7 +204,118 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
     m_doc->masterTimer()->start();
     m_running = true;
 
+    /* The autosave: armed by every modification, disarmed by a real save. A
+       daemon crash or an impatient power strip costs at most thirty seconds
+       of edits instead of the evening's. */
+    m_autosave = new QTimer(this);
+    m_autosave->setSingleShot(true);
+    bool intervalOk = false;
+    int interval = qEnvironmentVariableIntValue("ORCHID_AUTOSAVE_MS", &intervalOk);
+    if (intervalOk == false || interval <= 0)
+        interval = 30000;
+    m_autosave->setInterval(interval);
+
+    connect(m_autosave, &QTimer::timeout, this, [this]() {
+        const QString target = autosavePath();
+        if (target.isEmpty() || m_doc->isModified() == false)
+            return;
+        QString ignored;
+        /* Through the same writer as a real save, preserved sections included:
+           an autosave that loses the Virtual Console is not a recovery file,
+           it is a trap that looks like one. */
+        WorkspaceLoader::save(m_doc, target, m_preserved, ignored);
+    });
+
+    connect(m_doc, &Doc::modified, this, [this](bool state) {
+        if (state)
+            armAutosave();
+    });
+
     return true;
+}
+
+void EngineHost::armAutosave()
+{
+    if (m_autosave != nullptr)
+        m_autosave->start();
+}
+
+void EngineHost::newProject()
+{
+    Q_ASSERT(m_doc != nullptr);
+
+    m_doc->masterTimer()->stop();
+    m_doc->clearContents();
+    m_doc->clearErrorLog();
+    m_doc->inputOutputMap()->startUniverses();
+    m_doc->masterTimer()->start();
+
+    /* No path on purpose: the next save must say where. Keeping the old one
+       is how a blank workspace gets written over last night's show. */
+    m_projectPath.clear();
+    m_preserved = WorkspaceLoader::Preserved();
+
+    if (m_levels != nullptr)
+        m_levels->forgetEverything();
+    teachSliders();
+
+    m_undo.clear();
+    m_redo.clear();
+    m_doc->resetModified();
+
+    emit projectReplaced();
+}
+
+QString EngineHost::autosavePath() const
+{
+    if (m_projectPath.isEmpty() == false)
+        return m_projectPath + QStringLiteral(".autosave.qxw");
+
+    /* A brand-new show has no home yet; the autosave lives in the projects
+       directory so a crash before the first save still leaves something. */
+    if (m_projectsDirectory.isEmpty() == false)
+        return QDir(m_projectsDirectory).absoluteFilePath(QStringLiteral("NewProject.autosave.qxw"));
+
+    return QString();
+}
+
+bool EngineHost::recoverAutosave(QString &errorMessage)
+{
+    const QString shadow = pendingAutosave();
+    if (shadow.isEmpty())
+    {
+        errorMessage = QStringLiteral("There is no recovery copy to load");
+        return false;
+    }
+
+    const QString keep = m_projectPath;
+    if (loadProject(shadow, errorMessage) == false)
+        return false;
+
+    /* The content is the autosave's; the identity stays the project's. And it
+       IS modified relative to the file on disk -- that is the whole point. */
+    m_projectPath = keep;
+    m_doc->setModified();
+    return true;
+}
+
+QString EngineHost::pendingAutosave() const
+{
+    const QString candidate = autosavePath();
+    if (candidate.isEmpty() || QFileInfo::exists(candidate) == false)
+        return QString();
+
+    /* Only newer than the project it shadows: an autosave older than the real
+       file is a leftover from an edit somebody went on to save properly. */
+    if (m_projectPath.isEmpty() == false)
+    {
+        const QDateTime saved = QFileInfo(m_projectPath).lastModified();
+        const QDateTime shadow = QFileInfo(candidate).lastModified();
+        if (shadow <= saved)
+            return QString();
+    }
+
+    return candidate;
 }
 
 QStringList EngineHost::audioOutputs() const
@@ -439,6 +551,13 @@ bool EngineHost::saveProject(const QString &fileName, QString &errorMessage)
 
     m_projectPath = QFileInfo(target).absoluteFilePath();
     m_doc->resetModified();
+
+    /* Saved for real, so the recovery copy has nothing to recover. */
+    if (m_autosave != nullptr)
+        m_autosave->stop();
+    const QString shadow = autosavePath();
+    if (shadow.isEmpty() == false)
+        QFile::remove(shadow);
 
     return true;
 }

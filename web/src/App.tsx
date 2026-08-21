@@ -26,8 +26,10 @@ import { type Connection, Live } from './live'
 import { MatrixWidget } from './matrix'
 import { Nav } from './nav'
 import { Plan } from './plan'
+import { ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
+import { resolveClose, takePendingOpen } from './shell'
 import { Slider } from './slider'
 import { getToken, setToken } from './token'
 import type { View } from './views'
@@ -79,6 +81,10 @@ export function App() {
      phone arriving at a --listen-all desk by bare URL lands here by design,
      types the token once, and never sees this again. */
   const [needToken, setNeedToken] = useState(false)
+  /* The desktop shell asked "close with unsaved edits?" and the page owns the
+     question: three honest answers where a native two-button dialog offers
+     two. Null while nobody is closing. */
+  const [closeAsk, setCloseAsk] = useState(false)
   const [levels, setLevels] = useState<Record<number, number>>({})
   /* Channels groups, kept apart from the console's faders on purpose: a group
      and a widget can both be number 3 and have nothing to do with each other. */
@@ -155,6 +161,55 @@ export function App() {
     return () => clearTimeout(timer)
   }, [connection])
 
+  /* The shell's hand-offs. Both arrive as window events so the SAME page code
+     runs whether a path came from a native dialog, a file dropped on the
+     window, or a second launch in a terminal -- and so a browser, which never
+     receives them, needs no other code path removed or faked. */
+  useEffect(() => {
+    /* Pull, don't catch: the shell PARKS the path and pings, and this pulls
+       it -- on the ping, and once on mount, which is what makes a request
+       that arrived while the splash was still up (or before React mounted)
+       impossible to lose. The pull consumes, so mount+ping never double-open. */
+    const claim = () => {
+      takePendingOpen()
+        .then((path) => {
+          if (path === null) return
+          if (
+            dirty &&
+            !window.confirm('Hay cambios sin guardar que se perderán. ¿Abrir igualmente?')
+          )
+            return
+          return api.openProjectPath(path)
+        })
+        .catch((e: unknown) => setToast(e instanceof Error ? e.message : String(e)))
+    }
+    const onCloseRequest = () => setCloseAsk(true)
+
+    claim()
+    window.addEventListener('orchid-open-ping', claim)
+    window.addEventListener('orchid-close-request', onCloseRequest)
+    return () => {
+      window.removeEventListener('orchid-open-ping', claim)
+      window.removeEventListener('orchid-close-request', onCloseRequest)
+    }
+  }, [dirty])
+
+  /* Closing a tab with unsaved edits gets the browser's own "are you sure".
+     Only while dirty: registering it permanently would nag on every close. */
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (event: BeforeUnloadEvent) => {
+      /* Without a user gesture the browser refuses the panel anyway and logs
+         a warning about the attempt -- so asking is pure noise exactly when
+         nobody is there to answer. The suite's zero-console-errors net is
+         what caught this. */
+      if (navigator.userActivation?.hasBeenActive !== true) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+
   /* A toast is a moment, not a state: it clears itself so the next problem is
      legible, and touching nothing else. */
   useEffect(() => {
@@ -183,6 +238,15 @@ export function App() {
       onAudioTriggers: (id, state) => setAudio((current) => ({ ...current, [id]: state })),
       onBlackout: setBlackout,
       onError: setToast,
+      onProject: (isDirty) => {
+        setDirty(isDirty)
+        /* The identity (name, autosave) re-reads cheaply; the flag is what
+           needs to be instant. */
+        api
+          .project()
+          .then(setProject)
+          .catch(() => undefined)
+      },
       /* Somebody else edited the show. Re-read what they touched rather than
          patching a local copy from the message: the daemon decides what a
          change means, and two clients guessing at it is how they drift. */
@@ -230,7 +294,10 @@ export function App() {
 
     api
       .project()
-      .then(setProject)
+      .then((state) => {
+        setProject(state)
+        setDirty(state.modified)
+      })
       .catch(() => setProject(null))
 
     api
@@ -670,10 +737,14 @@ export function App() {
             permanent place. The name is the show, not the product: an operator
             with three shows on one daemon needs to know which one is up. */}
           <div className="showbar-id">
-            <strong>{project?.name.replace(/\.qxw$/i, '') ?? 'OrchidLights'}</strong>
+            <ProjectMenu
+              name={project?.name.replace(/\.qxw$/i, '') || 'OrchidLights'}
+              dirty={dirty}
+              onError={setToast}
+            />
             <span>
               {fixtures.length} fixtures
-              {project?.modified ? ' · sin guardar' : ''}
+              {dirty ? ' · sin guardar' : ''}
             </span>
           </div>
 
@@ -761,6 +832,75 @@ export function App() {
           <p className="toast" role="alert">
             {toast}
           </p>
+        )}
+
+        {/* A crash left edits newer than the file. Offered, never auto-loaded:
+            whether the last thirty seconds beat the file is the operator's
+            call, and "Seguir con el archivo" leaves the shadow alone (the
+            next real save clears it). */}
+        {project?.autosave && (
+          <div className="notice">
+            <span>
+              Hay una copia de recuperación más nueva que el proyecto (guardada{' '}
+              {new Date(project.autosave.savedAt).toLocaleTimeString()}).
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                api.recoverAutosave().then(
+                  () => api.project().then(setProject, () => undefined),
+                  (e: unknown) => setToast(e instanceof Error ? e.message : String(e)),
+                )
+              }
+            >
+              Recuperar
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setProject((current) => {
+                  if (current === null) return current
+                  // exactOptionalPropertyTypes: absent, not undefined.
+                  const { autosave: _dismissed, ...rest } = current
+                  return rest
+                })
+              }
+            >
+              Seguir con el archivo
+            </button>
+          </div>
+        )}
+
+        {/* Closing the desktop window over unsaved edits. Guardar y salir is
+            first because it is almost always the answer; Cancelar leaves
+            everything exactly as it was. */}
+        {closeAsk && (
+          <dialog className="gate" open aria-label="Cerrar con cambios sin guardar">
+            <div className="gate-card">
+              <h2>Hay cambios sin guardar</h2>
+              <p>¿Guardar el proyecto antes de salir?</p>
+              <button
+                type="button"
+                onClick={() =>
+                  api.saveProject().then(
+                    () => resolveClose(),
+                    (e: unknown) => {
+                      setCloseAsk(false)
+                      setToast(e instanceof Error ? e.message : String(e))
+                    },
+                  )
+                }
+              >
+                Guardar y salir
+              </button>
+              <button type="button" onClick={() => resolveClose()}>
+                Salir sin guardar
+              </button>
+              <button type="button" onClick={() => setCloseAsk(false)}>
+                Cancelar
+              </button>
+            </div>
+          </dialog>
         )}
 
         {/* Full-screen on purpose: nothing behind it works without the token,
