@@ -58,6 +58,9 @@ cmake --install "$BUILD" > /dev/null
 
 rm -rf "$OUT"
 mkdir -p "$OUT/bin" "$OUT/qtplugins"
+# The placeholder that keeps tauri-build satisfied on machines that have not
+# staged a sidecar (CI lint, a fresh checkout); harmless in the bundle.
+touch "$OUT/.gitkeep"
 
 cp "$STAGE/usr/bin/orchidlightsd" "$OUT/bin/"
 cp -r "$STAGE/usr/lib" "$OUT/lib"
