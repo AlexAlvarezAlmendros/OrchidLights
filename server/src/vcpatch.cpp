@@ -598,6 +598,33 @@ namespace
         node.setAttribute(QStringLiteral("Universe"), QString::number(universe.toInt()));
         node.setAttribute(QStringLiteral("Channel"), QString::number(channel.toInt()));
 
+        /* Custom feedback values: what the bound control's LED gets when the
+           widget turns off (lower) and on (upper). Present sets, null removes
+           (back to the plain 0/255), absent leaves whatever the file has. */
+        const auto feedbackValue = [&input, &node](const QString &jsonKey,
+                                                   const QString &attribute) -> Result {
+            if (input.contains(jsonKey) == false)
+                return Result::success();
+            const QJsonValue value = input.value(jsonKey);
+            if (value.isNull())
+            {
+                node.removeAttribute(attribute);
+                return Result::success();
+            }
+            const int number = value.toInt(-1);
+            if (number < 0 || number > 255)
+                return Result::failure(
+                    QStringLiteral("\"%1\" is 0..255, or null for the default").arg(jsonKey));
+            node.setAttribute(attribute, QString::number(number));
+            return Result::success();
+        };
+        Result fed = feedbackValue(QStringLiteral("lower"), QStringLiteral("LowerValue"));
+        if (fed.ok == false)
+            return fed;
+        fed = feedbackValue(QStringLiteral("upper"), QStringLiteral("UpperValue"));
+        if (fed.ok == false)
+            return fed;
+
         return Result::success();
     }
 
@@ -689,6 +716,24 @@ namespace
             const Result result = setInput(widget, patch.value(QStringLiteral("input")));
             if (result.ok == false)
                 return result;
+        }
+
+        /* The keyboard shortcut: QKeySequence text ("Ctrl+F1"). null or ""
+           unbinds -- removed, not blanked, because QLC+ reads an empty <Key>
+           as a bound empty sequence. */
+        if (patch.contains(QStringLiteral("key")))
+        {
+            const QJsonValue value = patch.value(QStringLiteral("key"));
+            if (value.isNull() || value.toString().isEmpty())
+                removeChildren(widget, QStringLiteral("Key"));
+            else if (value.isString())
+            {
+                XmlNode &node = widget.childOrCreate(QStringLiteral("Key"));
+                node.text = value.toString();
+            }
+            else
+                return Result::failure(
+                    QStringLiteral("\"key\" is a key sequence string, or null"));
         }
 
         /* What the widget does, as opposed to where it sits. Each of these
@@ -1025,6 +1070,23 @@ VcPatch::GrandMasterSettings VcPatch::readGrandMaster(const QStringList &section
                 property.attribute(QStringLiteral("ValueMode"), settings.valueMode);
             if (property.hasAttribute(QStringLiteral("Visible")))
                 settings.visible = property.attribute(QStringLiteral("Visible")) != QStringLiteral("0");
+
+            for (const XmlNode &input : property.children)
+            {
+                if (input.name != QStringLiteral("Input"))
+                    continue;
+                bool universeOk = false, channelOk = false;
+                const uint universe =
+                    input.attribute(QStringLiteral("Universe")).toUInt(&universeOk);
+                const uint channel =
+                    input.attribute(QStringLiteral("Channel")).toUInt(&channelOk);
+                if (universeOk && channelOk)
+                {
+                    settings.hasInput = true;
+                    settings.inputUniverse = quint32(universe);
+                    settings.inputChannel = quint32(channel);
+                }
+            }
         }
     }
 
@@ -1084,6 +1146,92 @@ VcPatch::Result VcPatch::writeGrandMaster(QStringList &sections,
     master->setAttribute(QStringLiteral("ValueMode"), settings.valueMode);
     master->setAttribute(QStringLiteral("Visible"),
                          settings.visible ? QStringLiteral("1") : QStringLiteral("0"));
+
+    sections[index] = XmlTree::toXml(console);
+    return Result::success();
+}
+
+VcPatch::Result VcPatch::writeGrandMasterInput(QStringList &sections, bool bind,
+                                               quint32 universe, quint32 channel)
+{
+    int index = -1;
+    XmlNode console;
+
+    const Result opened = openConsole(sections, index, console);
+    if (opened.ok == false)
+        return opened;
+
+    XmlNode *properties = nullptr;
+    for (XmlNode &child : console.children)
+    {
+        if (child.name == QStringLiteral("Properties"))
+        {
+            properties = &child;
+            break;
+        }
+    }
+
+    if (properties == nullptr)
+    {
+        /* Unbinding what a file without <Properties> never bound is done. */
+        if (bind == false)
+            return Result::success();
+        XmlNode created;
+        created.name = QStringLiteral("Properties");
+        console.children.append(created);
+        properties = &console.children.last();
+    }
+
+    XmlNode *master = nullptr;
+    for (XmlNode &property : properties->children)
+    {
+        if (property.name == QStringLiteral("GrandMaster"))
+        {
+            master = &property;
+            break;
+        }
+    }
+    if (master == nullptr)
+    {
+        if (bind == false)
+            return Result::success();
+        XmlNode created;
+        created.name = QStringLiteral("GrandMaster");
+        properties->children.append(created);
+        master = &properties->children.last();
+    }
+
+    if (bind == false)
+    {
+        /* Removed, not blanked -- an <Input> with no attributes reads back as
+           universe 0, channel 0: a binding to something real. */
+        for (int i = master->children.count() - 1; i >= 0; i--)
+        {
+            if (master->children.at(i).name == QStringLiteral("Input"))
+                master->children.removeAt(i);
+        }
+    }
+    else
+    {
+        XmlNode *input = nullptr;
+        for (XmlNode &child : master->children)
+        {
+            if (child.name == QStringLiteral("Input"))
+            {
+                input = &child;
+                break;
+            }
+        }
+        if (input == nullptr)
+        {
+            XmlNode created;
+            created.name = QStringLiteral("Input");
+            master->children.append(created);
+            input = &master->children.last();
+        }
+        input->setAttribute(QStringLiteral("Universe"), QString::number(universe));
+        input->setAttribute(QStringLiteral("Channel"), QString::number(channel));
+    }
 
     sections[index] = XmlTree::toXml(console);
     return Result::success();

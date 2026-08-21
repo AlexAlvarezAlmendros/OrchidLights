@@ -130,6 +130,13 @@ namespace VcPatch
         QString channelMode = QStringLiteral("Intensity"); /**< "Intensity" | "All" */
         QString valueMode = QStringLiteral("Reduce");      /**< "Reduce" | "Limit" */
         bool visible = true;
+
+        /** The external control bound to the Grand Master, read from the
+         *  <Input> child. Read for the router and reported; written only by
+         *  writeGrandMasterInput, never as a side effect of the modes. */
+        bool hasInput = false;
+        quint32 inputUniverse = 0;
+        quint32 inputChannel = 0;
     };
 
     GrandMasterSettings readGrandMaster(const QStringList &sections);
@@ -141,6 +148,15 @@ namespace VcPatch
      * mode) stay exactly as they are.
      */
     Result writeGrandMaster(QStringList &sections, const GrandMasterSettings &settings);
+
+    /**
+     * Bind (or, with bind = false, unbind) the external control that moves
+     * the Grand Master: the <Input> child of <Properties><GrandMaster>.
+     * Separate from writeGrandMaster on purpose, so changing the modes can
+     * never quietly rewrite a binding.
+     */
+    Result writeGrandMasterInput(QStringList &sections, bool bind, quint32 universe,
+                                 quint32 channel);
 }
 
 #endif // VCPATCH_H

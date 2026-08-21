@@ -165,8 +165,27 @@ namespace
                     widget.hasInput = true;
                     widget.inputUniverse = quint32(universe);
                     widget.inputChannel = quint32(channel);
+
+                    /* Custom feedback: what to send back to the control when
+                       the widget turns off (Lower) and on (Upper) -- the MIDI
+                       LED's two states. Absent means the plain 0/255. */
+                    bool ok = false;
+                    const uint lower =
+                        attributes.value(QStringLiteral("LowerValue")).toUInt(&ok);
+                    if (ok)
+                        widget.feedbackLower = uchar(lower);
+                    const uint upper =
+                        attributes.value(QStringLiteral("UpperValue")).toUInt(&ok);
+                    if (ok)
+                        widget.feedbackUpper = uchar(upper);
                 }
                 reader.skipCurrentElement();
+            }
+            else if (name == QStringLiteral("Key"))
+            {
+                /* The keyboard shortcut, as QKeySequence writes it
+                   ("Ctrl+F1"). An empty element means none was bound. */
+                widget.key = reader.readElementText().trimmed();
             }
             else if (name == QStringLiteral("Function"))
             {

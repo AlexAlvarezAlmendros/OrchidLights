@@ -36,6 +36,7 @@
 #include "virtualconsole.h"
 #include "docwriter.h"
 #include "levelsource.h"
+#include "inputrouter.h"
 #include "simpledesksource.h"
 
 #include "qlcfile.h"
@@ -210,6 +211,11 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
        widget is switched on. */
     m_triggers = new AudioTriggers(m_doc, m_levels, this);
 
+    /* External input made to act: the bindings preserved in the console XML
+       become a routing table, rebuilt on every console edit and project load
+       (its constructor connects itself to those signals). */
+    m_router = new InputRouter(this, this);
+
     m_doc->masterTimer()->start();
     m_running = true;
 
@@ -250,8 +256,34 @@ EngineHost::GrandMasterState EngineHost::grandMaster() const
     state.value = map->grandMasterValue();
     state.channelMode = GrandMaster::channelModeToString(map->grandMasterChannelMode());
     state.valueMode = GrandMaster::valueModeToString(map->grandMasterValueMode());
-    state.visible = VcPatch::readGrandMaster(m_preserved.sections).visible;
+    const VcPatch::GrandMasterSettings settings =
+        VcPatch::readGrandMaster(m_preserved.sections);
+    state.visible = settings.visible;
+    state.hasInput = settings.hasInput;
+    state.inputUniverse = settings.inputUniverse;
+    state.inputChannel = settings.inputChannel;
     return state;
+}
+
+bool EngineHost::setGrandMasterInput(bool bind, quint32 universe, quint32 channel,
+                                     QString &errorMessage)
+{
+    /* Like every persisted console change: remembered first, so the binding
+       joins the console's undo history like a widget edit would. */
+    rememberConsole();
+
+    const VcPatch::Result written =
+        VcPatch::writeGrandMasterInput(m_preserved.sections, bind, universe, channel);
+    if (written.ok == false)
+    {
+        errorMessage = written.error;
+        return false;
+    }
+
+    m_doc->setModified();
+    emit consoleChanged();
+    emit grandMasterChanged();
+    return true;
 }
 
 bool EngineHost::setGrandMaster(int value, const QString &channelMode,
@@ -1173,6 +1205,24 @@ VcPatch::Result EngineHost::addWidget(const QString &type, const QString &parent
         return checked;
 
     rememberConsole();
+
+    /* A project born in this daemon has no <VirtualConsole> section until
+       someone gives it a widget -- QLC+ always writes one, so a console is
+       scaffolded here rather than telling the operator their brand-new
+       project cannot hold a button. Same undo step as the widget itself. */
+    if (VcPatch::sectionIndex(m_preserved.sections) < 0)
+    {
+        m_preserved.sections.append(QStringLiteral(
+            "<VirtualConsole>\n <Frame Caption=\"\">\n"
+            "  <Appearance>\n   <FrameStyle>None</FrameStyle>\n"
+            "   <ForegroundColor>Default</ForegroundColor>\n"
+            "   <BackgroundColor>Default</BackgroundColor>\n"
+            "   <BackgroundImage>None</BackgroundImage>\n"
+            "   <Font>Default</Font>\n  </Appearance>\n"
+            " </Frame>\n <Properties>\n"
+            "  <Size Width=\"1920\" Height=\"1080\"/>\n"
+            " </Properties>\n</VirtualConsole>"));
+    }
 
     const VcPatch::Result result =
         VcPatch::addWidget(m_preserved.sections, type, parentId, properties, newId);

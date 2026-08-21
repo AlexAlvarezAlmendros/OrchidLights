@@ -13,7 +13,9 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const url = process.argv[2]
 const shots = process.argv[3]
@@ -28,6 +30,12 @@ function check(name, ok, detail) {
   if (!ok) failures.push(name)
 }
 
+/* A fresh profile per run. Without one, headless Chrome keeps a default
+   profile across runs and the app's service worker keeps serving whatever
+   bundle it cached last time -- a broken build stays broken for every run
+   after it, and a fixed one looks broken too. Found the hard way. */
+const profile = mkdtempSync(join(tmpdir(), 'orchid-ui-'))
+
 const chrome = spawn(
   process.env.CHROME ?? 'google-chrome',
   [
@@ -35,6 +43,7 @@ const chrome = spawn(
     '--disable-gpu',
     '--no-sandbox',
     '--no-first-run',
+    `--user-data-dir=${profile}`,
     `--remote-debugging-port=${port}`,
     '--window-size=1280,900',
     url,
@@ -46,7 +55,12 @@ async function debuggerUrl() {
   for (let i = 0; i < 75; i++) {
     try {
       const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json()
-      const page = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl)
+      /* OUR page, not just any page: a stale headless Chrome squatting on the
+         debug port serves its own about:blank, and a suite that connects to it
+         fails every check against an app that is running fine. */
+      const page = targets.find(
+        (t) => t.type === 'page' && t.webSocketDebuggerUrl && t.url.startsWith(url),
+      )
       if (page) return page.webSocketDebuggerUrl
     } catch {
       // Chrome is still starting; the port refuses connections until it is not.
@@ -2097,6 +2111,211 @@ try {
   })()`)
   check('the dump freezes exactly what is held', dump === 'ok' || dump === 'none', dump)
 
+  /* External input, through the screen: the Patch view's Entrada/Feedback
+     selects must actually patch, the editor's Aprender must bind to the next
+     control that moves, and a captured key must fire the widget from the
+     keyboard. The Loopback plugin closes the wire, exactly as in
+     input-smoke.sh -- when the daemon has no plugins, everything here says so
+     and steps aside. */
+  const patchIn = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const io = await (await fetch('/api/v1/io')).json()
+    if (!io.inputPlugins.some(p => p.name === 'Loopback')) return 'none'
+
+    ;[...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === 'Patch')?.click()
+    await wait(1000)
+
+    let card = [...document.querySelectorAll('.card')]
+      .find(c => c.querySelector('.chip')?.textContent === 'U2')
+    if (!card) {
+      /* One-universe projects grow a second one through the same button the
+         operator would use. Remembered, so the cleanup can take it back. */
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === '+ Añadir universo')?.click()
+      await wait(1000)
+      card = [...document.querySelectorAll('.card')]
+        .find(c => c.querySelector('.chip')?.textContent === 'U2')
+      if (!card) return 'adding a universe grew no U2 card'
+      window.__orchidF9AddedU2 = true
+    }
+    const selectOf = (label) => [...card.querySelectorAll('label.field')]
+      .find(l => l.querySelector('span')?.textContent === label)?.querySelector('select')
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    const pick = async (label) => {
+      const select = selectOf(label)
+      if (!select) return label + ' select missing'
+      const option = [...select.options].find(o => o.textContent.includes('Loopback'))
+      if (!option) return label + ' offers no Loopback'
+      setter.call(select, option.value)
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(800)
+      return 'ok'
+    }
+
+    let step = await pick('Salida')
+    if (step !== 'ok') return step
+    step = await pick('Entrada')
+    if (step !== 'ok') return step
+
+    /* The feedback select only exists once an input is patched: a feedback
+       line with no input is a promise to nobody. */
+    if (!selectOf('Feedback')) return 'no Feedback select after patching the input'
+    step = await pick('Feedback')
+    if (step !== 'ok') return step
+
+    const u2 = (await (await fetch('/api/v1/universes')).json()).find(u => u.id === 2)
+    if (u2?.input?.plugin !== 'Loopback' || u2?.feedback?.plugin !== 'Loopback') {
+      return 'the screen patched but the daemon disagrees: ' + JSON.stringify({ input: u2?.input, feedback: u2?.feedback })
+    }
+    return 'ok'
+  })()`)
+  check('the Patch view patches input and feedback', patchIn === 'ok' || patchIn === 'none', patchIn)
+
+  let learnedWidget = 'none'
+  if (patchIn === 'ok') {
+    /* Aprender: the binding is learned by moving the control, not typed. */
+    const learned = await evaluate(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Consola')?.click()
+      await wait(900)
+
+      const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+
+      /* A button of our own, over any function that still runs -- created
+         and later deleted whole, the same add-and-remove the suite already
+         proves leaves the console byte-identical. Hunting an existing button
+         broke on the chapter that deletes a function on purpose. */
+      const fn = (await (await fetch('/api/v1/functions')).json())
+        .find(f => f.type === 'Scene' || f.type === 'Chaser')
+      if (!fn) return 'none'
+      const made = await (await fetch('/api/v1/vc/widgets', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'button', caption: 'PulsadorF9', functionId: fn.id }),
+      })).json()
+      if (made.id === undefined) return 'could not create the button: ' + JSON.stringify(made)
+      const target = { id: Number(made.id), functionId: fn.id, caption: 'PulsadorF9' }
+      await wait(900)
+
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Editar'))?.click()
+      await wait(700)
+
+      /* Edit mode decorates every widget with its type label, so the text
+         reads "PulsadorF9button" -- matched by its caption prefix. */
+      const drawn = [...document.querySelectorAll('.widget.button')]
+        .find(w => w.textContent.trim().startsWith(target.caption))
+      if (!drawn) return 'the created button is not on screen'
+      drawn.click()
+      await wait(900)
+
+      const panel = document.querySelector('.editor')
+      if (!panel) return 'the editor never opened'
+      const external = panel.querySelector('details.external-input')
+      if (!external) return 'no external input panel'
+      external.open = true
+      await wait(200)
+
+      ;[...external.querySelectorAll('button')]
+        .find(b => b.textContent.startsWith('Aprender'))?.click()
+      await wait(300)
+
+      /* Move the control: a desk grip on the looped universe IS the wing. */
+      await fetch('/api/v1/simpledesk/2/channels', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: { '1': 255 } }),
+      })
+      await wait(1400)
+
+      const after = walk(await (await fetch('/api/v1/vc')).json())
+        .find(w => w.id === target.id)
+      if (after?.input?.universe !== 1 || after?.input?.channel !== 0) {
+        return 'the binding never landed: ' + JSON.stringify(after?.input)
+      }
+
+      /* And the key, captured rather than typed. */
+      ;[...panel.querySelectorAll('button')]
+        .find(b => b.textContent.startsWith('Capturar'))?.click()
+      await wait(200)
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F6' }))
+      await wait(1200)
+      const keyed = walk(await (await fetch('/api/v1/vc')).json())
+        .find(w => w.id === target.id)
+      if (keyed?.key !== 'F6') return 'the key never landed: ' + JSON.stringify(keyed?.key)
+
+      /* Let the wire go BEFORE leaving: a held grip is a held press. */
+      await fetch('/api/v1/simpledesk/2', { method: 'DELETE' })
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+      await wait(700)
+      return 'ok:' + target.id + ':' + target.functionId
+    })()`)
+    learnedWidget = learned
+    check('Aprender binds and Capturar keys, into the file', learned.startsWith('ok:') || learned === 'none', learned)
+  }
+
+  if (learnedWidget.startsWith('ok:')) {
+    const functionId = Number(learnedWidget.split(':')[2])
+    /* The captured key fires the widget from run mode -- same path as a tap. */
+    const keyFires = await evaluate(`(async () => {
+      const wait = (ms) => new Promise(r => setTimeout(r, ms))
+      const runs = async () => (await (await fetch('/api/v1/functions')).json())
+        .find(f => f.id === ${functionId})?.running === true
+
+      const pressed = new KeyboardEvent('keydown', { key: 'F6', cancelable: true })
+      window.dispatchEvent(pressed)
+      await wait(1200)
+      if (!(await runs())) {
+        /* Once more before declaring it dead: a keyup between chapters can
+           leave edge state mid-air. */
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: 'F6' }))
+        await wait(300)
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F6' }))
+        await wait(1500)
+      }
+      if (!(await runs())) {
+        const walk = (w) => [w, ...(w.children ?? []).flatMap(walk)]
+        const widget = walk(await (await fetch('/api/v1/vc')).json())
+          .find(w => w.id === ${Number(learnedWidget.split(':')[1])})
+        return 'the key pressed nothing: ' + JSON.stringify({
+          key: widget?.key,
+          action: widget?.action,
+          matched: pressed.defaultPrevented,
+        })
+      }
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'F6' }))
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F6' }))
+      await wait(1200)
+      if (await runs()) return 'the second press did not toggle it off'
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'F6' }))
+
+      /* The button leaves whole, bindings and all -- the add-and-remove the
+         round-trip guard already proves is byte-clean. */
+      await fetch('/api/v1/vc/widgets/${Number(learnedWidget.split(':')[1])}', { method: 'DELETE' })
+      await wait(700)
+      const walkAll = (w) => [w, ...(w.children ?? []).flatMap(walkAll)]
+      const leftover = walkAll(await (await fetch('/api/v1/vc')).json())
+        .find(w => w.id === ${Number(learnedWidget.split(':')[1])})
+      if (leftover !== undefined) return 'the button did not leave'
+
+      /* And the loop itself -- or the whole universe, where the chapter
+         grew one to work in. */
+      if (window.__orchidF9AddedU2 === true) {
+        await fetch('/api/v1/universes/2', { method: 'DELETE' })
+      } else {
+        await fetch('/api/v1/universes/2', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ output: { plugin: '', line: '' }, input: { plugin: '', line: '' }, feedback: { plugin: '', line: '' } }),
+        })
+      }
+      return 'ok'
+    })()`)
+    check('the captured key fires the widget at runtime', keyFires === 'ok', keyFires)
+  }
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches
@@ -2160,7 +2379,16 @@ try {
 } catch (error) {
   check('the run completed', false, error.message)
 } finally {
+  /* Dead before the sweep: Chrome flushes its profile on exit, and removing
+     the directory under a live browser loses the race. */
+  const gone = new Promise((resolve) => chrome.once('exit', resolve))
   chrome.kill()
+  await gone
+  try {
+    rmSync(profile, { recursive: true, force: true })
+  } catch {
+    // A straggler file is a leak of bytes in /tmp, not a failed suite.
+  }
 }
 
 if (failures.length > 0) {

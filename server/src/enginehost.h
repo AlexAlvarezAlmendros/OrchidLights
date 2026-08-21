@@ -30,6 +30,7 @@
 #include "vcpatch.h"
 
 class Doc;
+class InputRouter;
 
 /**
  * Owns the QLC+ engine and everything it needs to actually run: the caches, the
@@ -88,12 +89,22 @@ public:
         QString channelMode; /**< "Intensity" | "All" */
         QString valueMode;   /**< "Reduce" | "Limit" */
         bool visible = true;
+
+        /** The external control bound to the big fader, if any. */
+        bool hasInput = false;
+        quint32 inputUniverse = 0;
+        quint32 inputChannel = 0;
     };
     GrandMasterState grandMaster() const;
     /** Apply and persist. Empty strings leave a mode as it is; value < 0
      *  leaves the level alone. Returns false on an unknown mode string. */
     bool setGrandMaster(int value, const QString &channelMode, const QString &valueMode,
                         int visible, QString &errorMessage);
+
+    /** Bind (or, with bind = false, unbind) the external control that moves
+     *  the Grand Master. Persists into the console's <Properties>. */
+    bool setGrandMasterInput(bool bind, quint32 universe, quint32 channel,
+                             QString &errorMessage);
 
     /** Stop every running function; with fadeMs > 0, fade them out first. */
     void stopEverything(int fadeMs);
@@ -254,6 +265,9 @@ public:
 
     /** Drives the console from what the microphone hears. */
     AudioTriggers *audio() const { return m_triggers; }
+
+    /** The external-input routing table, for whoever needs to ask it. */
+    InputRouter *inputRouter() const { return m_router; }
 
     /** Fixture manufacturers in the library. */
     int manufacturerCount() const { return m_manufacturers; }
@@ -428,6 +442,7 @@ private:
     class QTimer *m_autosave = nullptr;
     SeenInput m_lastInput;
     AudioTriggers *m_triggers = nullptr;
+    InputRouter *m_router = nullptr;
     bool m_running = false;
 
     int m_manufacturers = 0;

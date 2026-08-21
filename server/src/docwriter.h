@@ -71,6 +71,11 @@ namespace DocWriter
     Result setOutputPatch(Doc *doc, int index, const QString &pluginName,
                           const QString &outputName);
 
+    /** The feedback line of a universe: where the router's LED echoes go.
+     *  An empty plugin name clears it. */
+    Result setFeedbackPatch(Doc *doc, int index, const QString &pluginName,
+                            const QString &outputName);
+
     Result setInputPatch(Doc *doc, int index, const QString &pluginName,
                          const QString &inputName, const QString &profileName);
 

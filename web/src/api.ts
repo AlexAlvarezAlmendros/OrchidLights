@@ -206,6 +206,8 @@ export interface UniverseState {
   name: string
   outputs: { plugin: string; output: string }[]
   input?: { plugin: string; line: string; profile: string }
+  /** Where this universe's feedback goes out (motorized faders, LEDs). */
+  feedback?: { plugin: string; line: string }
   passthrough: boolean
   /** False means this universe reaches nothing, however healthy the rest of
    *  the project looks. */
@@ -253,8 +255,16 @@ export interface WidgetPatch {
   foreground?: string | null
   font?: string | null
   frameStyle?: string
-  /** null unbinds the external control. */
-  input?: { universe: number; channel: number } | null
+  /** null unbinds the external control. lower/upper are the custom feedback
+   *  values (the control's LED in each state); null puts one back to 0/255. */
+  input?: {
+    universe: number
+    channel: number
+    lower?: number | null
+    upper?: number | null
+  } | null
+  /** Keyboard shortcut as QKeySequence text ("Ctrl+F1"); null unbinds. */
+  key?: string | null
 }
 
 /** The show the daemon has open. */
@@ -284,6 +294,8 @@ export interface GrandMasterState {
   /** "Reduce" | "Limit" */
   valueMode: string
   visible: boolean
+  /** The external control bound to the big fader; null when none. */
+  input?: { universe: number; channel: number } | null
 }
 
 export interface Status {
@@ -548,6 +560,7 @@ export const api = {
       passthrough?: boolean
       output?: { plugin: string; line: string }
       input?: { plugin: string; line: string; profile?: string }
+      feedback?: { plugin: string; line: string }
     },
   ) =>
     json<unknown>(`/api/v1/universes/${id}`, {

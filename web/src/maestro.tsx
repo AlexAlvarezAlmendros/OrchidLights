@@ -27,14 +27,18 @@ const FADES = [
 
 export function GrandMasterDock({
   state,
+  learning,
   onState,
   onError,
 }: {
   state: GrandMasterState | null
+  /** The last external control that moved, for learning the GM's binding. */
+  learning: { universe: number; channel: number; value: number } | null
   onState: (state: GrandMasterState) => void
   onError: (message: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [listening, setListening] = useState(false)
   const panel = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -47,12 +51,23 @@ export function GrandMasterDock({
     return () => window.removeEventListener('pointerdown', away)
   }, [open])
 
-  if (state === null || state.visible === false) return null
-
   const apply = (patch: Partial<GrandMasterState>) =>
     api
       .setGrandMaster(patch)
       .then(onState, (e: unknown) => onError(e instanceof Error ? e.message : String(e)))
+
+  /* Bind to whatever arrives while listening -- the operator's hand is on the
+     control, exactly like a widget's Aprender. BEFORE the early return below:
+     every hook must run on every render, including the renders where the dock
+     is hidden. */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: apply is stable per render and listing it would re-arm on every state echo
+  useEffect(() => {
+    if (!listening || learning === null) return
+    setListening(false)
+    apply({ input: { universe: learning.universe, channel: learning.channel } })
+  }, [listening, learning])
+
+  if (state === null || state.visible === false) return null
 
   const percent = Math.round((state.value / 255) * 100)
 
@@ -107,6 +122,35 @@ export function GrandMasterDock({
                 <option value="All">Todos</option>
               </select>
             </label>
+          </div>
+
+          {/* The big fader on a real fader: the GM is a routing destination
+              like any button, learned the same way -- move the control. */}
+          <div className="gm-input">
+            <span className="field-head">
+              Control externo
+              <span>
+                {state.input
+                  ? `U${state.input.universe} · canal ${state.input.channel}`
+                  : 'sin asignar'}
+              </span>
+            </span>
+            <div className="gm-input-buttons">
+              <button
+                type="button"
+                aria-pressed={listening}
+                onClick={() => setListening((on) => !on)}
+              >
+                {listening ? 'Esperando… mueve el control' : 'Aprender'}
+              </button>
+              <button
+                type="button"
+                disabled={state.input === null || state.input === undefined}
+                onClick={() => apply({ input: null })}
+              >
+                Quitar
+              </button>
+            </div>
           </div>
         </div>
       )}

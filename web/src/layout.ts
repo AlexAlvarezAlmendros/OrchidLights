@@ -44,7 +44,10 @@ export interface VcWidget {
   frameStyle?: string
   /** The external control bound to this widget. The universe is an *input*
    *  universe, a different numbering from the DMX ones. */
-  input?: { universe: number; channel: number }
+  input?: { universe: number; channel: number; lower?: number; upper?: number }
+
+  /** Keyboard shortcut bound to this widget, QKeySequence text ("Ctrl+F1"). */
+  key?: string
   page?: number
 
   /** Audio triggers: how many bands the widget was built for, and what each

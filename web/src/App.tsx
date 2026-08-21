@@ -34,6 +34,7 @@ import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
 import { resolveClose, takePendingOpen } from './shell'
 import { Slider } from './slider'
+import { keySequenceOf, typingSomewhere } from './teclas'
 import { getToken, setToken } from './token'
 import type { View } from './views'
 import { DumpButton } from './volcado'
@@ -420,6 +421,77 @@ export function App() {
     [blackout, running],
   )
 
+  /* Keyboard bindings, at runtime: a widget whose file names a key fires
+     from that key exactly as it fires from a tap -- the same callbacks, so
+     the same engine path. Quiet while editing (the keyboard belongs to the
+     forms), while typing, and while any dialog holds the screen. */
+  useEffect(() => {
+    if (vc === null || mode !== 'run') return
+
+    const buttonsFor = (sequence: string): VcWidget[] => {
+      const found: VcWidget[] = []
+      const visit = (w: VcWidget) => {
+        if (w.type === 'button' && w.key === sequence) found.push(w)
+        for (const child of w.children ?? []) visit(child)
+      }
+      visit(vc)
+      return found
+    }
+
+    /* Flashes held down, keyed by the BASE key: the modifier may come back up
+       first, and "Ctrl released before F" must not leave a light stuck on. */
+    const held = new Map<string, number[]>()
+    const baseOf = (event: KeyboardEvent) => event.key.toUpperCase()
+
+    const down = (event: KeyboardEvent) => {
+      if (event.repeat || typingSomewhere(event)) return
+      if (document.querySelector('dialog[open]') !== null) return
+      const sequence = keySequenceOf(event)
+      if (sequence === null) return
+      const targets = buttonsFor(sequence)
+      if (targets.length === 0) return
+      event.preventDefault()
+
+      for (const widget of targets) {
+        const action = widget.action ?? 'Toggle'
+        if (action === 'Blackout' || action === 'StopAll') {
+          buttonAction(action)
+        } else if (widget.functionId !== undefined) {
+          if (action === 'Flash') {
+            flash(widget.functionId, true)
+            const list = held.get(baseOf(event)) ?? []
+            list.push(widget.functionId)
+            held.set(baseOf(event), list)
+          } else {
+            toggle(widget.functionId)
+          }
+        }
+      }
+    }
+
+    const up = (event: KeyboardEvent) => {
+      const list = held.get(baseOf(event))
+      if (list === undefined) return
+      held.delete(baseOf(event))
+      for (const id of list) flash(id, false)
+    }
+
+    const letGo = () => {
+      for (const list of held.values()) for (const id of list) flash(id, false)
+      held.clear()
+    }
+
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', letGo)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', letGo)
+      letGo()
+    }
+  }, [vc, mode, toggle, flash, buttonAction])
+
   const setSpeed = useCallback((id: number, milliseconds: number) => {
     setLevels((current) => ({ ...current, [id]: milliseconds }))
     live.current?.setSpeedDial(id, milliseconds)
@@ -790,7 +862,12 @@ export function App() {
             onError={setToast}
             onDone={setToast}
           />
-          <GrandMasterDock state={grandMaster} onState={setGrandMaster} onError={setToast} />
+          <GrandMasterDock
+            state={grandMaster}
+            learning={lastInput}
+            onState={setGrandMaster}
+            onError={setToast}
+          />
 
           <span className="chip" data-state={connection}>
             <span className="dot" />

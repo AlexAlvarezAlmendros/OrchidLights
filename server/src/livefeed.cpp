@@ -30,6 +30,8 @@
 #include <QFileInfo>
 
 #include "livefeed.h"
+
+#include "widgetactions.h"
 #include "simpledesksource.h"
 #include "enginehost.h"
 #include "apiauth.h"
@@ -695,25 +697,14 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             return;
         }
 
+        /* Shared with the input router on purpose: a tap here and a MIDI
+           press there must be the same act, solo frames included -- see
+           WidgetActions. */
         const QString action = message.value("action").toString();
-        if (action == QStringLiteral("start") && function->isRunning() == false)
-        {
-            /* A solo frame's contents are mutually exclusive -- the colour bank
-               where picking red should drop blue. Enforced here rather than in
-               the interface because two clients have to agree about it: if one
-               browser did it and another did not, the frame would only be solo
-               for whoever pressed last. */
-            for (quint32 sibling : m_engine->soloSiblings(function->id()))
-            {
-                Function *other = doc->function(sibling);
-                if (other != nullptr && other->isRunning())
-                    other->stop(FunctionParent::master());
-            }
-
-            function->start(doc->masterTimer(), FunctionParent::master());
-        }
-        else if (action == QStringLiteral("stop") && function->isRunning())
-            function->stop(FunctionParent::master());
+        if (action == QStringLiteral("start"))
+            WidgetActions::startFunction(m_engine, function->id());
+        else if (action == QStringLiteral("stop"))
+            WidgetActions::stopFunction(m_engine, function->id());
 
         /* No reply: the state change arrives as a functions broadcast once the
            engine has actually made it, on its next tick. */

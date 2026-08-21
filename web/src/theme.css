@@ -613,6 +613,26 @@ body {
   gap: 0.6rem;
 }
 
+.gm-input {
+  display: grid;
+  gap: 0.4rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.gm-input .field-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.gm-input-buttons {
+  display: flex;
+  gap: 0.4rem;
+}
+
 /* The panic pair: the button and its little fade menu. */
 .stopall {
   position: relative;
