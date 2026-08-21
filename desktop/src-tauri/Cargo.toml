@@ -18,6 +18,9 @@ tauri-plugin-single-instance = "2"
 # Native open/save dialogs -- the one thing a browser genuinely cannot do.
 # Driven from Rust only; the webview gets no direct dialog permission.
 tauri-plugin-dialog = "2"
+# The panic must work with the window unfocused: mid-show the operator may be
+# in a media player or a browser when everything needs to stop.
+tauri-plugin-global-shortcut = "2"
 # Blocking HTTP is all the shell needs: readiness polls and one shutdown POST.
 # A full async client would be the heaviest dependency in the binary.
 ureq = { version = "2", features = ["json"] }

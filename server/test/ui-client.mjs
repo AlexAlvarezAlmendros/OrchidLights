@@ -1841,6 +1841,76 @@ try {
   })()`)
   check('a refused press is said out loud', surfaced === 'none' || surfaced === 'ok', surfaced)
 
+  /* The Grand Master dock: the badge opens a panel whose fader and modes
+     drive the daemon's one true GM -- verified against the API, because the
+     panel showing 50% while the engine scales by nothing is precisely the
+     lie this desk is organized against. */
+  const gmDock = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const badge = document.querySelector('.gm-badge')
+    if (!badge) return 'no GM badge in the bar'
+    badge.click()
+    await wait(400)
+
+    const slider = document.querySelector('.gm-panel input[type=range]')
+    if (!slider) return 'the panel has no fader'
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+    setter.call(slider, '128')
+    slider.dispatchEvent(new Event('change', { bubbles: true }))
+    await wait(600)
+
+    let state = await (await fetch('/api/v1/grandmaster')).json()
+    if (state.value !== 128) return 'the fader said 128, the engine says ' + state.value
+    if (!badge.textContent.includes('50')) return 'the badge does not show 50%: ' + badge.textContent
+
+    const mode = [...document.querySelectorAll('.gm-panel select')]
+      .find(s => [...s.options].some(o => o.value === 'All'))
+    if (!mode) return 'no channel-mode selector'
+    const optionSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+    optionSetter.call(mode, 'All')
+    mode.dispatchEvent(new Event('change', { bubbles: true }))
+    await wait(600)
+    state = await (await fetch('/api/v1/grandmaster')).json()
+    if (state.channelMode !== 'All') return 'the mode did not reach the engine: ' + state.channelMode
+
+    // Back where it was: the suite's later assertions read post-GM frames.
+    await fetch('/api/v1/grandmaster', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: 255, channelMode: 'Intensity' }),
+    })
+    document.body.click()
+    return 'ok'
+  })()`)
+  check('the grand master dock drives the engine', gmDock === 'ok', gmDock)
+
+  /* STOP ALL: honest at rest (disabled with nothing running) and effective
+     in motion (one press ends everything). */
+  const stopAll = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const stop = document.querySelector('.stopall > .danger')
+    if (!stop) return 'no STOP button'
+    const status = async () => (await (await fetch('/api/v1/status')).json())
+
+    if ((await status()).runningFunctions === 0 && !stop.disabled) {
+      return 'nothing runs, yet STOP invites a press'
+    }
+
+    const list = await (await fetch('/api/v1/functions')).json()
+    const startable = list.find(f => f.type === 'Scene' || f.type === 'Chaser')
+    if (!startable) return 'none'
+
+    await fetch('/api/v1/functions/' + startable.id + '/start', { method: 'POST' })
+    await wait(800)
+    if (stop.disabled) return 'a function runs, yet STOP is disabled'
+
+    stop.click()
+    await wait(900)
+    if ((await status()).runningFunctions !== 0) return 'STOP left something running'
+    return 'ok'
+  })()`)
+  check('STOP ALL is honest at rest and total in motion', stopAll === 'none' || stopAll === 'ok', stopAll)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

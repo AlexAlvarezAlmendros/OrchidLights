@@ -116,6 +116,31 @@ namespace VcPatch
 
     /** The lowest widget id the console is not already using. */
     QString nextFreeId(const XmlNode &console);
+
+    /**
+     * The Grand Master settings the console carries, in QLC+'s own strings.
+     *
+     * They live in <VirtualConsole><Properties><GrandMaster>, a preserved
+     * section this daemon used to carry without reading -- which meant a
+     * project saved with Limit/All ran here as Reduce/Intensity, silently.
+     * Defaults match QLC+'s when the project says nothing.
+     */
+    struct GrandMasterSettings
+    {
+        QString channelMode = QStringLiteral("Intensity"); /**< "Intensity" | "All" */
+        QString valueMode = QStringLiteral("Reduce");      /**< "Reduce" | "Limit" */
+        bool visible = true;
+    };
+
+    GrandMasterSettings readGrandMaster(const QStringList &sections);
+
+    /**
+     * Persist the settings back into <Properties><GrandMaster>, creating
+     * either node if the project never had one. Attributes QLC+ wrote that
+     * this daemon does not model (the external input binding, the slider
+     * mode) stay exactly as they are.
+     */
+    Result writeGrandMaster(QStringList &sections, const GrandMasterSettings &settings);
 }
 
 #endif // VCPATCH_H

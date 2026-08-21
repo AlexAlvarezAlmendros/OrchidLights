@@ -267,6 +267,7 @@ fn boot(
 
                 watch(handle.clone(), sidecar.clone());
                 arm_signals(sidecar.clone(), token.clone());
+                arm_panic_shortcut(handle, sidecar.base_url().to_string(), token.clone());
                 handle.manage(ShellState { sidecar, token });
 
                 let window = handle
@@ -287,6 +288,43 @@ fn boot(
         "{last_error}. El registro está en {}",
         log_path.display()
     ))
+}
+
+/// Ctrl+Shift+Esc stops every running function, window focused or not.
+///
+/// QLC+'s own panic combination. Global because mid-show the operator may be
+/// in a media player when everything needs to stop; the web page binds the
+/// same keys for browsers, where "global" is not a thing a page can have.
+fn arm_panic_shortcut(handle: &tauri::AppHandle, base: String, token: Option<String>) {
+    use tauri_plugin_global_shortcut::{
+        Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    };
+
+    let plugin = tauri_plugin_global_shortcut::Builder::new()
+        .with_handler(move |_app, _shortcut, event| {
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            let mut request = ureq::post(&format!("{base}/api/v1/stop"))
+                .timeout(std::time::Duration::from_secs(2));
+            if let Some(token) = &token {
+                request = request.set("Authorization", &format!("Bearer {token}"));
+            }
+            let _ = request.send_json(serde_json::json!({ "fadeMs": 0 }));
+        })
+        .build();
+
+    if handle.plugin(plugin).is_err() {
+        eprintln!("orchidlights-desktop: sin atajo global de pánico");
+        return;
+    }
+
+    let combo = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Escape);
+    if handle.global_shortcut().register(combo).is_err() {
+        // Wayland without the portal, some sandboxes: the page's own binding
+        // still works while the window is focused. Said, not hidden.
+        eprintln!("orchidlights-desktop: el atajo global de pánico no se pudo registrar");
+    }
 }
 
 /// SIGTERM and SIGINT run the same orderly shutdown as the close button.

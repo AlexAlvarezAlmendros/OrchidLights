@@ -91,6 +91,25 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(m_engine, &EngineHost::consoleChanged, this, &LiveFeed::onConsoleChanged);
     connect(m_engine, &EngineHost::projectReplaced, this, &LiveFeed::onProjectReplaced);
 
+    /* The Grand Master, pushed on every change: two phones and a desktop all
+       show the big fader, and one of them moving it must move the others. */
+    connect(m_engine, &EngineHost::grandMasterChanged, this, [this]() {
+        const EngineHost::GrandMasterState state = m_engine->grandMaster();
+        QJsonObject message;
+        message["type"] = "grandmaster";
+        message["value"] = state.value;
+        message["channelMode"] = state.channelMode;
+        message["valueMode"] = state.valueMode;
+        message["visible"] = state.visible;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+    });
+
     /* Blackout, pushed rather than polled. The button that engages it lives on
        every screen, so every screen has to see it flip -- an operator watching
        a phone that still says "en vivo" while the desk is dark reads that as

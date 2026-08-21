@@ -2456,6 +2456,79 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
+    m_server->route("/api/v1/grandmaster", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const EngineHost::GrandMasterState state = m_engine->grandMaster();
+        QJsonObject body;
+        body["value"] = state.value;
+        body["channelMode"] = state.channelMode;
+        body["valueMode"] = state.valueMode;
+        body["visible"] = state.visible;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/grandmaster", QHttpServerRequest::Method::Put,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+
+        const int value = asked.contains(QStringLiteral("value"))
+            ? asked.value(QStringLiteral("value")).toInt(-1)
+            : -1;
+        if (asked.contains(QStringLiteral("value")) && value < 0)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("value must be 0..255"));
+
+        const int visible = asked.contains(QStringLiteral("visible"))
+            ? (asked.value(QStringLiteral("visible")).toBool() ? 1 : 0)
+            : -1;
+
+        QString errorMessage;
+        if (m_engine->setGrandMaster(value,
+                                     asked.value(QStringLiteral("channelMode")).toString(),
+                                     asked.value(QStringLiteral("valueMode")).toString(),
+                                     visible, errorMessage)
+            == false)
+        {
+            return jsonError(StatusCode::BadRequest, errorMessage);
+        }
+
+        const EngineHost::GrandMasterState state = m_engine->grandMaster();
+        QJsonObject body;
+        body["value"] = state.value;
+        body["channelMode"] = state.channelMode;
+        body["valueMode"] = state.valueMode;
+        body["visible"] = state.visible;
+        return QHttpServerResponse(body);
+    });
+
+    /* Stop is not blackout: it ends every running function -- optionally
+       fading it out over a moment -- and touches nothing else. QLC+ calls
+       this the panic button, and a panic that can only snap to black makes
+       operators hesitate to press it. */
+    m_server->route("/api/v1/stop", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const int fadeMs = asked.value(QStringLiteral("fadeMs")).toInt(0);
+        if (fadeMs < 0 || fadeMs > 60000)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("fadeMs must be 0..60000"));
+
+        m_engine->stopEverything(fadeMs);
+
+        QJsonObject body;
+        body["stopping"] = doc->masterTimer()->runningFunctions();
+        body["fadeMs"] = fadeMs;
+        QHttpServerResponse response(body, StatusCode::Accepted);
+        return response;
+    });
+
     /* Not `denied`: the token is demanded even on loopback, where the rest of
        the API deliberately works without one. Killing the desk is in a
        different class from using it, and the strict check is what keeps

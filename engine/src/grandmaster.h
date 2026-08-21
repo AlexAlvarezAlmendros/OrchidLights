@@ -30,9 +30,9 @@
 
 /** Contains settings for Grand Master
  *
- *  Changing properties in Operate mode is not supported.
- *  If the need arises, Universe::slotGMValueChanged() needs to be fixed (recompute
- *  all channels, for the case when mode is changed from AllChannels to Intensity)
+ *  Properties may change while the engine runs: Universe::slotGMValueChanged()
+ *  recomputes every channel, so a switch from AllChannels to Intensity puts
+ *  the non-intensity channels back instead of leaving them scaled.
  */
 class GrandMaster final : public QObject
 {
