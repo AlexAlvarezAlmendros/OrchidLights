@@ -2316,6 +2316,120 @@ try {
     check('the captured key fires the widget at runtime', keyFires === 'ok', keyFires)
   }
 
+  /* The function organizer and the chaser editor: search that filters,
+     folders that appear, per-step speeds and a shuffle whose result is a
+     permutation the daemon can repeat back. Fixtures of its own, cleaned up
+     whole. */
+  const organizer = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const make = async (body) => (await (await fetch('/api/v1/functions', {
+      method: 'POST', headers: json, body: JSON.stringify(body) })).json()).id
+    const sceneA = await make({ type: 'Scene', name: 'BaseF10A' })
+    const sceneB = await make({ type: 'Scene', name: 'BaseF10B' })
+    const sceneC = await make({ type: 'Scene', name: 'BaseF10C' })
+    const chaser = await make({ type: 'Chaser', name: 'PruebaF10' })
+    for (const fn of [sceneA, sceneB, sceneC]) {
+      await fetch('/api/v1/functions/' + chaser + '/steps', {
+        method: 'POST', headers: json, body: JSON.stringify({ function: fn }) })
+    }
+
+    ;[...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === 'Funciones')?.click()
+    await wait(900)
+
+    const cleanup = async () => {
+      for (const fn of [chaser, sceneA, sceneB, sceneC]) {
+        await fetch('/api/v1/functions/' + fn + '?force=true', { method: 'DELETE' })
+      }
+    }
+
+    try {
+      /* Search narrows the list to what matches. */
+      const search = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      if (!search) return 'no search box'
+      const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setInput.call(search, 'PruebaF10')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+      await wait(500)
+      const rows = [...document.querySelectorAll('.table-row')]
+      if (rows.length !== 1) return rows.length + ' rows for a unique name'
+
+      /* Open the editor. */
+      rows[0].querySelector('button.linkish')?.click()
+      await wait(700)
+      const editor = [...document.querySelectorAll('article.card')]
+        .find(c => c.querySelector('header strong')?.textContent === 'PruebaF10')
+      if (!editor) return 'the editor never opened'
+
+      /* Per-step mode through the select, checked against the daemon. */
+      const modeSelect = [...editor.querySelectorAll('label.field')]
+        .find(l => l.querySelector('span')?.textContent === 'Entrada'
+                && l.querySelector('select'))?.querySelector('select')
+      if (!modeSelect) return 'no fade-in mode select'
+      const setSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setSelect.call(modeSelect, 'perstep')
+      modeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(700)
+      let body = await (await fetch('/api/v1/functions/' + chaser + '/body')).json()
+      if (body.fadeInMode !== 'perstep') return 'the mode never reached the daemon: ' + body.fadeInMode
+
+      /* A per-step fade written through its input. */
+      const stepTime = editor.querySelector('.step-time')
+      if (!stepTime) return 'per-step mode shows no per-step inputs'
+      setInput.call(stepTime, '500')
+      stepTime.dispatchEvent(new Event('input', { bubbles: true }))
+      /* React hears blur as focusout; a bare blur event commits nothing. */
+      stepTime.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      await wait(700)
+      body = await (await fetch('/api/v1/functions/' + chaser + '/body')).json()
+      if (body.steps[0].fadeIn !== 500) {
+        return 'the step fade never landed: ' + JSON.stringify(body.steps[0])
+      }
+
+      /* Shuffle: the same steps in a genuinely different order. Random may
+         deal the identity, so up to five clicks get to disagree with the
+         original -- five identities out of 3! orders is not luck, it is a
+         button that does nothing. */
+      const original = body.steps.map(s => s.function).join(',')
+      let changed = false
+      for (let round = 0; round < 5 && !changed; round++) {
+        ;[...editor.querySelectorAll('button')]
+          .find(b => b.textContent.trim() === 'Barajar')?.click()
+        await wait(700)
+        body = await (await fetch('/api/v1/functions/' + chaser + '/body')).json()
+        const kept = body.steps.map(s => s.function).sort().join(',')
+        if (kept !== [sceneA, sceneB, sceneC].sort().join(',')) {
+          return 'the shuffle lost steps: ' + kept
+        }
+        changed = body.steps.map(s => s.function).join(',') !== original
+      }
+      if (!changed) return 'five shuffles never changed the order'
+
+      /* The folder, and its headline in the list. */
+      const folderInput = [...editor.querySelectorAll('label.field')]
+        .find(l => l.querySelector('span')?.textContent === 'Carpeta')?.querySelector('input')
+      if (!folderInput) return 'no folder field'
+      setInput.call(folderInput, 'CarpetaF10')
+      folderInput.dispatchEvent(new Event('input', { bubbles: true }))
+      folderInput.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      await wait(800)
+      const listed = (await (await fetch('/api/v1/functions')).json())
+        .find(f => f.id === chaser)
+      if (listed.path !== 'CarpetaF10') return 'the folder never landed: ' + listed.path
+      if (![...document.querySelectorAll('.folder-title')]
+        .some(h => h.textContent.includes('CarpetaF10'))) {
+        return 'the folder heading never appeared'
+      }
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the organizer and the chaser editor act for real', organizer === 'ok', organizer)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

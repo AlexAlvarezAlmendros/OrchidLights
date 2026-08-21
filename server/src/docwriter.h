@@ -21,7 +21,10 @@
 #define DOCWRITER_H
 
 #include <QJsonObject>
+#include <QList>
 #include <QString>
+
+#include "scenevalue.h"
 
 class Doc;
 
@@ -180,6 +183,42 @@ namespace DocWriter
      * running function frees an object the MasterTimer is still stepping.
      */
     Result deleteFunction(Doc *doc, quint32 id, bool force);
+
+    /** The folder a function lives in ("Bolo/Sábado"). Empty moves it to the
+     *  root. Pure organization: nothing about the function itself changes. */
+    Result setFunctionPath(Doc *doc, quint32 id, const QString &path);
+
+    /** "time" or "beats" -- whether the speeds mean milliseconds or beats of
+     *  the master tempo. */
+    Result setFunctionTempo(Doc *doc, quint32 id, const QString &tempoType);
+
+    /** A chaser's three speed modes ("common" | "perstep" | "default", the
+     *  last one only for duration). Empty strings leave a mode as it is. */
+    Result setChaserSpeedModes(Doc *doc, quint32 chaserId, const QString &fadeIn,
+                               const QString &fadeOut, const QString &duration);
+
+    /**
+     * Edit one step of a chaser: null pointers leave a field alone. Editing
+     * hold or fadeIn recomputes the stored duration the way the reference
+     * editor does (duration = fadeIn + hold); setting duration recomputes
+     * hold. The note is the step's own name in cue lists.
+     */
+    Result setChaserStep(Doc *doc, quint32 chaserId, int index, const int *fadeIn,
+                         const int *hold, const int *fadeOut, const int *duration,
+                         const QString *note, const quint32 *functionId);
+
+    /** Reorder a chaser's steps to exactly this permutation of 0..n-1. */
+    Result setChaserStepsOrder(Doc *doc, quint32 chaserId, const QList<int> &order);
+
+    /** Clone a function, name suffixed like QLC+ does ("(Copy)"). */
+    Result cloneFunction(Doc *doc, quint32 id, quint32 &newId);
+
+    /** The DMX values one step of a sequence holds. */
+    Result setSequenceStepValues(Doc *doc, quint32 sequenceId, int index,
+                                 const QList<SceneValue> &values);
+
+    /** The function started with the show; id -1 clears it. */
+    Result setStartupFunction(Doc *doc, qint64 id);
 
     /* ---- Function bodies ------------------------------------------------ */
 

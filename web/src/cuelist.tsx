@@ -15,10 +15,15 @@ export interface Step {
   index: number
   function: number
   name: string
+  /** The operator's own name for the step, absent when it just wears its
+   *  function's. */
+  note?: string
   fadeIn: number
   hold: number
   fadeOut: number
   duration: number
+  /** Sequence steps: the DMX this step holds. */
+  values?: { fixture: number; channel: number; value: number }[]
 }
 
 export function CueList({

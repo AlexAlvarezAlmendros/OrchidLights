@@ -2849,3 +2849,62 @@ button.linkish.left {
   border: none;
   background-color: transparent;
 }
+
+/* Function organization: folders, batch bar, step editors. */
+.folder-title {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.batch-bar {
+  align-items: flex-end;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 10px;
+}
+
+.chaser-steps li {
+  gap: 0.4rem;
+}
+
+.step-note {
+  max-width: 8rem;
+}
+
+.step-time {
+  width: 4.6rem;
+}
+
+.sequence-step {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sequence-step-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sequence-values {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.4rem 0 0.2rem 1rem;
+}
+
+.sequence-value {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 1fr 3rem;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.organization {
+  align-items: center;
+}
+
+.organization .usage {
+  flex-basis: 100%;
+}

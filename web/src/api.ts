@@ -17,6 +17,18 @@ export interface FunctionState {
   fadeIn?: number
   fadeOut?: number
   duration?: number
+  /** The folder tree this function lives in, absent at the root. */
+  path?: string
+  runOrder?: string
+  direction?: string
+  tempoType?: string
+}
+
+/** Who uses a function: other functions, console widgets, the autostart. */
+export interface FunctionUsage {
+  functions: { id: number; name: string; type: string }[]
+  widgets: { id?: number; caption: string; type: string }[]
+  startup: boolean
 }
 
 export interface FunctionBody {
@@ -53,6 +65,10 @@ export interface FunctionBody {
 
   scene?: number // Sequence
   sceneName?: string
+  /** Chaser speed modes: "common" | "perstep" (+ "default" for duration). */
+  fadeInMode?: string
+  fadeOutMode?: string
+  durationMode?: string
 
   // Show
   tracks?: ShowTrack[]
@@ -272,6 +288,8 @@ export interface ProjectState {
   name: string
   path: string
   directory: string
+  /** The function the show opens with; -1 when none. */
+  startupFunction?: number
   /** Edited since it was loaded or last saved. Nothing here writes to disk on
    *  its own, so this is the only warning there is. */
   modified: boolean
@@ -361,7 +379,19 @@ export const api = {
     }),
   patchFunction: (
     id: number,
-    patch: { name?: string; fadeIn?: number; fadeOut?: number; duration?: number },
+    patch: {
+      name?: string
+      fadeIn?: number
+      fadeOut?: number
+      duration?: number
+      path?: string
+      runOrder?: string
+      direction?: string
+      tempoType?: string
+      fadeInMode?: string
+      fadeOutMode?: string
+      durationMode?: string
+    },
   ) =>
     json<FunctionState>(`/api/v1/functions/${id}`, {
       method: 'PATCH',
@@ -391,6 +421,50 @@ export const api = {
     }),
   removeChaserStep: (id: number, index: number) =>
     json<unknown>(`/api/v1/functions/${id}/steps/${index}`, { method: 'DELETE' }),
+  patchChaserStep: (
+    id: number,
+    index: number,
+    patch: {
+      fadeIn?: number
+      hold?: number
+      fadeOut?: number
+      duration?: number
+      note?: string
+      function?: number
+    },
+  ) =>
+    json<FunctionBody>(`/api/v1/functions/${id}/steps/${index}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  /** The whole permutation at once: what lands in the file is exactly this. */
+  setStepsOrder: (id: number, order: number[]) =>
+    json<FunctionBody>(`/api/v1/functions/${id}/steps/order`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    }),
+  /** A sequence step's own DMX values. */
+  setSequenceStepValues: (
+    id: number,
+    index: number,
+    values: { fixture: number; channel: number; value: number }[],
+  ) =>
+    json<FunctionBody>(`/api/v1/functions/${id}/steps/${index}/values`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values }),
+    }),
+  cloneFunction: (id: number) =>
+    json<{ id: number }>(`/api/v1/functions/${id}/clone`, { method: 'POST' }),
+  functionUsage: (id: number) => json<FunctionUsage>(`/api/v1/functions/${id}/usage`),
+  patchProject: (patch: { startupFunction?: number }) =>
+    json<{ startupFunction: number }>('/api/v1/project', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
   /** One route for every remaining type: the daemon dispatches on the
    *  function's own type, so a caller need not know which shape it takes. */
   setBody: (id: number, body: Record<string, unknown>) =>
