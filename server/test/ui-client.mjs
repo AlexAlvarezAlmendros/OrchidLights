@@ -1873,12 +1873,18 @@ try {
     state = await (await fetch('/api/v1/grandmaster')).json()
     if (state.channelMode !== 'All') return 'the mode did not reach the engine: ' + state.channelMode
 
-    // Back where it was: the suite's later assertions read post-GM frames.
+    // Back where it was -- and back to the BYTES it was: each persisted mode
+    // change joined the console's undo history, and only undo removes the
+    // <Properties><GrandMaster> nodes a mode flip materializes in projects
+    // that never carried them. The round-trip guard is what catches anything
+    // less.
     await fetch('/api/v1/grandmaster', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: 255, channelMode: 'Intensity' }),
     })
+    await fetch('/api/v1/vc/undo', { method: 'POST' })
+    await fetch('/api/v1/vc/undo', { method: 'POST' })
     document.body.click()
     return 'ok'
   })()`)

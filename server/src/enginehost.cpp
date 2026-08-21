@@ -284,6 +284,13 @@ bool EngineHost::setGrandMaster(int value, const QString &channelMode,
        marks the project dirty. */
     if (channelMode.isEmpty() == false || valueMode.isEmpty() == false || visible >= 0)
     {
+        /* Persisted changes join the console's undo history, exactly like a
+           widget edit: flipping the mode materializes <Properties><GrandMaster>
+           in projects that never carried them, and undo is what puts the
+           bytes back -- the round-trip guard in CI is what proved a
+           semantic restore is not a textual one. */
+        rememberConsole();
+
         VcPatch::GrandMasterSettings settings = VcPatch::readGrandMaster(m_preserved.sections);
         if (channelMode.isEmpty() == false)
             settings.channelMode = channelMode;
