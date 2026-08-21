@@ -30,6 +30,7 @@
 #include <QFileInfo>
 
 #include "livefeed.h"
+#include "simpledesksource.h"
 #include "enginehost.h"
 #include "apiauth.h"
 #include "jsonview.h"
@@ -90,6 +91,27 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
 
     connect(m_engine, &EngineHost::consoleChanged, this, &LiveFeed::onConsoleChanged);
     connect(m_engine, &EngineHost::projectReplaced, this, &LiveFeed::onProjectReplaced);
+
+    /* The Simple Desk's holdings, so two clients editing raw channels see
+       each other's grips. The VALUES already travel in the frames; this
+       message carries which channels are HELD, which the frames cannot say. */
+    connect(m_engine, &EngineHost::deskChanged, this, [this](quint32 universe) {
+        QJsonObject message;
+        message["type"] = "simpledesk";
+        message["universe"] = qint64(universe + 1);
+        const QHash<quint32, uchar> held = m_engine->desk()->held(universe);
+        QJsonObject channels;
+        for (auto it = held.constBegin(); it != held.constEnd(); ++it)
+            channels.insert(QString::number(it.key() + 1), int(it.value()));
+        message["held"] = channels;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+    });
 
     /* The Grand Master, pushed on every change: two phones and a desktop all
        show the big fader, and one of them moving it must move the others. */

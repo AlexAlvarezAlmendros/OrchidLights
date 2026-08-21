@@ -39,6 +39,8 @@ export interface LiveHandlers {
   onUniverse?: (universe: number, channels: Uint8Array) => void
   /** Blackout engaged or released -- by us or by anyone. */
   onBlackout?: (on: boolean) => void
+  /** The Simple Desk changed what it holds on a universe (1-based). */
+  onSimpleDesk?: (universe: number, held: Record<string, number>) => void
   /** The Grand Master moved or changed mode -- by anyone. */
   onGrandMaster?: (state: {
     value: number
@@ -137,6 +139,9 @@ export class Live {
           break
         case 'blackout':
           this.handlers.onBlackout?.(message.on === true)
+          break
+        case 'simpledesk':
+          this.handlers.onSimpleDesk?.(Number(message.universe ?? 0), message.held ?? {})
           break
         case 'grandmaster':
           this.handlers.onGrandMaster?.({

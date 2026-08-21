@@ -98,6 +98,9 @@ public:
     /** Stop every running function; with fadeMs > 0, fade them out first. */
     void stopEverything(int fadeMs);
 
+    /** The Simple Desk: raw universe channels, held by hand. */
+    class SimpleDeskSource *desk() const { return m_desk; }
+
     /**
      * Wind the engine down on purpose.
      *
@@ -349,6 +352,9 @@ signals:
     /** The Grand Master moved or changed mode -- by any client. */
     void grandMasterChanged();
 
+    /** The Simple Desk changed what it holds on a universe (0-based). */
+    void deskChanged(quint32 universe);
+
     /** An external control moved. Carried live because learning a binding means
      *  watching for the next thing the operator touches. */
     void inputSeen(quint32 universe, quint32 channel, uchar value);
@@ -384,6 +390,7 @@ private:
 
     Doc *m_doc = nullptr;
     LevelSource *m_levels = nullptr;
+    class SimpleDeskSource *m_desk = nullptr;
     class QTimer *m_autosave = nullptr;
     SeenInput m_lastInput;
     AudioTriggers *m_triggers = nullptr;

@@ -35,6 +35,7 @@
 #include "virtualconsole.h"
 #include "docwriter.h"
 #include "levelsource.h"
+#include "simpledesksource.h"
 
 #include "qlcfile.h"
 #include "qlcmodifierscache.h"
@@ -64,8 +65,11 @@ EngineHost::~EngineHost()
 
     if (m_doc != nullptr && m_levels != nullptr)
         m_doc->masterTimer()->unregisterDMXSource(m_levels);
+    if (m_doc != nullptr && m_desk != nullptr)
+        m_doc->masterTimer()->unregisterDMXSource(m_desk);
 
     delete m_levels;
+    delete m_desk;
 }
 
 void EngineHost::shutDown(bool zeroOutput)
@@ -197,6 +201,9 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
     /* Registered before the timer starts, so the first tick already has it. */
     m_levels = new LevelSource(m_doc);
     m_doc->masterTimer()->registerDMXSource(m_levels);
+
+    m_desk = new SimpleDeskSource(m_doc);
+    m_doc->masterTimer()->registerDMXSource(m_desk);
 
     /* No microphone is opened here: the triggers only ask for one once a
        widget is switched on. */
@@ -354,6 +361,8 @@ void EngineHost::newProject()
 
     if (m_levels != nullptr)
         m_levels->forgetEverything();
+    if (m_desk != nullptr)
+        m_desk->forgetEverything();
     teachSliders();
 
     m_undo.clear();
@@ -603,6 +612,8 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
            one fader here meant another one there. */
         if (m_levels != nullptr)
             m_levels->forgetEverything();
+        if (m_desk != nullptr)
+            m_desk->forgetEverything();
         teachSliders();
     }
 
@@ -628,6 +639,8 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
 
         if (m_levels != nullptr)
             m_levels->forgetEverything();
+        if (m_desk != nullptr)
+            m_desk->forgetEverything();
         teachSliders();
     }
 

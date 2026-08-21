@@ -57,6 +57,8 @@
 #include "functionparent.h"
 #include "inputoutputmap.h"
 #include "mastertimer.h"
+#include "keypadparser.h"
+#include "simpledesksource.h"
 #include "function.h"
 #include "doc.h"
 
@@ -2503,6 +2505,162 @@ void ApiServer::registerRoutes()
         body["channelMode"] = state.channelMode;
         body["valueMode"] = state.valueMode;
         body["visible"] = state.visible;
+        return QHttpServerResponse(body);
+    });
+
+    /* The Simple Desk: raw channels of a universe, held by hand -- including
+       channels with no fixture patched, which is precisely what tells this
+       desk apart from /live. Universe indices here are the 1-based ids the
+       /universes list shows. */
+    m_server->route("/api/v1/simpledesk/<arg>", QHttpServerRequest::Method::Get,
+                    [this, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const int universe = rawUniverse.toInt(&ok) - 1;
+        if (ok == false || universe < 0)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a 1-based number"));
+
+        const QHash<quint32, uchar> held = m_engine->desk()->held(quint32(universe));
+        QJsonObject channels;
+        for (auto it = held.constBegin(); it != held.constEnd(); ++it)
+            channels.insert(QString::number(it.key() + 1), int(it.value()));
+
+        QJsonObject body;
+        body["universe"] = universe + 1;
+        body["held"] = channels;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/simpledesk/<arg>/channels", QHttpServerRequest::Method::Put,
+                    [this, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const int universe = rawUniverse.toInt(&ok) - 1;
+        if (ok == false || universe < 0)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a 1-based number"));
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const QJsonObject values = asked.value(QStringLiteral("values")).toObject();
+        if (values.isEmpty())
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Give {\"values\": {\"<canal 1-512>\": 0-255}}"));
+
+        /* Validated whole before anything lands: a request that is half
+           nonsense must not half-happen. */
+        QVector<QPair<quint32, uchar>> parsed;
+        for (auto it = values.constBegin(); it != values.constEnd(); ++it)
+        {
+            bool channelOk = false;
+            const int channel = it.key().toInt(&channelOk);
+            const int value = it.value().toInt(-1);
+            if (channelOk == false || channel < 1 || channel > 512)
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Channel %1 is not 1..512").arg(it.key()));
+            if (value < 0 || value > 255)
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Value for channel %1 is not 0..255").arg(it.key()));
+            parsed.append({quint32(channel - 1), uchar(value)});
+        }
+
+        for (const auto &pair : parsed)
+            m_engine->desk()->setChannel(quint32(universe), pair.first, pair.second);
+
+        emit m_engine->deskChanged(quint32(universe));
+
+        QJsonObject body;
+        body["universe"] = universe + 1;
+        body["held"] = int(m_engine->desk()->held(quint32(universe)).size());
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/simpledesk/<arg>/channels/<arg>",
+                    QHttpServerRequest::Method::Delete,
+                    [this, denied](const QString &rawUniverse, const QString &rawChannel,
+                                   const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const int universe = rawUniverse.toInt(&ok) - 1;
+        bool channelOk = false;
+        const int channel = rawChannel.toInt(&channelOk);
+        if (ok == false || universe < 0 || channelOk == false || channel < 1 || channel > 512)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe or channel out of range"));
+
+        m_engine->desk()->resetChannel(quint32(universe), quint32(channel - 1));
+        emit m_engine->deskChanged(quint32(universe));
+
+        QJsonObject body;
+        body["released"] = channel;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/simpledesk/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const int universe = rawUniverse.toInt(&ok) - 1;
+        if (ok == false || universe < 0)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a 1-based number"));
+
+        m_engine->desk()->resetUniverse(quint32(universe));
+        emit m_engine->deskChanged(quint32(universe));
+
+        QJsonObject body;
+        body["released"] = universe + 1;
+        return QHttpServerResponse(body);
+    });
+
+    /* The keypad, parsed by the engine's own parser so "1 THRU 10 AT FULL"
+       means here exactly what it means in QLC+ 5 -- including the relative
+       commands, which read the universe's current values as their base. */
+    m_server->route("/api/v1/simpledesk/<arg>/keypad", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const int universe = rawUniverse.toInt(&ok) - 1;
+        if (ok == false || universe < 0
+            || quint32(universe) >= doc->inputOutputMap()->universesCount())
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a 1-based number"));
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const QString command = asked.value(QStringLiteral("command")).toString().trimmed();
+        if (command.isEmpty())
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Give {\"command\": \"...\"}"));
+
+        const QList<Universe *> universes = doc->inputOutputMap()->universes();
+        QByteArray uniData = universes.at(universe)->preGMValues();
+
+        KeyPadParser parser;
+        const QList<SceneValue> values =
+            parser.parseCommand(doc, command.toUpper(), uniData);
+        if (values.isEmpty())
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("The command names no channels"));
+
+        QJsonArray applied;
+        for (const SceneValue &value : values)
+        {
+            m_engine->desk()->setChannel(quint32(universe), value.channel, value.value);
+            QJsonObject one;
+            one["channel"] = int(value.channel) + 1;
+            one["value"] = int(value.value);
+            applied.append(one);
+        }
+
+        emit m_engine->deskChanged(quint32(universe));
+
+        QJsonObject body;
+        body["universe"] = universe + 1;
+        body["applied"] = applied;
         return QHttpServerResponse(body);
     });
 

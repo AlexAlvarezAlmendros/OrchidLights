@@ -38,6 +38,13 @@ const ICONS: Record<View, React.ReactNode> = {
       <path d="M7 8V5M12 8V5M17 8V5" />
     </>
   ),
+  /* A row of raw faders at equal height: the desk with no abstraction. */
+  desk: (
+    <>
+      <path d="M4 4v16M9 4v16M14 4v16M19 4v16" />
+      <path d="M2.5 14h3M7.5 9h3M12.5 17h3M17.5 11h3" />
+    </>
+  ),
   /* Lamps over a stage. */
   plan: (
     <>
@@ -53,10 +60,11 @@ const LABELS: Record<View, string> = {
   console: 'Consola',
   functions: 'Funciones',
   setup: 'Patch',
+  desk: 'Mesa',
   plan: 'Planta',
 }
 
-export const VIEWS: View[] = ['console', 'functions', 'setup', 'plan']
+export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan']
 
 export function Nav({
   view,

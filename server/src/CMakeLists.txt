@@ -14,6 +14,7 @@ add_executable(${module_name}
     vcpatch.cpp vcpatch.h
     jsonview.cpp jsonview.h
     levelsource.cpp levelsource.h
+    simpledesksource.cpp simpledesksource.h
     livefeed.cpp livefeed.h
     workspaceloader.cpp workspaceloader.h
     xmltree.cpp xmltree.h
