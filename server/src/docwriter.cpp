@@ -1455,7 +1455,9 @@ DocWriter::Result DocWriter::addChaserStep(Doc *doc, quint32 chaserId, quint32 f
                                            int index, int fadeIn, int hold, int fadeOut)
 {
     Function *function = doc->function(chaserId);
-    if (function == nullptr || function->type() != Function::ChaserType)
+    if (function == nullptr
+        || (function->type() != Function::ChaserType
+            && function->type() != Function::SequenceType))
         return Result::failure(QStringLiteral("No chaser with id %1").arg(chaserId));
 
     if (functionId == chaserId)
@@ -1478,7 +1480,9 @@ DocWriter::Result DocWriter::addChaserStep(Doc *doc, quint32 chaserId, quint32 f
 DocWriter::Result DocWriter::removeChaserStep(Doc *doc, quint32 chaserId, int index)
 {
     Function *function = doc->function(chaserId);
-    if (function == nullptr || function->type() != Function::ChaserType)
+    if (function == nullptr
+        || (function->type() != Function::ChaserType
+            && function->type() != Function::SequenceType))
         return Result::failure(QStringLiteral("No chaser with id %1").arg(chaserId));
 
     Chaser *chaser = qobject_cast<Chaser *>(function);
@@ -1916,6 +1920,244 @@ DocWriter::Result DocWriter::setSequenceScene(Doc *doc, quint32 sequenceId, quin
 
     sequence->setBoundSceneID(sceneId);
 
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setFunctionPath(Doc *doc, quint32 id, const QString &path)
+{
+    Function *function = doc->function(id);
+    if (function == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    function->setPath(path);
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setFunctionTempo(Doc *doc, quint32 id, const QString &tempoType)
+{
+    Function *function = doc->function(id);
+    if (function == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    const QString wanted = tempoType.toLower();
+    if (wanted == QStringLiteral("time"))
+        function->setTempoType(Function::Time);
+    else if (wanted == QStringLiteral("beats"))
+        function->setTempoType(Function::Beats);
+    else
+        return Result::failure(QStringLiteral("Tempo must be \"time\" or \"beats\""));
+
+    doc->setModified();
+    return Result::success();
+}
+
+namespace
+{
+    bool speedModeOf(const QString &name, Chaser::SpeedMode &mode, bool durationAllowed)
+    {
+        const QString wanted = name.toLower();
+        if (wanted == QStringLiteral("common"))
+            mode = Chaser::Common;
+        else if (wanted == QStringLiteral("perstep"))
+            mode = Chaser::PerStep;
+        else if (wanted == QStringLiteral("default") && durationAllowed)
+            mode = Chaser::Default;
+        else
+            return false;
+        return true;
+    }
+}
+
+DocWriter::Result DocWriter::setChaserSpeedModes(Doc *doc, quint32 chaserId,
+                                                 const QString &fadeIn, const QString &fadeOut,
+                                                 const QString &duration)
+{
+    Function *function = doc->function(chaserId);
+    if (function == nullptr
+        || (function->type() != Function::ChaserType
+            && function->type() != Function::SequenceType))
+        return Result::failure(QStringLiteral("No chaser with id %1").arg(chaserId));
+    Chaser *chaser = qobject_cast<Chaser *>(function);
+
+    Chaser::SpeedMode mode = Chaser::Common;
+    if (fadeIn.isEmpty() == false)
+    {
+        if (speedModeOf(fadeIn, mode, false) == false)
+            return Result::failure(QStringLiteral("fadeInMode must be \"common\" or \"perstep\""));
+        chaser->setFadeInMode(mode);
+    }
+    if (fadeOut.isEmpty() == false)
+    {
+        if (speedModeOf(fadeOut, mode, false) == false)
+            return Result::failure(QStringLiteral("fadeOutMode must be \"common\" or \"perstep\""));
+        chaser->setFadeOutMode(mode);
+    }
+    if (duration.isEmpty() == false)
+    {
+        /* Default here means "the chaser's own duration": the mode QLC+ only
+           offers for this one column. */
+        if (speedModeOf(duration, mode, true) == false)
+            return Result::failure(
+                QStringLiteral("durationMode must be \"common\", \"perstep\" or \"default\""));
+        chaser->setDurationMode(mode);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setChaserStep(Doc *doc, quint32 chaserId, int index,
+                                           const int *fadeIn, const int *hold, const int *fadeOut,
+                                           const int *duration, const QString *note,
+                                           const quint32 *functionId)
+{
+    Function *function = doc->function(chaserId);
+    if (function == nullptr
+        || (function->type() != Function::ChaserType
+            && function->type() != Function::SequenceType))
+        return Result::failure(QStringLiteral("No chaser with id %1").arg(chaserId));
+    Chaser *chaser = qobject_cast<Chaser *>(function);
+
+    if (index < 0 || index >= chaser->stepsCount())
+        return Result::failure(QStringLiteral("No step %1: the chaser has %2")
+                                   .arg(index)
+                                   .arg(chaser->stepsCount()));
+
+    ChaserStep step = chaser->steps().at(index);
+
+    if (functionId != nullptr)
+    {
+        if (*functionId == chaserId)
+            return Result::failure(QStringLiteral("A chaser cannot step through itself"));
+        if (doc->function(*functionId) == nullptr)
+            return Result::failure(QStringLiteral("No function with id %1").arg(*functionId));
+        step.fid = *functionId;
+    }
+    if (fadeIn != nullptr)
+        step.fadeIn = uint(qMax(0, *fadeIn));
+    if (hold != nullptr)
+        step.hold = uint(qMax(0, *hold));
+    if (fadeOut != nullptr)
+        step.fadeOut = uint(qMax(0, *fadeOut));
+
+    /* The reference editor's arithmetic (ui/src/chasereditor.cpp): the stored
+       duration is fadeIn + hold, and whichever of the three the operator
+       touched decides which of the others gives way. */
+    if (duration != nullptr)
+    {
+        step.duration = uint(qMax(0, *duration));
+        step.hold = step.duration >= step.fadeIn ? step.duration - step.fadeIn : 0;
+    }
+    else if (fadeIn != nullptr || hold != nullptr)
+    {
+        step.duration = Function::speedAdd(step.fadeIn, step.hold);
+    }
+
+    if (note != nullptr)
+        step.note = *note;
+
+    if (chaser->replaceStep(step, index) == false)
+        return Result::failure(QStringLiteral("The engine refused the step"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setChaserStepsOrder(Doc *doc, quint32 chaserId,
+                                                 const QList<int> &order)
+{
+    Function *function = doc->function(chaserId);
+    if (function == nullptr
+        || (function->type() != Function::ChaserType
+            && function->type() != Function::SequenceType))
+        return Result::failure(QStringLiteral("No chaser with id %1").arg(chaserId));
+    Chaser *chaser = qobject_cast<Chaser *>(function);
+
+    const QList<ChaserStep> steps = chaser->steps();
+    if (order.count() != steps.count())
+        return Result::failure(QStringLiteral("The order names %1 steps, the chaser has %2")
+                                   .arg(order.count())
+                                   .arg(steps.count()));
+
+    /* A permutation, not a wish list: every index exactly once, or a step
+       would be silently duplicated or dropped. */
+    QSet<int> seen;
+    for (int index : order)
+    {
+        if (index < 0 || index >= steps.count() || seen.contains(index))
+            return Result::failure(
+                QStringLiteral("The order must name every step index exactly once"));
+        seen.insert(index);
+    }
+
+    for (int target = 0; target < order.count(); target++)
+    {
+        /* Rebuild by replacement: position `target` takes the step that used
+           to live at order[target]. */
+        if (chaser->replaceStep(steps.at(order.at(target)), target) == false)
+            return Result::failure(QStringLiteral("The engine refused the reorder"));
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::cloneFunction(Doc *doc, quint32 id, quint32 &newId)
+{
+    Function *function = doc->function(id);
+    if (function == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    Function *copy = function->createCopy(doc);
+    if (copy == nullptr)
+        return Result::failure(QStringLiteral("The engine refused the copy"));
+
+    newId = copy->id();
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setSequenceStepValues(Doc *doc, quint32 sequenceId, int index,
+                                                   const QList<SceneValue> &values)
+{
+    Function *function = doc->function(sequenceId);
+    if (function == nullptr || function->type() != Function::SequenceType)
+        return Result::failure(QStringLiteral("No sequence with id %1").arg(sequenceId));
+    Chaser *sequence = qobject_cast<Chaser *>(function);
+
+    if (index < 0 || index >= sequence->stepsCount())
+        return Result::failure(QStringLiteral("No step %1: the sequence has %2")
+                                   .arg(index)
+                                   .arg(sequence->stepsCount()));
+
+    ChaserStep step = sequence->steps().at(index);
+    for (const SceneValue &value : values)
+    {
+        const Fixture *fixture = doc->fixture(value.fxi);
+        if (fixture == nullptr)
+            return Result::failure(QStringLiteral("No fixture with id %1").arg(value.fxi));
+        if (value.channel >= fixture->channels())
+            return Result::failure(QStringLiteral("\"%1\" has no channel %2")
+                                       .arg(fixture->name())
+                                       .arg(value.channel));
+        step.setValue(value);
+    }
+
+    if (sequence->replaceStep(step, index) == false)
+        return Result::failure(QStringLiteral("The engine refused the step"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setStartupFunction(Doc *doc, qint64 id)
+{
+    if (id >= 0 && doc->function(quint32(id)) == nullptr)
+        return Result::failure(QStringLiteral("No function with id %1").arg(id));
+
+    doc->setStartupFunction(id >= 0 ? quint32(id) : Function::invalidId());
     doc->setModified();
     return Result::success();
 }

@@ -41,6 +41,12 @@
 #include "audioplugincache.h"
 #include "audiorenderer.h"
 #include "docwriter.h"
+#include "chaser.h"
+#include "chaserstep.h"
+#include "collection.h"
+#include "show.h"
+#include "track.h"
+#include "showfunction.h"
 #include "rgbalgorithm.h"
 #include "qlcfixturedefcache.h"
 #include "qlcfixturemode.h"
@@ -912,6 +918,34 @@ void ApiServer::registerRoutes()
                 return jsonError(StatusCode::BadRequest, result.error);
         }
 
+        /* The folder tree. Present-and-empty moves the function to the root,
+           which is a real request and not a no-op. */
+        if (patch.contains("path"))
+        {
+            const DocWriter::Result result =
+                DocWriter::setFunctionPath(doc, id, patch.value("path").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        if (patch.contains("tempoType"))
+        {
+            const DocWriter::Result result =
+                DocWriter::setFunctionTempo(doc, id, patch.value("tempoType").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        if (patch.contains("fadeInMode") || patch.contains("fadeOutMode")
+            || patch.contains("durationMode"))
+        {
+            const DocWriter::Result result = DocWriter::setChaserSpeedModes(
+                doc, id, patch.value("fadeInMode").toString(),
+                patch.value("fadeOutMode").toString(), patch.value("durationMode").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
         const Function *function = doc->function(id);
         if (function == nullptr)
             return jsonError(StatusCode::NotFound, QStringLiteral("No such function"));
@@ -991,6 +1025,222 @@ void ApiServer::registerRoutes()
         QJsonObject response;
         response["chaser"] = qint64(id);
         return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    /* Editing one step: fades, hold, duration, its note, or the function it
+       points at. Only what the body names is touched. */
+    m_server->route("/api/v1/functions/<arg>/steps/<arg>", QHttpServerRequest::Method::Patch,
+                    [doc, denied](const QString &rawId, const QString &rawIndex,
+                                  const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false, indexOk = false;
+        const quint32 id = rawId.toUInt(&ok);
+        const int index = rawIndex.toInt(&indexOk);
+        if (ok == false || indexOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        const int fadeIn = body.value("fadeIn").toInt(-1);
+        const int hold = body.value("hold").toInt(-1);
+        const int fadeOut = body.value("fadeOut").toInt(-1);
+        const int duration = body.value("duration").toInt(-1);
+        const QString note = body.value("note").toString();
+        const quint32 functionId = quint32(body.value("function").toInt(-1));
+
+        const DocWriter::Result result = DocWriter::setChaserStep(
+            doc, id, index,
+            body.contains("fadeIn") ? &fadeIn : nullptr,
+            body.contains("hold") ? &hold : nullptr,
+            body.contains("fadeOut") ? &fadeOut : nullptr,
+            body.contains("duration") ? &duration : nullptr,
+            body.contains("note") ? &note : nullptr,
+            body.contains("function") ? &functionId : nullptr);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        return QHttpServerResponse(JsonView::functionBody(doc, doc->function(id)));
+    });
+
+    /* Reordering is one atomic permutation, not a dance of moves: the shuffle
+       button sends the shuffled order it wants, and what lands in the file is
+       exactly that. */
+    m_server->route("/api/v1/functions/<arg>/steps/order", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        if (body.value("order").isArray() == false)
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send {\"order\": [indices]}"));
+
+        QList<int> order;
+        for (const QJsonValue &value : body.value("order").toArray())
+            order.append(value.toInt(-1));
+
+        const DocWriter::Result result = DocWriter::setChaserStepsOrder(doc, id, order);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        return QHttpServerResponse(JsonView::functionBody(doc, doc->function(id)));
+    });
+
+    /* A sequence step's own DMX values -- the half that makes a sequence a
+       sequence rather than a chaser. */
+    m_server->route("/api/v1/functions/<arg>/steps/<arg>/values", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QString &rawId, const QString &rawIndex,
+                                  const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false, indexOk = false;
+        const quint32 id = rawId.toUInt(&ok);
+        const int index = rawIndex.toInt(&indexOk);
+        if (ok == false || indexOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        if (body.value("values").isArray() == false)
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send {\"values\": [{\"fixture\", \"channel\", \"value\"}]}"));
+
+        QList<SceneValue> values;
+        for (const QJsonValue &entry : body.value("values").toArray())
+        {
+            const QJsonObject one = entry.toObject();
+            const int fixture = one.value("fixture").toInt(-1);
+            const int channel = one.value("channel").toInt(-1);
+            const int value = one.value("value").toInt(-1);
+            if (fixture < 0 || channel < 0 || value < 0 || value > 255)
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Each value needs fixture, channel and value 0-255"));
+            values.append(SceneValue(quint32(fixture), quint32(channel), uchar(value)));
+        }
+
+        const DocWriter::Result result = DocWriter::setSequenceStepValues(doc, id, index, values);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        return QHttpServerResponse(JsonView::functionBody(doc, doc->function(id)));
+    });
+
+    /* A copy, QLC+-style: same everything, name suffixed. */
+    m_server->route("/api/v1/functions/<arg>/clone", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        quint32 newId = Function::invalidId();
+        const DocWriter::Result result = DocWriter::cloneFunction(doc, id, newId);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(newId);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    /* Who uses this function. Deleting one that a chaser steps through, a
+       collection carries, a show schedules or a button fires is exactly the
+       moment this list earns its place. */
+    m_server->route("/api/v1/functions/<arg>/usage", QHttpServerRequest::Method::Get,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+        if (doc->function(id) == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such function"));
+
+        QJsonArray functions;
+        for (const Function *other : doc->functions())
+        {
+            if (other->id() == id)
+                continue;
+
+            bool uses = false;
+            if (other->type() == Function::ChaserType || other->type() == Function::SequenceType)
+            {
+                const Chaser *chaser = qobject_cast<const Chaser *>(other);
+                for (const ChaserStep &step : chaser->steps())
+                    uses = uses || step.fid == id;
+            }
+            else if (other->type() == Function::CollectionType)
+            {
+                uses = qobject_cast<const Collection *>(other)->functions().contains(id);
+            }
+            else if (other->type() == Function::ShowType)
+            {
+                const Show *show = qobject_cast<const Show *>(other);
+                for (const Track *track : show->tracks())
+                {
+                    for (const ShowFunction *item : track->showFunctions())
+                        uses = uses || item->functionID() == id;
+                }
+            }
+
+            if (uses)
+            {
+                QJsonObject entry;
+                entry["id"] = qint64(other->id());
+                entry["name"] = other->name();
+                entry["type"] = Function::typeToString(other->type());
+                functions.append(entry);
+            }
+        }
+
+        /* The console's references, read from the same parsed tree the web
+           renders -- so what this reports and what the screen shows cannot
+           disagree. */
+        QJsonArray widgets;
+        VcWidget root;
+        if (VirtualConsole::parse(m_engine->preservedSections(), root))
+        {
+            QList<const VcWidget *> stack{&root};
+            while (stack.isEmpty() == false)
+            {
+                const VcWidget *widget = stack.takeLast();
+                for (const VcWidget &child : widget->children)
+                    stack.append(&child);
+
+                bool uses = (widget->hasFunction && widget->functionId == id)
+                    || (widget->hasChaser && widget->chaserId == id);
+                for (const VcWidget::SpeedTarget &target : widget->speedTargets)
+                    uses = uses || target.functionId == id;
+
+                if (uses)
+                {
+                    QJsonObject entry;
+                    if (widget->hasId)
+                        entry["id"] = qint64(widget->id);
+                    entry["caption"] = widget->caption;
+                    entry["type"] = widget->type;
+                    widgets.append(entry);
+                }
+            }
+        }
+
+        QJsonObject body;
+        body["functions"] = functions;
+        body["widgets"] = widgets;
+        body["startup"] = doc->startupFunction() == id;
+        return QHttpServerResponse(body);
     });
 
     m_server->route("/api/v1/functions/<arg>/steps/<arg>", QHttpServerRequest::Method::Delete,
@@ -2250,6 +2500,32 @@ void ApiServer::registerRoutes()
             body["autosave"] = recovery;
         }
 
+        /* The function the show opens with. -1 is "none", like the file. */
+        body["startupFunction"] = doc->startupFunction() == Function::invalidId()
+            ? qint64(-1)
+            : qint64(doc->startupFunction());
+
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project", QHttpServerRequest::Method::Patch,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject patch = QJsonDocument::fromJson(request.body()).object();
+        if (patch.contains(QStringLiteral("startupFunction")))
+        {
+            const DocWriter::Result result = DocWriter::setStartupFunction(
+                doc, qint64(patch.value(QStringLiteral("startupFunction")).toDouble(-1)));
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
+        QJsonObject body;
+        body["startupFunction"] = doc->startupFunction() == Function::invalidId()
+            ? qint64(-1)
+            : qint64(doc->startupFunction());
         return QHttpServerResponse(body);
     });
 

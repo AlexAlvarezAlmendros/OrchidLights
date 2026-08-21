@@ -212,6 +212,9 @@ jobs:
       - name: Input smoke test (loopback wire, button and GM bindings, feedback, .qxw)
         run: ./server/test/input-smoke.sh orchidlightsd
 
+      - name: Chaser smoke test (per-step fades measured, reorder persisted, sequence values)
+        run: ./server/test/chaser-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

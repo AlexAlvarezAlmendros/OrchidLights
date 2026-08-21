@@ -18,6 +18,7 @@ import {
   type FixtureState,
   type FunctionBody,
   type FunctionState,
+  type FunctionUsage,
   api,
 } from './api'
 import { ShowTimeline } from './show'
@@ -72,6 +73,11 @@ export function Functions({
   const [type, setType] = useState('Scene')
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [selecting, setSelecting] = useState(false)
+  const [checked, setChecked] = useState<Set<number>>(new Set())
+  const [batchName, setBatchName] = useState('')
 
   const run = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -87,16 +93,111 @@ export function Functions({
     [onChanged],
   )
 
-  const byType = TYPES.map((t) => ({
-    ...t,
-    items: functions.filter((f) => f.type === t.value),
-  })).filter((t) => t.items.length > 0)
+  const wanted = search.trim().toLowerCase()
+  const visible = functions.filter(
+    (f) =>
+      (typeFilter === '' || f.type === typeFilter) &&
+      (wanted === '' || f.name.toLowerCase().includes(wanted)),
+  )
+
+  /* Type, then folder: the tree QLC+ 5 draws, flattened into headings. A
+     folder is just the function's `path`; the root sorts first. */
+  const byType = TYPES.map((t) => {
+    const items = visible.filter((f) => f.type === t.value)
+    const folders = [...new Set(items.map((f) => f.path ?? ''))].sort((a, b) => a.localeCompare(b))
+    return {
+      ...t,
+      items,
+      folders: folders.map((folder) => ({
+        folder,
+        items: items.filter((f) => (f.path ?? '') === folder),
+      })),
+    }
+  }).filter((t) => t.items.length > 0)
 
   const current = functions.find((f) => f.id === selected) ?? null
 
   return (
     <section className="setup">
       {error && <p className="editor-error">{error}</p>}
+
+      <div className="fields">
+        <label className="field grow-field">
+          <span>Buscar</span>
+          <input
+            value={search}
+            placeholder="Nombre de función"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>Filtrar</span>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <option value="">Todas</option>
+            {TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          aria-pressed={selecting}
+          onClick={() => {
+            setSelecting((on) => !on)
+            setChecked(new Set())
+          }}
+        >
+          Selección
+        </button>
+      </div>
+
+      {selecting && (
+        <div className="fields batch-bar">
+          <span className="chip num">{checked.size} elegidas</span>
+          <label className="field grow-field">
+            <span>Nombre base / carpeta</span>
+            <input
+              value={batchName}
+              placeholder="Tema o Bolo/Sábado"
+              onChange={(e) => setBatchName(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={checked.size === 0 || batchName.trim() === ''}
+            title="«Tema» sobre 3 funciones da Tema 1, Tema 2, Tema 3"
+            onClick={() => {
+              const base = batchName.trim()
+              const ids = functions.filter((f) => checked.has(f.id)).map((f) => f.id)
+              run(async () => {
+                let ordinal = 1
+                for (const id of ids) {
+                  await api.patchFunction(id, { name: `${base} ${ordinal}` })
+                  ordinal++
+                }
+              }).catch(() => undefined)
+            }}
+          >
+            Renombrar numerando
+          </button>
+          <button
+            type="button"
+            disabled={checked.size === 0}
+            title="Mueve las elegidas a esa carpeta; vacío las saca a la raíz"
+            onClick={() => {
+              const folder = batchName.trim()
+              const ids = [...checked]
+              run(async () => {
+                for (const id of ids) await api.patchFunction(id, { path: folder })
+              }).catch(() => undefined)
+            }}
+          >
+            Mover a carpeta
+          </button>
+        </div>
+      )}
 
       <div className="card">
         <div className="fields">
@@ -142,32 +243,56 @@ export function Functions({
           <h3 className="group-title">
             {group.label} ({group.items.length})
           </h3>
-          <div className="table">
-            {group.items.map((f) => (
-              <div className="table-row" key={f.id} data-selected={f.id === selected}>
-                <button
-                  type="button"
-                  className="grow linkish left"
-                  onClick={() => setSelected(f.id === selected ? null : f.id)}
-                >
-                  {f.name}
-                </button>
-                <span className="hint">
-                  {f.fadeIn ?? 0} / {f.duration ?? 0} ms
-                </span>
-                <button
-                  type="button"
-                  aria-pressed={running.has(f.id)}
-                  data-running={running.has(f.id)}
-                  onClick={() => onToggle(f.id)}
-                >
-                  {running.has(f.id) ? '⏹' : '▶'}
-                </button>
+          {group.folders.map(({ folder, items }) => (
+            <div key={folder || '(raíz)'} className="stack">
+              {folder !== '' && <h4 className="folder-title">📁 {folder}</h4>}
+              <div className="table">
+                {items.map((f) => (
+                  <div className="table-row" key={f.id} data-selected={f.id === selected}>
+                    {selecting && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Elegir ${f.name}`}
+                        checked={checked.has(f.id)}
+                        onChange={(e) =>
+                          setChecked((current) => {
+                            const next = new Set(current)
+                            if (e.target.checked) next.add(f.id)
+                            else next.delete(f.id)
+                            return next
+                          })
+                        }
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className="grow linkish left"
+                      onClick={() => setSelected(f.id === selected ? null : f.id)}
+                    >
+                      {f.name}
+                    </button>
+                    <span className="hint">
+                      {f.fadeIn ?? 0} / {f.duration ?? 0} ms
+                    </span>
+                    <button
+                      type="button"
+                      aria-pressed={running.has(f.id)}
+                      data-running={running.has(f.id)}
+                      onClick={() => onToggle(f.id)}
+                    >
+                      {running.has(f.id) ? '⏹' : '▶'}
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       ))}
+
+      {visible.length === 0 && functions.length > 0 && (
+        <p className="hint">Nada responde a ese filtro.</p>
+      )}
 
       {current && (
         <FunctionEditor
@@ -276,6 +401,55 @@ function FunctionEditor({
         ))}
       </div>
 
+      <div className="fields">
+        <label className="field grow-field">
+          <span>Carpeta</span>
+          <input
+            defaultValue={fn.path ?? ''}
+            placeholder="(raíz) — o Bolo/Sábado"
+            onBlur={(e) => {
+              const folder = e.target.value.trim()
+              if (folder !== (fn.path ?? ''))
+                apply(() => api.patchFunction(fn.id, { path: folder }))
+            }}
+          />
+        </label>
+        <label className="field">
+          <span>Orden</span>
+          <select
+            value={fn.runOrder ?? 'loop'}
+            onChange={(e) => apply(() => api.patchFunction(fn.id, { runOrder: e.target.value }))}
+          >
+            <option value="loop">Bucle</option>
+            <option value="singleshot">Una vez</option>
+            <option value="pingpong">Ping-pong</option>
+            <option value="random">Aleatorio</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Dirección</span>
+          <select
+            value={fn.direction ?? 'forward'}
+            onChange={(e) => apply(() => api.patchFunction(fn.id, { direction: e.target.value }))}
+          >
+            <option value="forward">Adelante</option>
+            <option value="backward">Atrás</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Tempo</span>
+          <select
+            value={fn.tempoType ?? 'time'}
+            onChange={(e) => apply(() => api.patchFunction(fn.id, { tempoType: e.target.value }))}
+          >
+            <option value="time">Tiempo (ms)</option>
+            <option value="beats">Beats</option>
+          </select>
+        </label>
+      </div>
+
+      <Organization fn={fn} onApply={apply} />
+
       {body?.type === 'Scene' && (
         <SceneValues fn={fn} body={body} fixtures={fixtures} onApply={apply} />
       )}
@@ -328,10 +502,7 @@ function FunctionEditor({
         />
       )}
       {body?.type === 'Sequence' && (
-        <p className="hint">
-          Vinculada a la escena <strong>{body.sceneName}</strong>. Sus pasos son valores de esa
-          escena, uno por paso.
-        </p>
+        <SequenceSteps fn={fn} body={body} fixtures={fixtures} onApply={apply} />
       )}
       {body?.type === 'Collection' && (
         <Members fn={fn} body={body} functions={functions} onApply={apply} />
@@ -724,7 +895,12 @@ function SceneValues({
   )
 }
 
-/** A chaser is an ordered list of functions with times. */
+/**
+ * A chaser is an ordered list of functions with times -- and every column the
+ * reference editor has: per-step fades, hold, the note, the modes that decide
+ * whether the chaser listens to them, reordering and a shuffle whose result
+ * is a permutation the daemon persists exactly.
+ */
 function ChaserSteps({
   fn,
   body,
@@ -742,21 +918,114 @@ function ChaserSteps({
   // offering it here would only produce that refusal.
   const candidates = functions.filter((f) => f.id !== fn.id)
 
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= steps.length) return
+    const order = steps.map((_, i) => i)
+    order[from] = to
+    order[to] = from
+    onApply(() => api.setStepsOrder(fn.id, order))
+  }
+
+  const shuffle = () => {
+    /* Fisher-Yates over indices; the daemon receives the RESULT, so what the
+       file keeps is exactly what the operator saw happen. */
+    const order = steps.map((_, i) => i)
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[order[i], order[j]] = [order[j] as number, order[i] as number]
+    }
+    onApply(() => api.setStepsOrder(fn.id, order))
+  }
+
+  const mode = (key: 'fadeInMode' | 'fadeOutMode' | 'durationMode') => (
+    <label className="field" key={key}>
+      <span>
+        {key === 'fadeInMode' ? 'Entrada' : key === 'fadeOutMode' ? 'Salida' : 'Duración'}
+      </span>
+      <select
+        value={body[key] ?? 'common'}
+        onChange={(e) => onApply(() => api.patchFunction(fn.id, { [key]: e.target.value }))}
+      >
+        <option value="common">Común</option>
+        <option value="perstep">Por paso</option>
+        {key === 'durationMode' && <option value="default">Por defecto</option>}
+      </select>
+    </label>
+  )
+
+  const perStepSpeeds = body.fadeInMode === 'perstep' || body.durationMode === 'perstep'
+
   return (
     <div className="field">
       <span>Pasos ({steps.length})</span>
 
+      <div className="fields">
+        {mode('fadeInMode')}
+        {mode('fadeOutMode')}
+        {mode('durationMode')}
+        <span className="spacer" />
+        <button type="button" disabled={steps.length < 2} onClick={shuffle}>
+          Barajar
+        </button>
+      </div>
+
       {steps.length === 0 && <p className="hint">Este chaser no tiene pasos.</p>}
 
-      <ul className="channels">
+      <ul className="channels chaser-steps">
         {steps.map((step) => (
           <li key={step.index}>
-            <span>
-              {step.index + 1}. {step.name}
-            </span>
-            <span className="cue-time">
-              {step.fadeIn} / {step.hold} ms
-            </span>
+            <span className="num">{step.index + 1}.</span>
+            <span className="grow">{step.name}</span>
+            <input
+              className="step-note"
+              defaultValue={step.note ?? ''}
+              placeholder="nota"
+              aria-label={`Nota del paso ${step.index + 1}`}
+              onBlur={(e) => {
+                const note = e.target.value.trim()
+                if (note !== (step.note ?? ''))
+                  onApply(() => api.patchChaserStep(fn.id, step.index, { note }))
+              }}
+            />
+            {perStepSpeeds &&
+              (['fadeIn', 'hold', 'fadeOut'] as const).map((key) => (
+                <input
+                  key={key}
+                  type="number"
+                  min={0}
+                  className="step-time num"
+                  defaultValue={step[key]}
+                  title={
+                    key === 'fadeIn'
+                      ? 'Entrada (ms)'
+                      : key === 'hold'
+                        ? 'Espera (ms)'
+                        : 'Salida (ms)'
+                  }
+                  aria-label={`${key} del paso ${step.index + 1}`}
+                  onBlur={(e) => {
+                    const value = Number(e.target.value)
+                    if (value !== step[key])
+                      onApply(() => api.patchChaserStep(fn.id, step.index, { [key]: value }))
+                  }}
+                />
+              ))}
+            <button
+              type="button"
+              disabled={step.index === 0}
+              aria-label={`Subir paso ${step.index + 1}`}
+              onClick={() => move(step.index, step.index - 1)}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              disabled={step.index === steps.length - 1}
+              aria-label={`Bajar paso ${step.index + 1}`}
+              onClick={() => move(step.index, step.index + 1)}
+            >
+              ↓
+            </button>
             <button
               type="button"
               aria-label={`Quitar paso ${step.index + 1}`}
@@ -787,6 +1056,224 @@ function ChaserSteps({
           ))}
         </select>
       </div>
+    </div>
+  )
+}
+
+/**
+ * A sequence for real: the same scene, one set of values per step. Each step
+ * is added over the bound scene and edited channel by channel -- and the
+ * values edited here are what the next run plays, which the smoke test reads
+ * off the wire.
+ */
+function SequenceSteps({
+  fn,
+  body,
+  fixtures,
+  onApply,
+}: {
+  fn: FunctionState
+  body: FunctionBody
+  fixtures: FixtureState[]
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const steps = body.steps ?? []
+  const [open, setOpen] = useState<number | null>(null)
+  const [fixtureId, setFixtureId] = useState<number | null>(fixtures[0]?.id ?? null)
+  const [detail, setDetail] = useState<FixtureDetail | null>(null)
+
+  useEffect(() => {
+    if (fixtureId === null) return
+    let live = true
+    api
+      .fixture(fixtureId)
+      .then((d) => live && setDetail(d))
+      .catch(() => live && setDetail(null))
+    return () => {
+      live = false
+    }
+  }, [fixtureId])
+
+  return (
+    <div className="field">
+      <span>
+        Vinculada a <strong>{body.sceneName}</strong> · {steps.length} pasos
+      </span>
+
+      {steps.length === 0 && <p className="hint">Esta secuencia no tiene pasos todavía.</p>}
+
+      <ul className="channels">
+        {steps.map((step) => (
+          <li key={step.index} className="sequence-step">
+            <div className="sequence-step-row">
+              <button
+                type="button"
+                className="linkish"
+                aria-expanded={open === step.index}
+                onClick={() => setOpen(open === step.index ? null : step.index)}
+              >
+                {step.index + 1}. {step.name} · {(step.values ?? []).length} valores
+              </button>
+              <span className="spacer" />
+              <button
+                type="button"
+                aria-label={`Quitar paso ${step.index + 1}`}
+                onClick={() => onApply(() => api.removeChaserStep(fn.id, step.index))}
+              >
+                ✕
+              </button>
+            </div>
+
+            {open === step.index && (
+              <div className="sequence-values">
+                {(step.values ?? []).map((value) => (
+                  <div key={`${value.fixture}-${value.channel}`} className="sequence-value">
+                    <span>
+                      #{value.fixture} · canal {value.channel + 1}
+                    </span>
+                    <Slider
+                      min={0}
+                      max={255}
+                      defaultValue={value.value}
+                      aria-label={`Valor del canal ${value.channel + 1}`}
+                      onPointerUp={(e) =>
+                        onApply(() =>
+                          api.setSequenceStepValues(fn.id, step.index, [
+                            {
+                              fixture: value.fixture,
+                              channel: value.channel,
+                              value: Number((e.target as HTMLInputElement).value),
+                            },
+                          ]),
+                        )
+                      }
+                    />
+                    <span className="cue-time num">{value.value}</span>
+                  </div>
+                ))}
+
+                <div className="channel-add">
+                  <select
+                    value={fixtureId ?? ''}
+                    aria-label="Fixture"
+                    onChange={(e) =>
+                      setFixtureId(e.target.value === '' ? null : Number(e.target.value))
+                    }
+                  >
+                    {fixtures.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value=""
+                    aria-label="Añadir canal al paso"
+                    disabled={detail === null}
+                    onChange={(e) => {
+                      if (e.target.value === '' || fixtureId === null) return
+                      onApply(() =>
+                        api.setSequenceStepValues(fn.id, step.index, [
+                          { fixture: fixtureId, channel: Number(e.target.value), value: 255 },
+                        ]),
+                      )
+                    }}
+                  >
+                    <option value="">Añadir canal…</option>
+                    {(detail?.channelList ?? []).map((c) => (
+                      <option key={c.index} value={c.index}>
+                        {c.index + 1}. {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {body.scene !== undefined && (
+        <button
+          type="button"
+          onClick={() =>
+            onApply(() => api.addChaserStep(fn.id, { function: body.scene as number }))
+          }
+        >
+          + Añadir paso
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Clone, usage and the autostart -- the function's place in the project, as
+ * opposed to what it does.
+ */
+function Organization({
+  fn,
+  onApply,
+}: {
+  fn: FunctionState
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [usage, setUsage] = useState<FunctionUsage | null>(null)
+  const [startup, setStartup] = useState<boolean | null>(null)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the id on purpose
+  useEffect(() => {
+    setUsage(null)
+    api
+      .project()
+      .then((p) => setStartup(p.startupFunction === fn.id))
+      .catch(() => setStartup(null))
+  }, [fn.id])
+
+  return (
+    <div className="fields organization">
+      <button type="button" onClick={() => onApply(() => api.cloneFunction(fn.id))}>
+        Clonar
+      </button>
+
+      {startup !== null && (
+        <label className="field row-field">
+          <input
+            type="checkbox"
+            checked={startup}
+            onChange={(e) => {
+              const on = e.target.checked
+              setStartup(on)
+              onApply(() => api.patchProject({ startupFunction: on ? fn.id : -1 }))
+            }}
+          />
+          <span>Arrancar con el show</span>
+        </label>
+      )}
+
+      <button
+        type="button"
+        onClick={() =>
+          api
+            .functionUsage(fn.id)
+            .then(setUsage)
+            .catch(() => setUsage(null))
+        }
+      >
+        ¿Dónde se usa?
+      </button>
+
+      {usage !== null && (
+        <p className="hint usage">
+          {usage.functions.length === 0 && usage.widgets.length === 0 && !usage.startup
+            ? 'Nada la usa: se puede borrar sin dejar huecos.'
+            : [
+                ...usage.functions.map((f) => `${f.type} «${f.name}»`),
+                ...usage.widgets.map((w) => `${w.type} «${w.caption || '(sin título)'}»`),
+                ...(usage.startup ? ['el arranque del show'] : []),
+              ].join(' · ')}
+        </p>
+      )}
     </div>
   )
 }

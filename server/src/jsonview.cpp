@@ -118,6 +118,17 @@ QJsonObject JsonView::function(const Function *function)
     json["fadeOut"] = qint64(function->fadeOutSpeed());
     json["duration"] = qint64(function->duration());
 
+    /* Organization and run semantics. The path is the folder tree the
+       function lives in; run order and direction are QLC+'s own strings,
+       lowercased the way the PATCH accepts them back. */
+    /* Simplified: the bare folder, without the type-name root QLC+ 5
+       prefixes internally. */
+    if (function->path(true).isEmpty() == false)
+        json["path"] = function->path(true);
+    json["runOrder"] = Function::runOrderToString(function->runOrder()).toLower();
+    json["direction"] = Function::directionToString(function->direction()).toLower();
+    json["tempoType"] = Function::tempoTypeToString(function->tempoType()).toLower();
+
     /* Where a chaser has got to. This rides on the function list, which the
        live feed already broadcasts, so a cue list can show the cue that is
        actually up without asking for it. */
@@ -226,6 +237,10 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
             entry["index"] = i;
             entry["function"] = qint64(step.fid);
             entry["name"] = step.note.isEmpty() ? named(step.fid) : step.note;
+            /* The raw note travels apart from the display name, so an editor
+               can tell "named by hand" from "named after its function". */
+            if (step.note.isEmpty() == false)
+                entry["note"] = step.note;
             entry["fadeIn"] = qint64(step.fadeIn);
             entry["hold"] = qint64(step.hold);
             entry["fadeOut"] = qint64(step.fadeOut);
@@ -235,6 +250,9 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
 
         json["steps"] = steps;
         json["step"] = chaser->currentStepIndex();
+        json["fadeInMode"] = Chaser::speedModeToString(chaser->fadeInMode()).toLower();
+        json["fadeOutMode"] = Chaser::speedModeToString(chaser->fadeOutMode()).toLower();
+        json["durationMode"] = Chaser::speedModeToString(chaser->durationMode()).toLower();
         return json;
     }
 
@@ -389,7 +407,41 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
         json["scene"] = qint64(sceneId);
         const Function *scene = doc->function(sceneId);
         json["sceneName"] = scene != nullptr ? scene->name() : QStringLiteral("(borrada)");
-        json["steps"] = sequence->stepsCount();
+
+        QJsonArray steps;
+        const QList<ChaserStep> list = sequence->steps();
+        for (int i = 0; i < list.count(); i++)
+        {
+            const ChaserStep &step = list.at(i);
+            QJsonObject entry;
+            entry["index"] = i;
+            /* Same shape as a chaser's steps, so one client type fits both:
+               the function is the bound scene, the name is the note or a
+               plain ordinal. */
+            entry["function"] = qint64(step.fid);
+            entry["name"] = step.note.isEmpty()
+                ? QStringLiteral("Paso %1").arg(i + 1)
+                : step.note;
+            entry["fadeIn"] = qint64(step.fadeIn);
+            entry["hold"] = qint64(step.hold);
+            entry["fadeOut"] = qint64(step.fadeOut);
+            entry["duration"] = qint64(step.duration);
+            if (step.note.isEmpty() == false)
+                entry["note"] = step.note;
+
+            QJsonArray values;
+            for (const SceneValue &value : step.values)
+            {
+                QJsonObject one;
+                one["fixture"] = qint64(value.fxi);
+                one["channel"] = qint64(value.channel);
+                one["value"] = value.value;
+                values.append(one);
+            }
+            entry["values"] = values;
+            steps.append(entry);
+        }
+        json["steps"] = steps;
         return json;
     }
 
