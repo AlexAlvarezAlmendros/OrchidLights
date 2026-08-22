@@ -108,6 +108,20 @@ namespace DocWriter
      */
     Result addFixtures(Doc *doc, const FixturePlacement &placement, QList<quint32> &ids);
 
+    /**
+     * Clone a patched fixture: same definition, same mode, first hole in its
+     * universe that fits the whole batch.
+     *
+     * Copy/paste for the patch. The address is chosen here rather than asked
+     * for because the point of duplicating is not having to work one out: the
+     * search starts right after the original, wraps to the top of the universe,
+     * and refuses if no run of channels holds every copy. Channel modifiers
+     * travel with the copy -- they belong to the patch, and a duplicate whose
+     * dimmer bends differently from the original is not a duplicate.
+     */
+    Result cloneFixtures(Doc *doc, quint32 sourceId, int quantity, int gap,
+                         QList<quint32> &ids);
+
     Result removeFixture(Doc *doc, quint32 fixtureId);
 
     /** Move or rename a fixture. A universe or address of -1 leaves it alone. */
@@ -142,8 +156,26 @@ namespace DocWriter
      * raised. A plan is a top view; height belongs to a 3D view that does not
      * exist here yet.
      */
-    Result setPlanPosition(Doc *doc, quint32 fixtureId, const double *x, const double *y,
-                           const double *rotation, const QString *gel);
+    struct PlanItemPatch
+    {
+        const double *x = nullptr;
+        const double *y = nullptr;
+        const double *rotation = nullptr;
+        const QString *gel = nullptr;
+        const int *zoom = nullptr;       //!< fixed beam width in degrees; 0 clears it
+        const bool *hidden = nullptr;
+        const bool *locked = nullptr;
+        const bool *invertPan = nullptr;
+        const bool *invertTilt = nullptr;
+    };
+
+    /**
+     * The same, per head, plus what QLC+ hangs off a plan item beyond its
+     * position: a fixed zoom, and the hidden / locked / inverted-pan /
+     * inverted-tilt flags. Head 0 is the fixture itself; a multi-head bar
+     * stores an item per head, and the file says which with a Head attribute.
+     */
+    Result setPlanItem(Doc *doc, quint32 fixtureId, int head, const PlanItemPatch &patch);
 
     /** Take a fixture off the plan without unpatching it. */
     Result clearPlanPosition(Doc *doc, quint32 fixtureId);
@@ -355,6 +387,33 @@ namespace DocWriter
                            quint32 &groupId);
     Result removeFixtureGroup(Doc *doc, quint32 groupId);
     Result setFixtureGroupMembers(Doc *doc, quint32 groupId, const QList<quint32> &fixtureIds);
+
+    Result renameFixtureGroup(Doc *doc, quint32 groupId, const QString &name);
+
+    struct GroupCell
+    {
+        int x = 0;
+        int y = 0;
+        quint32 fixture = 0;
+        int head = 0;
+    };
+
+    /**
+     * Lay a group out as a 2D grid: its size and every occupied cell at once.
+     *
+     * The grid is what decides which way an RGB matrix runs across the rig, so
+     * it is replaced whole rather than patched cell by cell -- a half-applied
+     * layout is a matrix that snakes wrong with no way to see why. Cells may
+     * name a specific head, which is how one pixel bar becomes a column.
+     */
+    Result setFixtureGroupGrid(Doc *doc, quint32 groupId, int width, int height,
+                               const QList<GroupCell> &cells);
+
+    /**
+     * Turn or mirror the grid in place: rotate90, rotate180, rotate270,
+     * flipH, flipV -- the transformations QLC+ 5 offers on a group.
+     */
+    Result transformFixtureGroup(Doc *doc, quint32 groupId, const QString &op);
 
     /**
      * Channels groups: a named handful of individual channels, moved together.

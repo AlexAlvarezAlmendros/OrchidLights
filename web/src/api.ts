@@ -154,10 +154,20 @@ export interface ShowItem {
   missing?: boolean
 }
 
+export interface GroupCell {
+  x: number
+  y: number
+  fixture: number
+  head: number
+}
+
 export interface FixtureGroup {
   id: number
   name: string
   fixtures: number[]
+  /** The 2D grid: which way an effect snakes across the rig. */
+  size: { width: number; height: number }
+  cells: GroupCell[]
 }
 
 /**
@@ -187,6 +197,19 @@ export interface PlanState {
   fixtures: PlanFixture[]
 }
 
+export interface PlanHeadItem {
+  head: number
+  x: number
+  y: number
+  rotation: number
+  gel?: string
+  zoom?: number
+  hidden?: boolean
+  locked?: boolean
+  invertPan?: boolean
+  invertTilt?: boolean
+}
+
 export interface PlanFixture {
   id: number
   name: string
@@ -200,6 +223,14 @@ export interface PlanFixture {
   y?: number
   rotation?: number
   gel?: string
+  zoom?: number
+  hidden?: boolean
+  locked?: boolean
+  invertPan?: boolean
+  invertTilt?: boolean
+  heads?: number
+  /** Heads beyond the fixture's own that carry their own plan item. */
+  headItems?: PlanHeadItem[]
   /** Offsets from the fixture's address, so the interface can read them against
    *  the DMX frames it already receives. */
   roles: {
@@ -262,6 +293,11 @@ export interface FixtureState {
   manufacturer?: string
   model?: string
   mode?: string
+  /** How many heads the mode defines; a pixel bar is one fixture, many heads. */
+  heads?: number
+  /** What the definition's physical block says, for the rigger's summary.
+   *  Only what it actually says: an invented zero would read as "weightless". */
+  physical?: { weight?: number; power?: number; width?: number; height?: number; depth?: number }
 }
 
 /** Universes are numbered from 1 here, as they are on a desk. */
@@ -619,11 +655,26 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, fixtures }),
     }),
-  patchGroup: (id: number, patch: { name?: string; fixtures?: number[] }) =>
+  patchGroup: (
+    id: number,
+    patch: {
+      name?: string
+      fixtures?: number[]
+      size?: { width: number; height: number }
+      cells?: GroupCell[]
+    },
+  ) =>
     json<unknown>(`/api/v1/fixture-groups/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
+    }),
+  /** rotate90 | rotate180 | rotate270 | flipH | flipV, in place. */
+  transformGroup: (id: number, op: string) =>
+    json<unknown>(`/api/v1/fixture-groups/${id}/transform`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op }),
     }),
   removeGroup: (id: number) => json<unknown>(`/api/v1/fixture-groups/${id}`, { method: 'DELETE' }),
 
@@ -699,7 +750,18 @@ export const api = {
    *  and a height would not survive being saved. */
   setPlanPosition: (
     id: number,
-    position: { x?: number; y?: number; rotation?: number; gel?: string },
+    position: {
+      head?: number
+      x?: number
+      y?: number
+      rotation?: number
+      gel?: string
+      zoom?: number
+      hidden?: boolean
+      locked?: boolean
+      invertPan?: boolean
+      invertTilt?: boolean
+    },
   ) =>
     json<{ id: number }>(`/api/v1/plan/fixtures/${id}`, {
       method: 'PUT',
@@ -815,6 +877,13 @@ export const api = {
   removeFixture: (id: number) =>
     json<{ removed: number; consoleReferencesRemoved: number }>(`/api/v1/fixtures/${id}`, {
       method: 'DELETE',
+    }),
+  /** Same definition, same mode, first hole in the universe that fits. */
+  cloneFixture: (id: number, body: { quantity?: number; gap?: number } = {}) =>
+    json<{ created: number[] }>(`/api/v1/fixtures/${id}/clone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     }),
 
   /* Undo and redo, scoped to the console. A deleted widget comes back; a

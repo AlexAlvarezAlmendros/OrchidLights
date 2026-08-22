@@ -123,8 +123,13 @@ export function Plan({
   const across = grid.units === 'feet' ? grid.width * 304.8 : grid.width * 1000
   const deep = grid.units === 'feet' ? grid.depth * 304.8 : grid.depth * 1000
 
-  const placed = plan.fixtures.filter((f) => f.x !== undefined && f.y !== undefined)
+  const placed = plan.fixtures.filter(
+    (f) => f.x !== undefined && f.y !== undefined && f.hidden !== true,
+  )
   const unplaced = plan.fixtures.filter((f) => f.x === undefined || f.y === undefined)
+  const hidden = plan.fixtures.filter(
+    (f) => f.x !== undefined && f.y !== undefined && f.hidden === true,
+  )
 
   /** Pointer coordinates as millimetres on the stage, clamped to it. */
   const toStage = (event: React.PointerEvent) => {
@@ -289,6 +294,9 @@ export function Plan({
               chosen={chosen.includes(fixture.id)}
               colour={blackout ? null : colourOf(fixture, universes)}
               onGrab={(event) => {
+                /* A locked lamp still selects; it just cannot be dragged.
+                   That is what the padlock means on every plan ever drawn. */
+                if (fixture.locked === true) return
                 pending.current = { id: fixture.id, x: event.clientX, y: event.clientY }
               }}
               onRemove={() => {
@@ -366,6 +374,10 @@ export function Plan({
                   ? 'Ninguna de estas mezcla color.'
                   : `${selected.length - mixable} de ${selected.length} no mezclan color.`}
               </p>
+            )}
+
+            {selected.length === 1 && selected[0] !== undefined && (
+              <LampProps key={selected[0].id} fixture={selected[0]} onDone={reload} onFail={fail} />
             )}
 
             <button type="button" onClick={() => api.releaseLive().then(() => undefined, fail)}>
@@ -455,7 +467,137 @@ export function Plan({
           </div>
         </details>
       )}
+
+      {/* A hidden lamp that simply vanished could never be brought back. */}
+      {hidden.length > 0 && (
+        <details className="plan-tray">
+          <summary>Ocultas ({hidden.length})</summary>
+          <div className="tray-items">
+            {hidden.map((fixture) => (
+              <button
+                key={fixture.id}
+                type="button"
+                className="tray-item"
+                onClick={() =>
+                  api.setPlanPosition(fixture.id, { hidden: false }).then(reload).catch(fail)
+                }
+              >
+                {fixture.name}
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
+  )
+}
+
+/**
+ * What a lamp IS on the plan, as opposed to what it is doing: gel, rotation,
+ * fixed zoom, and the four flags QLC+ hangs off a plan item. Per head, when
+ * the fixture has more than one -- a pixel bar's cells can wear different
+ * gels, and the file says which with a Head attribute.
+ */
+function LampProps({
+  fixture,
+  onDone,
+  onFail,
+}: {
+  fixture: PlanFixture
+  onDone: () => void
+  onFail: (e: unknown) => void
+}) {
+  const [head, setHead] = useState(0)
+  const heads = fixture.heads ?? 1
+
+  const item = head === 0 ? fixture : fixture.headItems?.find((h) => h.head === head)
+
+  const write = (patch: Parameters<typeof api.setPlanPosition>[1]) =>
+    api
+      .setPlanPosition(fixture.id, { ...patch, head })
+      .then(onDone)
+      .catch(onFail)
+
+  const flag = (
+    key: 'hidden' | 'locked' | 'invertPan' | 'invertTilt',
+    label: string,
+    title: string,
+  ) => (
+    <label className="field row-field" title={title}>
+      <input
+        type="checkbox"
+        checked={item?.[key] === true}
+        onChange={(e) => write({ [key]: e.target.checked })}
+      />
+      <span>{label}</span>
+    </label>
+  )
+
+  return (
+    <details className="lamp-props">
+      <summary>Propiedades</summary>
+
+      {heads > 1 && (
+        <label className="field">
+          <span>Cabeza</span>
+          <select value={head} onChange={(e) => setHead(Number(e.target.value))}>
+            <option value={0}>Toda la fixture</option>
+            {Array.from({ length: heads }, (_, i) => i)
+              .slice(1)
+              .map((i) => (
+                <option key={i} value={i}>
+                  Cabeza {i + 1}
+                </option>
+              ))}
+          </select>
+        </label>
+      )}
+
+      <div className="fields">
+        <label className="field">
+          <span>Gel</span>
+          <input
+            type="color"
+            value={item?.gel ?? '#ffffff'}
+            onChange={(e) => write({ gel: e.target.value })}
+          />
+        </label>
+        <label className="field">
+          <span>Rotación</span>
+          <input
+            type="number"
+            min={0}
+            max={359}
+            value={item?.rotation ?? 0}
+            onChange={(e) => write({ rotation: Number(e.target.value) })}
+          />
+        </label>
+        <label className="field">
+          <span>Zoom fijo</span>
+          <input
+            type="number"
+            min={0}
+            max={180}
+            title="Ancho de haz en grados; 0 lo deja al canal"
+            value={item?.zoom ?? 0}
+            onChange={(e) => write({ zoom: Number(e.target.value) })}
+          />
+        </label>
+      </div>
+
+      {flag('hidden', 'Oculta', 'No se dibuja en la planta; se recupera desde «Ocultas»')}
+      {flag('locked', 'Bloqueada', 'Se queda donde está: la planta no la deja arrastrar')}
+      {flag(
+        'invertPan',
+        'Pan invertido',
+        'Para la vista 2D/3D y QLC+: el indicador de pan se dibuja al revés',
+      )}
+      {flag(
+        'invertTilt',
+        'Tilt invertido',
+        'Para la vista 2D/3D y QLC+: el indicador de tilt se dibuja al revés',
+      )}
+    </details>
   )
 }
 

@@ -3074,6 +3074,163 @@ try {
   check('the console depth acts: pages round-trip, presets land, banks build',
     consoleDepth === 'ok', consoleDepth)
 
+  /* F15a through the screen: the patch at rig scale. A duplicate born from
+     the row, the universe view that picks a lamp up and puts it down, the DIP
+     bank that says which switches, the rigger's summary, and a group grid a
+     quarter-turn actually turns. */
+  const patchScale = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const bornFixtures = []
+    let group = null
+
+    const cleanup = async () => {
+      if (group !== null) await fetch('/api/v1/fixture-groups/' + group, { method: 'DELETE' })
+      for (const id of bornFixtures) await fetch('/api/v1/fixtures/' + id, { method: 'DELETE' })
+      await wait(300)
+    }
+
+    try {
+      /* Room first: the chapter runs over nine different projects, and a
+         universe with no run of ten channels is a project this chapter
+         honestly skips rather than fails. */
+      const before = await (await fetch('/api/v1/fixtures')).json()
+      const taken = new Set()
+      for (const f of before) {
+        if (f.universe !== 1) continue
+        for (let c = f.address - 1; c < f.address - 1 + f.channels; c++) taken.add(c)
+      }
+      let start = -1
+      for (let c = 0; c <= 512 - 10 && start < 0; c++) {
+        let free = true
+        for (let i = 0; i < 10; i++) if (taken.has(c + i)) { free = false; break }
+        if (free) start = c
+      }
+      if (start < 0) return 'ok'
+
+      const made = await (await fetch('/api/v1/fixtures', { method: 'POST', headers: json,
+        body: JSON.stringify({ manufacturer: 'Generic', model: 'Generic RGBW', mode: 'RGBW',
+          name: 'RigF15', universe: 1, address: start + 1 }) })).json()
+      if (!made.created) return 'the probe fixture was refused: ' + JSON.stringify(made)
+      bornFixtures.push(...made.created)
+
+      /* To the patch, fixtures tab. */
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Patch')?.click()
+      await wait(900)
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Fixtures'))?.click()
+      await wait(600)
+
+      /* The add form offers the gap. */
+      const gapField = [...document.querySelectorAll('label')]
+        .find(l => l.textContent.includes('Hueco'))
+      if (!gapField) return 'the add form has no gap field'
+
+      /* A duplicate, born from the row. */
+      const dup = document.querySelector('button[aria-label="Duplicar RigF15"]')
+      if (!dup) return 'the row has no duplicate button'
+      dup.click()
+      await wait(1200)
+      const after = await (await fetch('/api/v1/fixtures')).json()
+      const copy = after.find(f => f.name === 'RigF15 (copia)')
+      if (!copy) return 'the duplicate never landed: ' + after.map(f => f.name).join(', ')
+      bornFixtures.push(copy.id)
+      if (copy.address !== start + 5) {
+        return 'the duplicate did not take the next hole: ' + copy.address
+      }
+
+      /* The universe view picks it up and puts it down. */
+      const uview = [...document.querySelectorAll('summary')]
+        .find(s => s.textContent.trim() === 'Vista de universo')
+      if (!uview) return 'there is no universe view'
+      uview.click()
+      await wait(600)
+      const cellOf = (channel) => [...document.querySelectorAll('.uview-cell')]
+        .find(c => (c.title ?? '').startsWith(channel + ' '))
+      const held = cellOf(copy.address)
+      if (!held || !held.title.includes('RigF15 (copia)')) {
+        return 'the copy is not painted on its cells: ' + (held?.title ?? 'no cell')
+      }
+      held.click()
+      await wait(300)
+      /* Ten channels past its end is free: we measured the hole above. */
+      const targetCell = cellOf(copy.address + 8)
+      if (!targetCell || !targetCell.title.includes('libre')) {
+        return 'no free cell to drop on: ' + (targetCell?.title ?? 'none')
+      }
+      targetCell.click()
+      await wait(1200)
+      const moved = (await (await fetch('/api/v1/fixtures')).json())
+        .find(f => f.id === copy.id)
+      if (moved.address !== copy.address + 8) {
+        return 'the drop moved nothing: ' + moved.address
+      }
+
+      /* The DIP bank: address 7 with the +1 convention is value 6 -- switches
+         2 and 3 up, everything else down. */
+      const dipCard = [...document.querySelectorAll('summary')]
+        .find(s => s.textContent.trim() === 'Calculadora DIP')
+      if (!dipCard) return 'there is no DIP calculator'
+      dipCard.click()
+      await wait(400)
+      const addressBox = dipCard.parentElement.querySelector('input[type=number]')
+      const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setI.call(addressBox, '7')
+      addressBox.dispatchEvent(new Event('input', { bubbles: true }))
+      await wait(400)
+      const levers = [...dipCard.parentElement.querySelectorAll('.dip-switch')]
+        .map(s => s.getAttribute('aria-pressed'))
+      const wanted = ['false','true','true','false','false','false','false','false','false','false']
+      if (levers.join(',') !== wanted.join(',')) {
+        return 'the DIP bank shows ' + levers.join(',') + ' for address 7'
+      }
+
+      /* The summary carries the copy and a totals row. */
+      const summary = [...document.querySelectorAll('summary')]
+        .find(s => s.textContent.trim() === 'Resumen del rig')
+      if (!summary) return 'there is no rig summary'
+      summary.click()
+      await wait(400)
+      const table = summary.parentElement.querySelector('.summary-table')
+      if (!table || !table.textContent.includes('RigF15 (copia)')) {
+        return 'the summary does not list the copy'
+      }
+      if (!table.querySelector('tfoot')) return 'the summary has no totals row'
+
+      /* A group of two, laid 2x1 by the daemon, turned to 1x2 from the
+         screen -- and the API agrees. */
+      const gr = await (await fetch('/api/v1/fixture-groups', { method: 'POST', headers: json,
+        body: JSON.stringify({ name: 'RejillaF15', fixtures: bornFixtures }) })).json()
+      group = gr.id
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Grupos'))?.click()
+      await wait(900)
+      const widthBox = document.querySelector('input[aria-label="Ancho de la rejilla de RejillaF15"]')
+      if (!widthBox) return 'the group card shows no grid'
+      const turn = widthBox.closest('.group-grid')
+        ?.querySelector('button[title="Girar 90° a la derecha"]')
+      if (!turn) return 'the group has no turn buttons'
+      turn.click()
+      await wait(1200)
+      const turned = (await (await fetch('/api/v1/fixture-groups')).json())
+        .find(g => g.id === group)
+      if (turned.size.width !== 1 || turned.size.height !== 2) {
+        return 'the quarter turn did not turn: ' + JSON.stringify(turned.size)
+      }
+
+      /* And the grid's cells are editable controls, not a drawing. */
+      const cell = document.querySelector('select[aria-label="Celda 1,1 de RejillaF15"]')
+      if (!cell) return 'the grid cells are not editable'
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the patch works at rig scale: duplicate, universe view, DIP, summary, grid',
+    patchScale === 'ok', patchScale)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

@@ -21,6 +21,7 @@
 #include <QJsonArray>
 #include <QColor>
 #include <QSet>
+#include <functional>
 
 #include "docwriter.h"
 
@@ -458,6 +459,107 @@ DocWriter::Result DocWriter::addFixtures(Doc *doc, const FixturePlacement &place
     return Result::success();
 }
 
+DocWriter::Result DocWriter::cloneFixtures(Doc *doc, quint32 sourceId, int quantity, int gap,
+                                           QList<quint32> &ids)
+{
+    ids.clear();
+
+    Fixture *source = doc->fixture(sourceId);
+    if (source == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(sourceId));
+
+    QLCFixtureDef *definition = source->fixtureDef();
+    QLCFixtureMode *mode = source->fixtureMode();
+    if (definition == nullptr || mode == nullptr)
+    {
+        return Result::failure(
+            QStringLiteral("\"%1\" has no resolved definition; a copy of a placeholder "
+                           "would only be a second placeholder").arg(source->name()));
+    }
+
+    if (quantity < 1 || quantity > 512)
+        return Result::failure(QStringLiteral("Quantity must be between 1 and 512"));
+    if (gap < 0 || gap > 512)
+        return Result::failure(QStringLiteral("Gap must be between 0 and 512"));
+
+    const int channels = int(source->channels());
+    const int stride = channels + gap;
+    const int universe = int(source->universe());
+
+    /* The first run of channels that holds the whole batch, searched from right
+       after the original and wrapping to the top of the universe. Chosen here
+       rather than asked for: the point of duplicating is not having to work an
+       address out. */
+    const QSet<int> taken = occupiedChannels(doc, universe, Fixture::invalidId());
+
+    const auto fits = [&](int start) {
+        const int span = quantity * stride - gap;
+        if (start < 0 || start + span > 512)
+            return false;
+        for (int i = 0; i < quantity; i++)
+            for (int c = start + i * stride; c < start + i * stride + channels; c++)
+                if (taken.contains(c))
+                    return false;
+        return true;
+    };
+
+    int start = -1;
+    const int preferred = int(source->address()) + channels;
+    for (int candidate = preferred; candidate <= 512 - channels; candidate++)
+    {
+        if (fits(candidate))
+        {
+            start = candidate;
+            break;
+        }
+    }
+    for (int candidate = 0; start < 0 && candidate < preferred; candidate++)
+    {
+        if (fits(candidate))
+            start = candidate;
+    }
+
+    if (start < 0)
+    {
+        return Result::failure(
+            QStringLiteral("Universe %1 has no run of %2 free channels for %3 %4")
+                .arg(universe + 1).arg(quantity * stride - gap).arg(quantity)
+                .arg(quantity == 1 ? QStringLiteral("copy") : QStringLiteral("copies")));
+    }
+
+    for (int i = 0; i < quantity; i++)
+    {
+        Fixture *fixture = new Fixture(doc);
+        fixture->setFixtureDefinition(definition, mode);
+        fixture->setUniverse(quint32(universe));
+        fixture->setAddress(quint32(start + i * stride));
+        fixture->setName(quantity > 1
+                             ? QStringLiteral("%1 (copia %2)").arg(source->name()).arg(i + 1)
+                             : QStringLiteral("%1 (copia)").arg(source->name()));
+
+        /* The modifiers belong to the patch: a duplicate whose dimmer bends
+           differently from the original is not a duplicate. */
+        for (quint32 c = 0; c < source->channels(); c++)
+        {
+            ChannelModifier *modifier = source->channelModifier(c);
+            if (modifier != nullptr)
+                fixture->setChannelModifier(c, modifier);
+        }
+
+        if (doc->addFixture(fixture) == false)
+        {
+            delete fixture;
+            return Result::failure(
+                QStringLiteral("The engine refused copy %1 of %2").arg(i + 1).arg(quantity));
+        }
+
+        ids.append(fixture->id());
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
 DocWriter::Result DocWriter::removeFixture(Doc *doc, quint32 fixtureId)
 {
     const Fixture *fixture = doc->fixture(fixtureId);
@@ -599,6 +701,130 @@ DocWriter::Result DocWriter::addFixtureGroup(Doc *doc, const QString &name,
         group->assignFixture(id, QLCPoint(x++, 0));
 
     groupId = group->id();
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::renameFixtureGroup(Doc *doc, quint32 groupId, const QString &name)
+{
+    FixtureGroup *group = doc->fixtureGroup(groupId);
+    if (group == nullptr)
+        return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
+    if (name.trimmed().isEmpty())
+        return Result::failure(QStringLiteral("A group needs a name"));
+
+    group->setName(name.trimmed());
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setFixtureGroupGrid(Doc *doc, quint32 groupId, int width, int height,
+                                                 const QList<GroupCell> &cells)
+{
+    FixtureGroup *group = doc->fixtureGroup(groupId);
+    if (group == nullptr)
+        return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
+
+    if (width < 1 || height < 1 || width > 64 || height > 64)
+        return Result::failure(QStringLiteral("The grid must be between 1x1 and 64x64"));
+
+    /* Check the whole layout before touching the group: cells in bounds, every
+       fixture real, every head real, no two heads in one cell and no head in
+       two cells. A half-applied grid is a matrix that snakes wrong with no way
+       to see why. */
+    QSet<QPair<int, int>> seenCells;
+    QSet<QPair<quint32, int>> seenHeads;
+    for (const GroupCell &cell : cells)
+    {
+        if (cell.x < 0 || cell.x >= width || cell.y < 0 || cell.y >= height)
+        {
+            return Result::failure(QStringLiteral("Cell (%1,%2) falls outside a %3x%4 grid")
+                                       .arg(cell.x).arg(cell.y).arg(width).arg(height));
+        }
+
+        const Fixture *fixture = doc->fixture(cell.fixture);
+        if (fixture == nullptr)
+            return Result::failure(QStringLiteral("No fixture with id %1").arg(cell.fixture));
+        if (cell.head < 0 || cell.head >= fixture->heads())
+        {
+            return Result::failure(QStringLiteral("\"%1\" has no head %2")
+                                       .arg(fixture->name()).arg(cell.head));
+        }
+
+        if (seenCells.contains({cell.x, cell.y}))
+            return Result::failure(QStringLiteral("Cell (%1,%2) is named twice")
+                                       .arg(cell.x).arg(cell.y));
+        seenCells.insert({cell.x, cell.y});
+
+        if (seenHeads.contains({cell.fixture, cell.head}))
+        {
+            return Result::failure(QStringLiteral("Head %1 of fixture %2 is placed twice")
+                                       .arg(cell.head).arg(cell.fixture));
+        }
+        seenHeads.insert({cell.fixture, cell.head});
+    }
+
+    const QList<QLCPoint> occupied = group->headsMap().keys();
+    for (const QLCPoint &point : occupied)
+        group->resignHead(point);
+
+    group->setSize(QSize(width, height));
+    for (const GroupCell &cell : cells)
+        group->assignHead(QLCPoint(cell.x, cell.y), GroupHead(cell.fixture, cell.head));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::transformFixtureGroup(Doc *doc, quint32 groupId, const QString &op)
+{
+    FixtureGroup *group = doc->fixtureGroup(groupId);
+    if (group == nullptr)
+        return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
+
+    const int w = group->size().width();
+    const int h = group->size().height();
+    const QMap<QLCPoint, GroupHead> heads = group->headsMap();
+
+    QSize size(w, h);
+    std::function<QLCPoint(const QLCPoint &)> map;
+
+    if (op == QStringLiteral("rotate90"))
+    {
+        size = QSize(h, w);
+        map = [h](const QLCPoint &p) { return QLCPoint(h - 1 - p.y(), p.x()); };
+    }
+    else if (op == QStringLiteral("rotate180"))
+    {
+        map = [w, h](const QLCPoint &p) { return QLCPoint(w - 1 - p.x(), h - 1 - p.y()); };
+    }
+    else if (op == QStringLiteral("rotate270"))
+    {
+        size = QSize(h, w);
+        map = [w](const QLCPoint &p) { return QLCPoint(p.y(), w - 1 - p.x()); };
+    }
+    else if (op == QStringLiteral("flipH"))
+    {
+        map = [w](const QLCPoint &p) { return QLCPoint(w - 1 - p.x(), p.y()); };
+    }
+    else if (op == QStringLiteral("flipV"))
+    {
+        map = [h](const QLCPoint &p) { return QLCPoint(p.x(), h - 1 - p.y()); };
+    }
+    else
+    {
+        return Result::failure(QStringLiteral(
+            "\"%1\" is not a transformation. Use rotate90, rotate180, rotate270, flipH or flipV")
+                                   .arg(op));
+    }
+
+    for (auto it = heads.constBegin(); it != heads.constEnd(); ++it)
+        group->resignHead(it.key());
+
+    group->setSize(size);
+    for (auto it = heads.constBegin(); it != heads.constEnd(); ++it)
+        group->assignHead(map(it.key()), it.value());
+
     doc->setModified();
     return Result::success();
 }
@@ -747,41 +973,73 @@ DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
  * The plan
  *****************************************************************************/
 
-DocWriter::Result DocWriter::setPlanPosition(Doc *doc, quint32 fixtureId, const double *x,
-                                             const double *y, const double *rotation,
-                                             const QString *gel)
+DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head,
+                                         const PlanItemPatch &patch)
 {
     const Fixture *fixture = doc->fixture(fixtureId);
     if (fixture == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
 
+    if (head < 0 || head >= fixture->heads())
+    {
+        return Result::failure(QStringLiteral("\"%1\" has %2 %3; there is no head %4")
+                                   .arg(fixture->name()).arg(fixture->heads())
+                                   .arg(fixture->heads() == 1 ? QStringLiteral("head")
+                                                              : QStringLiteral("heads"))
+                                   .arg(head));
+    }
+
     MonitorProperties *monitor = doc->monitorProperties();
+    const quint16 h = quint16(head);
 
     QColor colour;
-    if (gel != nullptr && gel->isEmpty() == false)
+    if (patch.gel != nullptr && patch.gel->isEmpty() == false)
     {
-        colour = QColor(*gel);
+        colour = QColor(*patch.gel);
         if (colour.isValid() == false)
-            return Result::failure(QStringLiteral("\"%1\" is not a colour").arg(*gel));
+            return Result::failure(QStringLiteral("\"%1\" is not a colour").arg(*patch.gel));
     }
+
+    if (patch.zoom != nullptr && (*patch.zoom < 0 || *patch.zoom > 180))
+        return Result::failure(QStringLiteral("Zoom is a beam width in degrees, 0 to 180"));
 
     /* Whatever it had, so a request that moves a lamp does not also throw away
        the gel somebody set on it. */
-    const QVector3D was = monitor->fixturePosition(fixtureId, 0, 0);
-    const QVector3D turned = monitor->fixtureRotation(fixtureId, 0, 0);
+    const QVector3D was = monitor->fixturePosition(fixtureId, h, 0);
+    const QVector3D turned = monitor->fixtureRotation(fixtureId, h, 0);
 
-    const QVector3D position(x != nullptr ? float(*x) : was.x(),
-                             y != nullptr ? float(*y) : was.y(),
+    const QVector3D position(patch.x != nullptr ? float(*patch.x) : was.x(),
+                             patch.y != nullptr ? float(*patch.y) : was.y(),
                              was.z());
 
-    monitor->setFixturePosition(fixtureId, 0, 0, position);
+    monitor->setFixturePosition(fixtureId, h, 0, position);
 
-    if (rotation != nullptr)
-        monitor->setFixtureRotation(fixtureId, 0, 0, QVector3D(turned.x(), float(*rotation),
-                                                               turned.z()));
+    if (patch.rotation != nullptr)
+        monitor->setFixtureRotation(fixtureId, h, 0,
+                                    QVector3D(turned.x(), float(*patch.rotation), turned.z()));
 
-    if (gel != nullptr)
-        monitor->setFixtureGelColor(fixtureId, 0, 0, colour);
+    if (patch.gel != nullptr)
+        monitor->setFixtureGelColor(fixtureId, h, 0, colour);
+
+    if (patch.zoom != nullptr)
+        monitor->setFixtureFixedZoom(fixtureId, h, 0, *patch.zoom);
+
+    /* The four flags QLC+ hangs off a plan item, read-modify-write so setting
+       one never clears another. */
+    quint32 flags = monitor->fixtureFlags(fixtureId, h, 0);
+    const auto apply = [&flags](const bool *value, quint32 bit) {
+        if (value == nullptr)
+            return;
+        if (*value)
+            flags |= bit;
+        else
+            flags &= ~bit;
+    };
+    apply(patch.hidden, MonitorProperties::HiddenFlag);
+    apply(patch.locked, MonitorProperties::LockedFlag);
+    apply(patch.invertPan, MonitorProperties::InvertedPanFlag);
+    apply(patch.invertTilt, MonitorProperties::InvertedTiltFlag);
+    monitor->setFixtureFlags(fixtureId, h, 0, flags);
 
     doc->setModified();
     return Result::success();

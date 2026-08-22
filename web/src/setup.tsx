@@ -18,6 +18,7 @@ import {
   type ChannelGroup,
   type FixtureGroup,
   type FixtureState,
+  type GroupCell,
   type IoOptions,
   type UniverseMap,
   type UniverseState,
@@ -399,7 +400,239 @@ function Fixtures({
           <FixtureRow key={fixture.id} fixture={fixture} universes={universes} onRun={onRun} />
         ))}
       </div>
+
+      {fixtures.length > 0 && (
+        <UniverseView fixtures={fixtures} universes={universes} onRun={onRun} />
+      )}
+      <AddressTool />
+      {fixtures.length > 0 && <RigSummary fixtures={fixtures} />}
     </div>
+  )
+}
+
+/**
+ * The universe, cell by cell: 512 channels with who sits on each.
+ *
+ * Also the honest way to move a fixture -- pick it up, put it down on a free
+ * run, and the daemon refuses the drop if it would land on somebody. QLC+
+ * calls this the Universe View; cut and paste here is literally changing the
+ * address, so that is what the gesture does.
+ */
+function UniverseView({
+  fixtures,
+  universes,
+  onRun,
+}: {
+  fixtures: FixtureState[]
+  universes: UniverseState[]
+  onRun: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [universe, setUniverse] = useState(1)
+  const [moving, setMoving] = useState<number | null>(null)
+
+  const local = fixtures.filter((f) => f.universe === universe)
+  const byCell = new Map<number, FixtureState>()
+  for (const fixture of local) {
+    for (let c = fixture.address - 1; c < fixture.address - 1 + fixture.channels; c++) {
+      byCell.set(c, fixture)
+    }
+  }
+  const used = byCell.size
+
+  /* A colour per fixture, stable across renders: the id decides the hue. */
+  const hueOf = (id: number) => (id * 47) % 360
+
+  const drop = (cell: number) => {
+    if (moving === null) return
+    const id = moving
+    setMoving(null)
+    onRun(() => api.patchFixture(id, { universe, address: cell + 1 }))
+  }
+
+  return (
+    <details className="card universe-view">
+      <summary>Vista de universo</summary>
+
+      <div className="fields">
+        <label className="field">
+          <span>Universo</span>
+          <select value={universe} onChange={(e) => setUniverse(Number(e.target.value))}>
+            {universes.map((u) => (
+              <option key={u.id} value={u.id}>
+                U{u.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="hint">
+          {used} ocupados · {512 - used} libres.
+          {moving !== null
+            ? ` Moviendo «${fixtures.find((f) => f.id === moving)?.name}»: pulsa una celda libre.`
+            : ' Pulsa una fixture para recogerla y una celda libre para soltarla.'}
+        </p>
+      </div>
+
+      <div className="uview-grid">
+        {Array.from({ length: 512 }, (_, cell) => {
+          const owner = byCell.get(cell)
+          return (
+            <button
+              /* The cell IS the channel; 512 fixed positions. */
+              // biome-ignore lint/suspicious/noArrayIndexKey: the index is the channel
+              key={cell}
+              type="button"
+              className="uview-cell"
+              data-held={owner !== undefined && owner.id === moving}
+              title={
+                owner
+                  ? `${cell + 1} · ${owner.name} (${owner.address}–${owner.address + owner.channels - 1})`
+                  : `${cell + 1} libre`
+              }
+              style={
+                owner
+                  ? { background: `hsl(${hueOf(owner.id)} 60% ${owner.id === moving ? 60 : 40}%)` }
+                  : undefined
+              }
+              onClick={() => {
+                if (owner === undefined) drop(cell)
+                else setMoving(moving === owner.id ? null : owner.id)
+              }}
+            >
+              {cell % 32 === 0 ? cell + 1 : ''}
+            </button>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
+
+/**
+ * The DIP switch calculator, both ways: type an address and read the
+ * switches, or click switches and read the address. The common convention
+ * (all switches off = address 1) is a toggle, because half the amps on a rig
+ * follow it and the other half do not.
+ */
+function AddressTool() {
+  const [address, setAddress] = useState(1)
+  const [plusOne, setPlusOne] = useState(true)
+
+  const value = plusOne ? address - 1 : address
+  const clamp = (next: number) => Math.min(512, Math.max(plusOne ? 1 : 0, next))
+
+  return (
+    <details className="card">
+      <summary>Calculadora DIP</summary>
+
+      <div className="fields">
+        <label className="field">
+          <span>Dirección</span>
+          <input
+            type="number"
+            min={1}
+            max={512}
+            value={address}
+            onChange={(e) => setAddress(clamp(Number(e.target.value)))}
+          />
+        </label>
+        <label className="field row-field">
+          <input type="checkbox" checked={plusOne} onChange={(e) => setPlusOne(e.target.checked)} />
+          <span>Todo apagado = dirección 1 (DIP = dirección − 1)</span>
+        </label>
+      </div>
+
+      <fieldset className="dip-bank">
+        <legend className="visually-hidden">Interruptores DIP</legend>
+        {Array.from({ length: 10 }, (_, i) => {
+          const on = (value & (1 << i)) !== 0
+          return (
+            <button
+              // biome-ignore lint/suspicious/noArrayIndexKey: the index is the switch
+              key={i}
+              type="button"
+              className="dip-switch"
+              aria-pressed={on}
+              aria-label={`DIP ${i + 1} (${1 << i})`}
+              onClick={() => setAddress(clamp(address + (on ? -(1 << i) : 1 << i)))}
+            >
+              <span className="dip-lever" data-on={on} />
+              <span className="dip-label">{i + 1}</span>
+            </button>
+          )
+        })}
+      </fieldset>
+    </details>
+  )
+}
+
+/**
+ * What the rig weighs and draws, fixture by fixture and in total -- the two
+ * numbers a rigger and a generator hire actually ask for. Printable: the
+ * print stylesheet keeps only this card.
+ */
+function RigSummary({ fixtures }: { fixtures: FixtureState[] }) {
+  const weight = fixtures.reduce((sum, f) => sum + (f.physical?.weight ?? 0), 0)
+  const power = fixtures.reduce((sum, f) => sum + (f.physical?.power ?? 0), 0)
+  const channels = fixtures.reduce((sum, f) => sum + f.channels, 0)
+  const blanks = fixtures.filter((f) => f.physical === undefined).length
+
+  return (
+    <details className="card print-area">
+      <summary>Resumen del rig</summary>
+
+      <table className="summary-table">
+        <thead>
+          <tr>
+            <th>Fixture</th>
+            <th>Modo</th>
+            <th>U</th>
+            <th>Dirección</th>
+            <th>Canales</th>
+            <th>Peso</th>
+            <th>Potencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fixtures.map((f) => (
+            <tr key={f.id}>
+              <td>{f.name}</td>
+              <td>{f.mode ?? '—'}</td>
+              <td>{f.universe}</td>
+              <td>
+                {f.address}–{f.address + f.channels - 1}
+              </td>
+              <td>{f.channels}</td>
+              <td>{f.physical?.weight !== undefined ? `${f.physical.weight} kg` : '—'}</td>
+              <td>{f.physical?.power !== undefined ? `${f.physical.power} W` : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>{fixtures.length} fixtures</td>
+            <td />
+            <td />
+            <td />
+            <td>{channels}</td>
+            <td>{weight > 0 ? `${Math.round(weight * 10) / 10} kg` : '—'}</td>
+            <td>{power > 0 ? `${power} W` : '—'}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      {/* Missing data said plainly: a total that quietly skips half the rig
+          reads as a lighter, thriftier rig than the one on the truck. */}
+      {blanks > 0 && (
+        <p className="hint">
+          {blanks} de {fixtures.length} sin datos físicos en su definición: los totales son un
+          mínimo, no el rig.
+        </p>
+      )}
+
+      <button type="button" onClick={() => window.print()}>
+        Imprimir
+      </button>
+    </details>
   )
 }
 
@@ -472,6 +705,16 @@ function FixtureRow({
             that looks right and one that is right. */}
           {fixture.resolved ? '' : ' · sin definición'}
         </span>
+
+        <button
+          type="button"
+          aria-label={`Duplicar ${fixture.name}`}
+          title="Duplicar: misma definición, primer hueco que la acoge"
+          disabled={!fixture.resolved}
+          onClick={() => onRun(() => api.cloneFixture(fixture.id))}
+        >
+          ⧉
+        </button>
 
         {/* A lamp behaving oddly is explained by a modifier more often than by
           anything else in the patch, so the count is on the row: without it
@@ -639,6 +882,7 @@ function AddFixture({
   const [universe, setUniverse] = useState(1)
   const [address, setAddress] = useState(1)
   const [quantity, setQuantity] = useState(1)
+  const [gap, setGap] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -772,11 +1016,24 @@ function AddFixture({
             onChange={(e) => setQuantity(Number(e.target.value))}
           />
         </label>
+
+        <label className="field">
+          <span>Hueco</span>
+          <input
+            type="number"
+            min={0}
+            max={64}
+            value={gap}
+            title="Canales libres entre fixture y fixture"
+            onChange={(e) => setGap(Number(e.target.value))}
+          />
+        </label>
       </div>
 
       {channels > 0 && (
         <p className="hint">
-          {quantity} × {channels} canales, de {address} a {address + quantity * channels - 1}.
+          {quantity} × {channels} canales{gap > 0 ? ` con ${gap} de hueco` : ''}, de {address} a{' '}
+          {address + quantity * channels + Math.max(0, quantity - 1) * gap - 1}.
         </p>
       )}
 
@@ -784,7 +1041,9 @@ function AddFixture({
         type="button"
         disabled={!ready}
         onClick={() =>
-          onRun(() => api.addFixtures({ manufacturer, model, mode, universe, address, quantity }))
+          onRun(() =>
+            api.addFixtures({ manufacturer, model, mode, universe, address, quantity, gap }),
+          )
         }
       >
         Añadir
@@ -896,6 +1155,8 @@ function GroupCard({
         ))}
       </ul>
 
+      {group.fixtures.length > 0 && <GroupGrid group={group} fixtures={fixtures} onRun={onRun} />}
+
       <div className="channel-add">
         <select
           value=""
@@ -920,6 +1181,157 @@ function GroupCard({
         </select>
       </div>
     </article>
+  )
+}
+
+/**
+ * The group as the 2D grid it really is.
+ *
+ * Which head sits in which cell is what decides which way an RGB matrix runs
+ * across the rig, so the grid is edited whole: every cell is a select over
+ * the members' heads, and the turns are the daemon's -- the same arithmetic
+ * QLC+ 5 applies, proven against the saved file.
+ */
+function GroupGrid({
+  group,
+  fixtures,
+  onRun,
+}: {
+  group: FixtureGroup
+  fixtures: FixtureState[]
+  onRun: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const width = group.size?.width ?? 1
+  const height = group.size?.height ?? 1
+  const cells = group.cells ?? []
+
+  const members = group.fixtures
+    .map((id) => fixtures.find((f) => f.id === id))
+    .filter((f): f is FixtureState => f !== undefined)
+
+  const options: { value: string; label: string }[] = []
+  for (const member of members) {
+    const heads = member.heads ?? 1
+    for (let head = 0; head < heads; head++) {
+      options.push({
+        value: `${member.id}:${head}`,
+        label: heads > 1 ? `${member.name} · c${head + 1}` : member.name,
+      })
+    }
+  }
+
+  const at = (x: number, y: number) => cells.find((c) => c.x === x && c.y === y)
+
+  const resize = (w: number, h: number) => {
+    if (w < 1 || h < 1 || w > 64 || h > 64) return
+    onRun(() =>
+      api.patchGroup(group.id, {
+        size: { width: w, height: h },
+        /* Whatever no longer fits is dropped -- visibly, since the grid is
+           the screen the operator is looking at. */
+        cells: cells.filter((c) => c.x < w && c.y < h),
+      }),
+    )
+  }
+
+  const place = (x: number, y: number, value: string) => {
+    const kept = cells.filter(
+      (c) => !(c.x === x && c.y === y) && `${c.fixture}:${c.head}` !== value,
+    )
+    const next: GroupCell[] =
+      value === ''
+        ? kept
+        : [
+            ...kept,
+            {
+              x,
+              y,
+              fixture: Number(value.split(':')[0]),
+              head: Number(value.split(':')[1]),
+            },
+          ]
+    onRun(() => api.patchGroup(group.id, { size: { width, height }, cells: next }))
+  }
+
+  const turn = (op: string) => onRun(() => api.transformGroup(group.id, op))
+
+  return (
+    <div className="group-grid">
+      <div className="fields">
+        <label className="field">
+          <span>Ancho</span>
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={width}
+            aria-label={`Ancho de la rejilla de ${group.name}`}
+            onChange={(e) => resize(Number(e.target.value), height)}
+          />
+        </label>
+        <label className="field">
+          <span>Alto</span>
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={height}
+            aria-label={`Alto de la rejilla de ${group.name}`}
+            onChange={(e) => resize(width, Number(e.target.value))}
+          />
+        </label>
+        <div className="field">
+          <span>Girar</span>
+          <div className="grid-turns">
+            <button
+              type="button"
+              title="Girar 90° a la izquierda"
+              onClick={() => turn('rotate270')}
+            >
+              ⟲
+            </button>
+            <button type="button" title="Girar 90° a la derecha" onClick={() => turn('rotate90')}>
+              ⟳
+            </button>
+            <button type="button" title="Girar 180°" onClick={() => turn('rotate180')}>
+              180°
+            </button>
+            <button type="button" title="Espejar horizontal" onClick={() => turn('flipH')}>
+              ↔
+            </button>
+            <button type="button" title="Espejar vertical" onClick={() => turn('flipV')}>
+              ↕
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-cells" style={{ gridTemplateColumns: `repeat(${width}, 1fr)` }}>
+        {Array.from({ length: width * height }, (_, i) => {
+          const x = i % width
+          const y = Math.floor(i / width)
+          const cell = at(x, y)
+          return (
+            <select
+              /* The cell IS the coordinate. */
+              // biome-ignore lint/suspicious/noArrayIndexKey: the index is the cell
+              key={i}
+              className="grid-cell"
+              value={cell ? `${cell.fixture}:${cell.head}` : ''}
+              aria-label={`Celda ${x + 1},${y + 1} de ${group.name}`}
+              onChange={(e) => place(x, y, e.target.value)}
+            >
+              <option value="">·</option>
+              {options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
