@@ -20,6 +20,7 @@
 #ifndef VIRTUALCONSOLE_H
 #define VIRTUALCONSOLE_H
 
+#include <climits>
 #include <QStringList>
 #include <QString>
 #include <QVector>
@@ -87,6 +88,26 @@ struct VcWidget
      *  "Ctrl+F1"), empty when none. */
     QString key;
 
+    /** How a slider draws: "Knob" for the round one, empty for the default. */
+    QString sliderStyle;
+
+    /** Adjust-mode slider: the function whose attribute this fader turns.
+     *  UINT_MAX when none. */
+    quint32 adjustFunction = UINT_MAX;
+    int adjustAttribute = 0;
+
+    /** A clock's agenda: functions fired at a time of day, on chosen days.
+     *  weekFlags: bit 0 = Monday .. bit 6 = Sunday, 0 = every day; bit 7 =
+     *  repeat. Times are seconds into the day; stop -1 = none. */
+    struct ClockSchedule
+    {
+        quint32 functionId = UINT_MAX;
+        int startTime = 0;
+        int stopTime = -1;
+        int weekFlags = 0;
+    };
+    QVector<ClockSchedule> schedules;
+
     /** Function a button drives, or the one a playback slider rides. */
     bool hasFunction = false;
     quint32 functionId = 0;
@@ -94,6 +115,16 @@ struct VcWidget
     /** What a button does when pressed: Toggle, Flash, Blackout or StopAll.
      *  Empty for everything else. */
     QString action;
+
+    /** Flash buttons: whether the flash overrides running functions, and
+     *  whether it forces LTP. Attributes of the <Action> element. */
+    bool flashOverride = false;
+    bool flashForceLTP = false;
+
+    /** Startup intensity: the level a button starts its function at, when
+     *  enabled. Percent, as the file stores it. */
+    bool startupIntensityEnabled = false;
+    int startupIntensity = 100;
 
     /* Sliders. QLC+ has three kinds and they do entirely different things:
        Level drives fixture channels directly, Playback rides a function's

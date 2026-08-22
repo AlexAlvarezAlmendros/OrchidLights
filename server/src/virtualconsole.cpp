@@ -19,6 +19,8 @@
 
 #include <QXmlStreamReader>
 
+#include <QTime>
+
 #include "virtualconsole.h"
 
 namespace
@@ -70,6 +72,12 @@ namespace
     void parseWidget(QXmlStreamReader &reader, VcWidget &widget)
     {
         widget.type = typeForElement(reader.name());
+
+        /* qmlui's slider style: "Knob" draws round. Read here because it is
+           an attribute of the widget element itself. */
+        if (reader.attributes().hasAttribute(QStringLiteral("WidgetStyle")))
+            widget.sliderStyle =
+                reader.attributes().value(QStringLiteral("WidgetStyle")).toString();
 
         const QXmlStreamAttributes widgetAttributes = reader.attributes();
         widget.caption = widgetAttributes.value(QStringLiteral("Caption")).toString();
@@ -181,6 +189,40 @@ namespace
                 }
                 reader.skipCurrentElement();
             }
+            else if (name == QStringLiteral("Schedule"))
+            {
+                /* The clock's agenda, in either spelling: qmlui writes
+                   StartTime/StopTime/WeekFlags, QLC+ 4 wrote a bare Time. */
+                const QXmlStreamAttributes attributes = reader.attributes();
+                VcWidget::ClockSchedule entry;
+                entry.functionId =
+                    attributes.value(QStringLiteral("Function")).toUInt();
+
+                const auto seconds = [&attributes](const QString &key) {
+                    const QTime time = QTime::fromString(
+                        attributes.value(key).toString(), QStringLiteral("HH:mm:ss"));
+                    return time.isValid() ? time.msecsSinceStartOfDay() / 1000 : -1;
+                };
+                int start = seconds(QStringLiteral("StartTime"));
+                if (start < 0)
+                    start = seconds(QStringLiteral("Time"));
+                entry.startTime = qMax(0, start);
+                entry.stopTime = seconds(QStringLiteral("StopTime"));
+                entry.weekFlags =
+                    attributes.value(QStringLiteral("WeekFlags")).toInt();
+
+                widget.schedules.append(entry);
+                reader.skipCurrentElement();
+            }
+            else if (name == QStringLiteral("Intensity"))
+            {
+                /* A button's startup intensity: <Intensity Adjust="True">75.
+                   Only meaningful on buttons; harmless to carry elsewhere. */
+                widget.startupIntensityEnabled =
+                    reader.attributes().value(QStringLiteral("Adjust"))
+                        .compare(QStringLiteral("True"), Qt::CaseInsensitive) == 0;
+                widget.startupIntensity = reader.readElementText().trimmed().toInt();
+            }
             else if (name == QStringLiteral("Key"))
             {
                 /* The keyboard shortcut, as QKeySequence writes it
@@ -270,6 +312,17 @@ namespace
                 widget.speedMax = reader.attributes().value(QStringLiteral("Maximum")).toInt();
                 reader.skipCurrentElement();
             }
+            else if (name == QStringLiteral("Adjust"))
+            {
+                /* qmlui's adjust-mode target: the function whose attribute
+                   the fader turns. */
+                const QXmlStreamAttributes attributes = reader.attributes();
+                widget.adjustFunction =
+                    attributes.value(QStringLiteral("Function")).toUInt();
+                widget.adjustAttribute =
+                    attributes.value(QStringLiteral("Attribute")).toInt();
+                reader.skipCurrentElement();
+            }
             else if (name == QStringLiteral("SliderMode"))
             {
                 widget.sliderMode = reader.readElementText().trimmed().toLower();
@@ -280,6 +333,13 @@ namespace
                    only ever show it as a toggle -- and a button captioned
                    BLACKOUT that has been quietly turned into a toggle is a
                    discovery nobody wants to make from the desk. */
+                {
+                    const QXmlStreamAttributes attributes = reader.attributes();
+                    widget.flashOverride =
+                        attributes.value(QStringLiteral("Override")).toInt() != 0;
+                    widget.flashForceLTP =
+                        attributes.value(QStringLiteral("ForceLTP")).toInt() != 0;
+                }
                 widget.action = reader.readElementText().trimmed();
             }
             else if (name == QStringLiteral("Level"))

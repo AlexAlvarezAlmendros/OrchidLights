@@ -395,13 +395,19 @@ export function App() {
   }, [theme])
 
   const running = useMemo(
-    () => new Set(functions.filter((f) => f.running).map((f) => f.id)),
+    /* Flashing counts as lit: the engine's flash overlay lights without
+       owning the run state, and a lit button drawn dark is a lie. */
+    () => new Set(functions.filter((f) => f.running || f.flashing === true).map((f) => f.id)),
     [functions],
   )
 
   const toggle = useCallback((id: number) => live.current?.toggle(id, running.has(id)), [running])
 
-  const flash = useCallback((id: number, on: boolean) => live.current?.flash(id, on), [])
+  const flash = useCallback(
+    (id: number, on: boolean, flags?: { override?: boolean; forceLTP?: boolean }) =>
+      live.current?.flash(id, on, flags),
+    [],
+  )
 
   /* The two button actions that have no function behind them. Stop-all walks
      the running set through the same stop path a tap uses -- the daemon's
@@ -458,7 +464,10 @@ export function App() {
           buttonAction(action)
         } else if (widget.functionId !== undefined) {
           if (action === 'Flash') {
-            flash(widget.functionId, true)
+            flash(widget.functionId, true, {
+              override: widget.flashOverride ?? false,
+              forceLTP: widget.flashForceLTP ?? false,
+            })
             const list = held.get(baseOf(event)) ?? []
             list.push(widget.functionId)
             held.set(baseOf(event), list)
@@ -792,11 +801,14 @@ export function App() {
     async (type: string) => {
       const spec = CREATABLE.find((c) => c.type === type)
 
+      /* A knob is a slider wearing WidgetStyle="Knob" -- one widget in the
+         file, two entries in the palette because operators ask for knobs. */
       const created = await api.addWidget({
-        type,
+        type: type === 'knob' ? 'slider' : type,
         ...(current ? { parent: current.id } : {}),
         caption: spec?.label ?? type,
         geometry: placeBelow(current?.children ?? [], type),
+        ...(type === 'knob' ? { sliderStyle: 'Knob' } : {}),
       })
 
       await refresh()
@@ -1267,7 +1279,7 @@ export function App() {
  *  Bundled so the plumbing through Surface and NestedFrame stays one prop. */
 interface DeskActions {
   blackout: boolean
-  onFlash: (id: number, on: boolean) => void
+  onFlash: (id: number, on: boolean, flags?: { override?: boolean; forceLTP?: boolean }) => void
   onAction: (action: 'Blackout' | 'StopAll') => void
 }
 
@@ -1754,7 +1766,10 @@ function Widget({
               } catch {
                 // The pointerup listener still covers the common case.
               }
-              desk.onFlash(id, true)
+              desk.onFlash(id, true, {
+                override: widget.flashOverride ?? false,
+                forceLTP: widget.flashForceLTP ?? false,
+              })
             }}
             onPointerUp={() => desk.onFlash(id, false)}
             onPointerCancel={() => desk.onFlash(id, false)}
@@ -1778,6 +1793,10 @@ function Widget({
         </button>
       )
     }
+  }
+
+  if (widget.type === 'clock') {
+    return <ClockFace widget={widget} style={style} />
   }
 
   if (widget.type === 'audiotriggers') {
@@ -2055,6 +2074,42 @@ function Heading({ text }: { text: string }) {
   )
 }
 
+/**
+ * The clock, actually drawn: ticking time for the plain one, the configured
+ * span for countdown and stopwatch, and a chip when the agenda carries
+ * schedules -- which run in the DAEMON, browser open or not.
+ */
+function ClockFace({ widget, style }: { widget: VcWidget; style: React.CSSProperties }) {
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const kind = widget.clockType ?? 'clock'
+  const two = (n: number) => String(n).padStart(2, '0')
+  const face =
+    kind === 'clock'
+      ? `${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`
+      : (() => {
+          const total = widget.clockTime ?? 0
+          return `${two(Math.floor(total / 3600))}:${two(Math.floor((total % 3600) / 60))}:${two(total % 60)}`
+        })()
+
+  return (
+    <div className="widget clock" style={style}>
+      {widget.caption !== '' && <span className="clock-caption">{widget.caption}</span>}
+      <span className="clock-face num">{face}</span>
+      {(widget.schedules?.length ?? 0) > 0 && (
+        <span className="chip num" title="Programaciones de la agenda (corren en el daemon)">
+          ⏰ {widget.schedules?.length}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function Fader({
   widget,
   style,
@@ -2080,7 +2135,12 @@ function Fader({
   const usable = widget.controllable === true && widget.id !== undefined
 
   return (
-    <label className="widget fader" style={style} data-usable={usable}>
+    <label
+      className="widget fader"
+      style={style}
+      data-usable={usable}
+      data-knob={widget.sliderStyle === 'Knob'}
+    >
       <span className="fader-caption">{widget.caption || `#${widget.id ?? '?'}`}</span>
       <span className="fader-value num">{usable ? `${percent}%` : widget.sliderMode}</span>
       <Slider

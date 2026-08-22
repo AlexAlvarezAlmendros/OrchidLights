@@ -419,7 +419,8 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         const quint32 id = quint32(message.value("id").toInt(-1));
         const int raw = message.value("value").toInt(-1);
 
-        if (raw < 0 || raw > 255 || m_engine->levels()->knows(id) == false)
+        if (raw < 0 || raw > 255
+            || WidgetActions::setSliderLevel(m_engine, id, uchar(raw)) == false)
         {
             QJsonObject error;
             error["type"] = "error";
@@ -427,8 +428,6 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             sendJson(socket, error);
             return;
         }
-
-        m_engine->levels()->setValue(id, uchar(raw));
 
         /* Echoed to the other clients only: the one that moved it is already
            showing the new position, and bouncing it back makes a dragged
@@ -705,6 +704,12 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             WidgetActions::startFunction(m_engine, function->id());
         else if (action == QStringLiteral("stop"))
             WidgetActions::stopFunction(m_engine, function->id());
+        else if (action == QStringLiteral("flash"))
+            WidgetActions::flashFunction(m_engine, function->id(),
+                                         message.value("override").toBool(false),
+                                         message.value("forceLTP").toBool(false));
+        else if (action == QStringLiteral("unflash"))
+            WidgetActions::unflashFunction(m_engine, function->id());
 
         /* No reply: the state change arrives as a functions broadcast once the
            engine has actually made it, on its next tick. */

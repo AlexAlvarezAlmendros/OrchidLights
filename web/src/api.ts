@@ -22,6 +22,8 @@ export interface FunctionState {
   runOrder?: string
   direction?: string
   tempoType?: string
+  /** Lit by the engine's flash overlay (not the same as running). */
+  flashing?: boolean
 }
 
 /** Who uses a function: other functions, console widgets, the autostart. */
@@ -327,6 +329,17 @@ export interface WidgetPatch {
   } | null
   /** Keyboard shortcut as QKeySequence text ("Ctrl+F1"); null unbinds. */
   key?: string | null
+  /** Slider drawing style: "Knob" or "Slider" (the file's own spellings). */
+  sliderStyle?: string
+  /** Adjust-mode slider target; null removes it. */
+  adjust?: { function: number; attribute: number } | null
+  /** Flash buttons: override running functions / force LTP. */
+  flashOverride?: boolean
+  flashForceLTP?: boolean
+  /** Startup intensity a button applies before starting; null removes. */
+  startupIntensity?: { enabled: boolean; value: number } | null
+  /** A clock's whole agenda, replaced at once. */
+  schedules?: { function: number; start: string; stop?: string; weekFlags?: number }[]
 }
 
 /** The show the daemon has open. */

@@ -5,6 +5,7 @@ add_executable(${module_name}
     apiauth.cpp apiauth.h
     audiotriggers.cpp audiotriggers.h
     inputrouter.cpp inputrouter.h
+    clockscheduler.cpp clockscheduler.h
     widgetactions.cpp widgetactions.h
     apiserver.cpp apiserver.h
     consolelayout.cpp consolelayout.h

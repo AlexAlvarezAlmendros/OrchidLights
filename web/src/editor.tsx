@@ -35,6 +35,8 @@ const SLIDER_MODES = [
   { value: 'Level', label: 'Nivel (canales)' },
   { value: 'Playback', label: 'Playback (función)' },
   { value: 'Submaster', label: 'Submaster' },
+  { value: 'GrandMaster', label: 'Grand Master' },
+  { value: 'Adjust', label: 'Ajuste (atributo de función)' },
 ]
 
 const CLOCK_TYPES = [
@@ -161,6 +163,65 @@ export function WidgetEditor({
               ))}
             </select>
           </label>
+
+          {widget.action === 'Flash' && (
+            <div className="fields">
+              <label className="field row-field">
+                <input
+                  type="checkbox"
+                  checked={widget.flashOverride ?? false}
+                  disabled={busy}
+                  onChange={(e) => apply({ flashOverride: e.target.checked })}
+                />
+                <span>Pisa lo que corre (override)</span>
+              </label>
+              <label className="field row-field">
+                <input
+                  type="checkbox"
+                  checked={widget.flashForceLTP ?? false}
+                  disabled={busy}
+                  onChange={(e) => apply({ flashForceLTP: e.target.checked })}
+                />
+                <span>Forzar LTP</span>
+              </label>
+            </div>
+          )}
+
+          <div className="fields">
+            <label className="field row-field">
+              <input
+                type="checkbox"
+                checked={widget.startupIntensity?.enabled ?? false}
+                disabled={busy}
+                onChange={(e) =>
+                  apply({
+                    startupIntensity: {
+                      enabled: e.target.checked,
+                      value: widget.startupIntensity?.value ?? 100,
+                    },
+                  })
+                }
+              />
+              <span>Intensidad de arranque</span>
+            </label>
+            {widget.startupIntensity?.enabled === true && (
+              <label className="field">
+                <span>%</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  defaultValue={widget.startupIntensity?.value ?? 100}
+                  disabled={busy}
+                  onBlur={(e) =>
+                    apply({
+                      startupIntensity: { enabled: true, value: Number(e.target.value) },
+                    })
+                  }
+                />
+              </label>
+            )}
+          </div>
         </>
       )}
 
@@ -210,11 +271,32 @@ export function WidgetEditor({
               disabled={busy}
             />
           )}
+
+          {widget.sliderMode === 'adjust' && (
+            <FunctionPicker
+              label="Función a ajustar"
+              options={functions}
+              value={widget.adjust?.function}
+              onChange={(functionId) =>
+                apply({
+                  adjust: functionId === null ? null : { function: functionId, attribute: 0 },
+                })
+              }
+              disabled={busy}
+            />
+          )}
+
+          {widget.sliderMode === 'grandmaster' && (
+            <p className="hint">
+              Este fader ES el Grand Master: moverlo aquí mueve el de la barra, y al revés.
+            </p>
+          )}
         </>
       )}
 
       {isClock && (
         <>
+          <ClockAgenda widget={widget} functions={functions} busy={busy} onApply={apply} />
           <label className="field">
             <span>Tipo</span>
             <select
@@ -523,6 +605,127 @@ function Appearance({
         Volver a lo de por defecto
       </button>
     </details>
+  )
+}
+
+/**
+ * The clock's weekly agenda. Each line is a function, a start time, an
+ * optional stop, and the days it applies to -- and the whole list travels to
+ * the daemon at once, where the SCHEDULER lives: these fire with every
+ * browser closed, which is the point of an alarm.
+ */
+function ClockAgenda({
+  widget,
+  functions,
+  busy,
+  onApply,
+}: {
+  widget: VcWidget
+  functions: FunctionState[]
+  busy: boolean
+  onApply: (patch: WidgetPatch) => Promise<void>
+}) {
+  const DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+  const schedules = widget.schedules ?? []
+  const [draft, setDraft] = useState<{ function: number; start: string } | null>(null)
+
+  const put = (next: { function: number; start: string; stop?: string; weekFlags: number }[]) =>
+    onApply({ schedules: next })
+
+  return (
+    <div className="field">
+      <span>Agenda ({schedules.length})</span>
+      {schedules.length === 0 && (
+        <p className="hint">Sin programaciones. Las que añadas suenan aunque no haya navegador.</p>
+      )}
+
+      <ul className="channels">
+        {schedules.map((entry, index) => {
+          const fn = functions.find((f) => f.id === entry.function)
+          return (
+            <li key={`${entry.function}-${entry.start}`} className="agenda-row">
+              <span className="grow">
+                {fn?.name ?? `#${entry.function}`} · {entry.start}
+                {entry.stop !== undefined ? ` → ${entry.stop}` : ''}
+              </span>
+              <span className="agenda-days">
+                {DAYS.map((day, bit) => (
+                  <button
+                    key={day}
+                    type="button"
+                    className="agenda-day"
+                    aria-pressed={
+                      (entry.weekFlags & 0x7f) === 0 || (entry.weekFlags & (1 << bit)) !== 0
+                    }
+                    title={(entry.weekFlags & 0x7f) === 0 ? 'Todos los días' : undefined}
+                    disabled={busy}
+                    onClick={() => {
+                      const next = schedules.map((s, i) =>
+                        i === index ? { ...s, weekFlags: s.weekFlags ^ (1 << bit) } : s,
+                      )
+                      put(next)
+                    }}
+                  >
+                    {day}
+                  </button>
+                ))}
+              </span>
+              <button
+                type="button"
+                aria-label={`Quitar programación de ${entry.start}`}
+                disabled={busy}
+                onClick={() => put(schedules.filter((_, i) => i !== index))}
+              >
+                ✕
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+
+      <div className="channel-add">
+        <select
+          value={draft?.function ?? ''}
+          aria-label="Función a programar"
+          disabled={busy}
+          onChange={(e) =>
+            setDraft(
+              e.target.value === ''
+                ? null
+                : { function: Number(e.target.value), start: draft?.start ?? '20:00:00' },
+            )
+          }
+        >
+          <option value="">— función —</option>
+          {functions.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="time"
+          step={1}
+          aria-label="Hora de inicio"
+          value={draft?.start ?? '20:00:00'}
+          disabled={busy || draft === null}
+          onChange={(e) =>
+            draft !== null && setDraft({ ...draft, start: `${e.target.value}:00`.slice(0, 8) })
+          }
+        />
+        <button
+          type="button"
+          disabled={busy || draft === null}
+          onClick={() => {
+            if (draft === null) return
+            put([...schedules, { ...draft, weekFlags: 0 }])
+            setDraft(null)
+          }}
+        >
+          Programar
+        </button>
+      </div>
+    </div>
   )
 }
 

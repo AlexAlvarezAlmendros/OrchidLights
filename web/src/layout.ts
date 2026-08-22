@@ -81,12 +81,23 @@ export interface VcWidget {
   chaserId?: number
   clockType?: string
   clockTime?: number
+  /** The clock's agenda: functions fired at a time of day, on chosen days. */
+  schedules?: { function: number; start: string; stop?: string; weekFlags: number }[]
   /** XY pad: how many heads it steers, and where it was left. Zero heads
    *  means a pad that steers nothing, which is a control that does nothing. */
   padHeads?: number
   padX?: number
   padY?: number
   sliderMode?: string
+  /** Flash buttons: override running functions / force LTP. */
+  flashOverride?: boolean
+  flashForceLTP?: boolean
+  /** Startup intensity a button applies before starting its function. */
+  startupIntensity?: { enabled: boolean; value: number }
+  /** "Knob" draws the round one. */
+  sliderStyle?: string
+  /** Adjust-mode slider: the function whose attribute it turns. */
+  adjust?: { function: number; attribute: number }
   levelChannels?: { fixture: number; channel: number }[]
   low?: number
   high?: number

@@ -190,9 +190,21 @@ export class Live {
     this.send({ type: 'function', id, action: running ? 'stop' : 'start' })
   }
 
-  /** Hold-to-light: start on press, stop on release. */
-  flash(id: number, on: boolean): void {
-    this.send({ type: 'function', id, action: on ? 'start' : 'stop' })
+  /** Hold-to-light through the engine's own flash overlay: it lights
+   *  without owning the function's run state, and honours the button's
+   *  override / force-LTP flags. */
+  flash(id: number, on: boolean, flags?: { override?: boolean; forceLTP?: boolean }): void {
+    this.send(
+      on
+        ? {
+            type: 'function',
+            id,
+            action: 'flash',
+            override: flags?.override ?? false,
+            forceLTP: flags?.forceLTP ?? false,
+          }
+        : { type: 'function', id, action: 'unflash' },
+    )
   }
 
   setSpeedDial(id: number, milliseconds: number): void {

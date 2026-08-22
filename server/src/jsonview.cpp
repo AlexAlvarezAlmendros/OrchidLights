@@ -17,6 +17,8 @@
   limitations under the License.
 */
 
+#include <QTime>
+
 #include "jsonview.h"
 #include "virtualconsole.h"
 #include "levelsource.h"
@@ -120,6 +122,11 @@ QJsonObject JsonView::function(const Function *function)
     json["name"] = function->name();
     json["type"] = Function::typeToString(function->type());
     json["running"] = function->isRunning();
+    /* Flashing is not running: the engine's flash overlay lights without
+       owning the run state, and a client that cannot see it draws a lit
+       button as dark. */
+    if (function->flashing())
+        json["flashing"] = true;
 
     /* Speeds, in milliseconds. Exposed so a speed dial's effect is observable
        rather than merely acknowledged. */
@@ -881,11 +888,42 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
 
     if (widget.key.isEmpty() == false)
         json["key"] = widget.key;
+    if (widget.sliderStyle.isEmpty() == false)
+        json["sliderStyle"] = widget.sliderStyle;
+
+    if (widget.schedules.isEmpty() == false)
+    {
+        QJsonArray schedules;
+        for (const VcWidget::ClockSchedule &schedule : widget.schedules)
+        {
+            QJsonObject entry;
+            entry["function"] = qint64(schedule.functionId);
+            entry["start"] = QTime::fromMSecsSinceStartOfDay(schedule.startTime * 1000)
+                                 .toString(QStringLiteral("HH:mm:ss"));
+            if (schedule.stopTime >= 0)
+                entry["stop"] = QTime::fromMSecsSinceStartOfDay(schedule.stopTime * 1000)
+                                    .toString(QStringLiteral("HH:mm:ss"));
+            entry["weekFlags"] = schedule.weekFlags;
+            schedules.append(entry);
+        }
+        json["schedules"] = schedules;
+    }
 
     if (widget.hasFunction)
         json["functionId"] = qint64(widget.functionId);
     if (widget.action.isEmpty() == false)
         json["action"] = widget.action;
+    if (widget.flashOverride)
+        json["flashOverride"] = true;
+    if (widget.flashForceLTP)
+        json["flashForceLTP"] = true;
+    if (widget.startupIntensityEnabled)
+    {
+        QJsonObject intensity;
+        intensity["enabled"] = true;
+        intensity["value"] = widget.startupIntensity;
+        json["startupIntensity"] = intensity;
+    }
 
     if (widget.hasChaser)
     {
@@ -1063,7 +1101,20 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
                 (widget.sliderMode == QStringLiteral("level")
                  && widget.levelChannels.isEmpty() == false)
                 || (widget.sliderMode == QStringLiteral("playback") && widget.hasFunction
-                    && widget.functionId != UINT_MAX);
+                    && widget.functionId != UINT_MAX)
+                /* The grand master always exists; an adjust fader needs its
+                   function. */
+                || widget.sliderMode == QStringLiteral("grandmaster")
+                || (widget.sliderMode == QStringLiteral("adjust")
+                    && widget.adjustFunction != UINT_MAX);
+
+            if (widget.adjustFunction != UINT_MAX)
+            {
+                QJsonObject adjust;
+                adjust["function"] = qint64(widget.adjustFunction);
+                adjust["attribute"] = widget.adjustAttribute;
+                json["adjust"] = adjust;
+            }
         }
 
         /* The channels themselves, so an editor can show what a fader is

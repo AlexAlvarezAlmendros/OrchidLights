@@ -17,6 +17,14 @@ export const CREATABLE = [
   { type: 'cuelist', label: 'Cue list', width: 320, height: 220 },
   { type: 'clock', label: 'Reloj', width: 150, height: 60 },
   { type: 'frame', label: 'Marco', width: 300, height: 200 },
+  { type: 'soloframe', label: 'Marco solo', width: 300, height: 200 },
+  { type: 'speeddial', label: 'Dial de tempo', width: 160, height: 120 },
+  { type: 'xypad', label: 'XY pad', width: 240, height: 240 },
+  { type: 'audiotriggers', label: 'Triggers de audio', width: 220, height: 140 },
+  { type: 'matrix', label: 'Matriz', width: 220, height: 140 },
+  /* A knob IS a slider (WidgetStyle="Knob" in the file); it earns its own
+     entry because the operator asks for "a knob", not for a slider option. */
+  { type: 'knob', label: 'Knob', width: 90, height: 110 },
 ] as const
 
 /** How far below the last widget a new one starts. Only has to clear the row

@@ -305,8 +305,15 @@ assert w['action'] == 'Flash', w
     || fail "an unknown button action was accepted"
 [ "$(code PATCH /vc/widgets/3 -d '{"action":"Flash"}')" = "400" ] \
     || fail "a label was given a button action"
-[ "$(code PATCH /vc/widgets/1 -d '{"sliderMode":"Grandmaster"}')" = "400" ] \
+# "Grandmaster" stopped being the unknown example the day F14a made it a real
+# mode; the guard keeps its teeth with a name that stays imaginary.
+[ "$(code PATCH /vc/widgets/1 -d '{"sliderMode":"Hyperdrive"}')" = "400" ] \
     || fail "an unknown slider mode was accepted, and unknown means submaster"
+[ "$(code PATCH /vc/widgets/1 -d '{"sliderMode":"GrandMaster"}')" = "200" ] \
+    || fail "the GrandMaster slider mode was refused"
+# And BACK, or the round-trip guard rightly reports a console nobody restored.
+[ "$(code PATCH /vc/widgets/1 -d '{"sliderMode":"Level"}')" = "200" ] \
+    || fail "the slider would not return to Level"
 [ "$(code PATCH /vc/widgets/1 -d '{"levelChannels":[{"fixture":0,"channel":7}]}')" = "400" ] \
     || fail "a channel past the end of the fixture was accepted"
 [ "$(code PATCH /vc/widgets/1 -d '{"levelChannels":[{"fixture":77,"channel":0}]}')" = "400" ] \
