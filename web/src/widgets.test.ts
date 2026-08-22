@@ -53,7 +53,9 @@ describe('placeBelow', () => {
 
   it('only offers types the console can actually render', () => {
     // Creating a widget the interface draws as a grey box is worse than not
-    // offering it: it looks like the feature exists.
+    // offering it: it looks like the feature exists. F14a taught the console
+    // to draw and operate every remaining type, so the palette carries them
+    // all -- plus the knob, which is a slider wearing WidgetStyle="Knob".
     expect(CREATABLE.map((c) => c.type)).toEqual([
       'button',
       'slider',
@@ -61,6 +63,12 @@ describe('placeBelow', () => {
       'cuelist',
       'clock',
       'frame',
+      'soloframe',
+      'speeddial',
+      'xypad',
+      'audiotriggers',
+      'matrix',
+      'knob',
     ])
   })
 })
