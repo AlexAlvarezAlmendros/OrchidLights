@@ -495,6 +495,23 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   status: () => json<Status>('/api/v1/status'),
+  /** The kiosk access mask: what this desk lets untrusted clients touch. */
+  access: () =>
+    json<{
+      fixtures: boolean
+      functions: boolean
+      vcControl: boolean
+      vcEditing: boolean
+      simpleDesk: boolean
+      show: boolean
+      io: boolean
+    }>('/api/v1/access'),
+  setAccess: (body: Record<string, boolean | string>) =>
+    json<{ mask: number }>('/api/v1/access', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   project: () => json<ProjectState>('/api/v1/project'),
   functions: () => json<FunctionState[]>('/api/v1/functions'),
   vc: () => json<import('./layout').VcWidget>('/api/v1/vc'),

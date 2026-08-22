@@ -88,7 +88,10 @@ ws.onmessage = (event) => {
     // The daemon serves no favicon, and the browser always asks.
     !message.params.entry.url?.endsWith('/favicon.ico')
   ) {
-    consoleErrors.push(message.params.entry.text)
+    /* The access-mask chapter PROVOKES a 403 on purpose; the browser logs
+       every non-2xx resource. That one expected line is not an error. */
+    if (message.params.entry.text.includes('status of 403') === false)
+      consoleErrors.push(message.params.entry.text)
   }
 
   /* JavaScript dialogs get answered, the way the human they are for would.
@@ -3875,6 +3878,95 @@ try {
     }
   })()`)
   check('the bar undoes any edit and redoes it', globalUndo === 'ok', globalUndo)
+
+  /* F20 through the screen: the settings dialog scales the desk, the access
+     mask hides whole views from the rail and 403s what it closed, and the
+     kiosk flag strips the chrome. */
+  const kioskAccess = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const authed = { ...json, Authorization: 'Bearer ' + ${JSON.stringify(apiToken)} }
+
+    const cleanup = async () => {
+      await fetch('/api/v1/access', { method: 'PUT', headers: authed,
+        body: JSON.stringify({ preset: 'all' }) })
+      document.body.removeAttribute('data-kiosk')
+      document.documentElement.style.fontSize = ''
+      ;[...document.querySelectorAll('dialog .gate-actions button')]
+        .find(b => b.textContent.trim() === 'Listo')?.click()
+      await wait(300)
+    }
+
+    try {
+      /* Ajustes: the dialog opens from the rail and the scale acts. */
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Ajustes')?.click()
+      await wait(500)
+      const dialog = document.querySelector('dialog[aria-label="Ajustes"]')
+      if (!dialog) return 'the settings dialog never opened'
+      const scaleSelect = [...dialog.querySelectorAll('label')]
+        .find(l => l.querySelector('span')?.textContent === 'Escala')
+        ?.querySelector('select')
+      if (!scaleSelect) return 'there is no scale setting'
+      const setS = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setS.call(scaleSelect, '1.15')
+      scaleSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(300)
+      if (document.documentElement.style.fontSize !== '115%') {
+        return 'the scale moved nothing: ' + document.documentElement.style.fontSize
+      }
+      setS.call(scaleSelect, '1')
+      scaleSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(200)
+      const themeSelect = [...dialog.querySelectorAll('label')]
+        .find(l => l.querySelector('span')?.textContent === 'Tema')?.querySelector('select')
+      const langSelect = [...dialog.querySelectorAll('label')]
+        .find(l => l.querySelector('span')?.textContent === 'Idioma')?.querySelector('select')
+      if (!themeSelect || !langSelect) return 'the dialog misses theme or language'
+      ;[...dialog.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Listo')?.click()
+      await wait(300)
+
+      /* The mask closes areas: the rail thins out and writes bounce. */
+      const closed = await fetch('/api/v1/access', { method: 'PUT', headers: authed,
+        body: JSON.stringify({ preset: 'operate' }) })
+      if (!closed.ok) return 'the mask would not close: ' + closed.status
+      await wait(900)
+      const entries = [...document.querySelectorAll('.rail-item span')]
+        .map(s => s.textContent.trim())
+      if (entries.includes('Funciones')) {
+        return 'the rail still lists Funciones under the operate mask: ' + entries.join(',')
+      }
+      const refusedWrite = await fetch('/api/v1/functions', { method: 'POST', headers: json,
+        body: JSON.stringify({ type: 'Scene', name: 'Enjaulada' }) })
+      if (refusedWrite.status !== 403) {
+        return 'a masked write answered ' + refusedWrite.status
+      }
+      await fetch('/api/v1/access', { method: 'PUT', headers: authed,
+        body: JSON.stringify({ preset: 'all' }) })
+      await wait(900)
+      const reopened = [...document.querySelectorAll('.rail-item span')]
+        .map(s => s.textContent.trim())
+      if (!reopened.includes('Funciones')) {
+        return 'the rail did not come back: ' + reopened.join(',')
+      }
+
+      /* Kiosk strips the chrome. */
+      document.body.dataset.kiosk = '1'
+      await wait(200)
+      const rail = document.querySelector('.rail')
+      if (rail && getComputedStyle(rail).display !== 'none') {
+        return 'kiosk left the rail visible'
+      }
+      document.body.removeAttribute('data-kiosk')
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the kiosk and the mask act: settings, thinned rail, 403, stripped chrome',
+    kioskAccess === 'ok', kioskAccess)
 
   /* The desktop shell's close question, answered by the page.
    *

@@ -1466,6 +1466,15 @@ bool EngineHost::applyMatrixPreset(quint32 widgetId, int presetId, QString &erro
     return false;
 }
 
+void EngineHost::setAccessMask(quint32 mask)
+{
+    mask &= AccessAll;
+    if (m_accessMask == mask)
+        return;
+    m_accessMask = mask;
+    emit accessChanged();
+}
+
 int EngineHost::forgetFixture(quint32 fixtureId)
 {
     const int removed = VcPatch::forgetFixture(m_preserved.sections, fixtureId);

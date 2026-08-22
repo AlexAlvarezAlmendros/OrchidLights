@@ -61,3 +61,17 @@ export async function resolveClose(): Promise<void> {
   if (tauri === null) return
   await tauri.invoke('resolve_close')
 }
+
+/** Ctrl+F11: the window's own fullscreen. A browser ignores this quietly. */
+export async function toggleFullscreen(): Promise<void> {
+  const tauri = internals()
+  if (tauri === null) return
+  await tauri.invoke('toggle_fullscreen')
+}
+
+/** The kiosk's door: true when the shell opened it. */
+export async function leaveKiosk(pin: string | null): Promise<boolean> {
+  const tauri = internals()
+  if (tauri === null) return false
+  return (await tauri.invoke('leave_kiosk', { pin })) === true
+}

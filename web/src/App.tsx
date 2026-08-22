@@ -14,6 +14,7 @@ import { CueList } from './cuelist'
 import { type Insertion, insertionAt, isNoop, sameInsertion } from './drag'
 import { WidgetEditor } from './editor'
 import { Functions } from './functions'
+import { type Lang, currentLang, setLang, t } from './i18n'
 import {
   type Row,
   type VcWidget,
@@ -32,7 +33,7 @@ import { Plan } from './plan'
 import { ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
-import { resolveClose, takePendingOpen } from './shell'
+import { leaveKiosk, resolveClose, takePendingOpen, toggleFullscreen } from './shell'
 import { Slider } from './slider'
 import { keySequenceOf, typingSomewhere } from './teclas'
 import { getToken, setToken } from './token'
@@ -148,6 +149,35 @@ export function App() {
   const [operator, setOperator] = useState(
     () => window.localStorage.getItem('orchid.operator') === 'yes',
   )
+  /* Kiosk: the URL decides, not a setting -- a kiosk tablet must come back
+     as a kiosk after a reboot with nobody touching it. */
+  const kiosk = useMemo(
+    () =>
+      new URLSearchParams(window.location.search).get('kiosk') === '1' ||
+      window.location.hash.includes('kiosk=1'),
+    [],
+  )
+  /** What the daemon's access mask leaves on offer. */
+  const [access, setAccess] = useState({
+    fixtures: true,
+    functions: true,
+    vcControl: true,
+    vcEditing: true,
+    simpleDesk: true,
+    show: true,
+    io: true,
+  })
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [scale, setScale] = useState(
+    () => Number(window.localStorage.getItem('orchid.scale') ?? '1') || 1,
+  )
+  useEffect(() => {
+    document.documentElement.style.fontSize = scale === 1 ? '' : `${scale * 100}%`
+    window.localStorage.setItem('orchid.scale', String(scale))
+  }, [scale])
+  useEffect(() => {
+    if (kiosk) document.body.dataset.kiosk = '1'
+  }, [kiosk])
   const [pads, setPads] = useState<Record<number, { x: number; y: number }>>({})
   /** Bumped whenever the project changed under us, so the screens that keep
    *  their own state know to re-read it. */
@@ -265,6 +295,12 @@ export function App() {
       onUniverse: (universe, channels) =>
         setFrames((current) => ({ ...current, [universe]: channels })),
       onBeat: () => setBeatTick((tick) => tick + 1),
+      onAccess: () => {
+        api
+          .access()
+          .then(setAccess)
+          .catch(() => undefined)
+      },
       onShow: (id, elapsed, running, paused) =>
         setShows((current) => {
           if (running) return { ...current, [id]: { elapsed, paused } }
@@ -770,7 +806,48 @@ export function App() {
       .globalHistory()
       .then((h) => setRing({ undo: h.undo, redo: h.redo }))
       .catch(() => undefined)
+    api
+      .access()
+      .then(setAccess)
+      .catch(() => undefined)
   }, [revision])
+
+  /* Deep routes: #/mesa in the URL is a view, so a second window -- or a
+     bookmark on a phone -- opens straight where it is needed. */
+  useEffect(() => {
+    const byHash: Record<string, View> = {
+      vc: 'console',
+      consola: 'console',
+      functions: 'functions',
+      funciones: 'functions',
+      setup: 'setup',
+      patch: 'setup',
+      desk: 'desk',
+      mesa: 'desk',
+      plan: 'plan',
+      planta: 'plan',
+    }
+    const segment = window.location.hash
+      .replace(/^#/, '')
+      .split('#')
+      .find((s) => s.startsWith('/'))
+    const name = segment?.replace(/^\//, '').split('?')[0] ?? ''
+    const target = byHash[name]
+    if (target !== undefined) setView(target)
+  }, [])
+
+  /* Ctrl+F11: the shell's own fullscreen. In a browser this quietly does
+     nothing, which is honest -- F11 already exists there. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'F11' && event.ctrlKey) {
+        event.preventDefault()
+        void toggleFullscreen()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   /* Ctrl+Z / Ctrl+Shift+Z, anywhere somebody is not typing. */
   useEffect(() => {
@@ -890,16 +967,34 @@ export function App() {
       {/* Where you are, down the left with room and across the bottom without.
           Gone in operator mode, along with everything else that is not the
           console. */}
-      {!operator && (
+      {!operator && !kiosk && (
         <Nav
           view={view}
           theme={theme}
+          visible={[
+            'console',
+            ...(access.functions ? (['functions'] as View[]) : []),
+            ...(access.io || access.fixtures ? (['setup'] as View[]) : []),
+            ...(access.simpleDesk ? (['desk'] as View[]) : []),
+            ...(access.fixtures ? (['plan'] as View[]) : []),
+          ]}
           onView={(target) => {
             setView(target)
             setMode('run')
             setSelected(null)
           }}
           onTheme={() => setTheme(theme === 'stage' ? 'blackout' : 'stage')}
+          onSettings={() => setSettingsOpen(true)}
+        />
+      )}
+
+      {settingsOpen && (
+        <Settings
+          theme={theme}
+          scale={scale}
+          onTheme={setTheme}
+          onScale={setScale}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
@@ -999,6 +1094,18 @@ export function App() {
           {dirty && (
             <button type="button" onClick={persist}>
               Guardar
+            </button>
+          )}
+          {kiosk && (
+            <button
+              type="button"
+              title={t('Salir del kiosko')}
+              onClick={() => {
+                const pin = window.prompt('PIN')
+                void leaveKiosk(pin)
+              }}
+            >
+              {t('Salir del kiosko')}
             </button>
           )}
           <BpmDock beatTick={beatTick} />
@@ -2323,5 +2430,86 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
     >
       {held > 0 ? 'Suelta para cancelar…' : 'Operador 🔒'}
     </button>
+  )
+}
+
+/**
+ * The settings the reference keeps in its UI dialog: theme, scale, language
+ * -- and About, because a bug report without a version is a riddle. All
+ * local to this device: two phones on one desk can disagree about language.
+ */
+function Settings({
+  theme,
+  scale,
+  onTheme,
+  onScale,
+  onClose,
+}: {
+  theme: Theme
+  scale: number
+  onTheme: (theme: Theme) => void
+  onScale: (scale: number) => void
+  onClose: () => void
+}) {
+  const [about, setAbout] = useState<{ version?: string; name?: string } | null>(null)
+
+  useEffect(() => {
+    api
+      .status()
+      .then((s) => setAbout({ version: s.version, name: s.name }))
+      .catch(() => setAbout(null))
+  }, [])
+
+  return (
+    <dialog className="gate" open aria-label={t('Ajustes')}>
+      <div className="gate-card">
+        <h2>{t('Ajustes')}</h2>
+
+        <label className="field">
+          <span>{t('Tema')}</span>
+          <select value={theme} onChange={(e) => onTheme(e.target.value as Theme)}>
+            <option value="stage">{t('Pase')}</option>
+            <option value="blackout">{t('Oscuro')}</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span>{t('Escala')}</span>
+          <select value={String(scale)} onChange={(e) => onScale(Number(e.target.value))}>
+            <option value="0.85">85%</option>
+            <option value="1">100%</option>
+            <option value="1.15">115%</option>
+            <option value="1.3">130%</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span>{t('Idioma')}</span>
+          <select
+            defaultValue={currentLang()}
+            onChange={(e) => {
+              setLang(e.target.value as Lang)
+              /* The dictionary is read at render time; the cheap honest way
+                 to repaint everything is to reload. */
+              window.location.reload()
+            }}
+          >
+            <option value="es">Español</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+
+        <p className="hint">
+          OrchidLights{about?.version ? ` · ${about.version}` : ''}
+          {about?.name ? ` · ${about.name}` : ''} · Apache-2.0 · motor QLC+ (fork)
+        </p>
+
+        <div className="gate-actions">
+          <button type="button" onClick={onClose}>
+            Listo
+          </button>
+        </div>
+      </div>
+    </dialog>
   )
 }

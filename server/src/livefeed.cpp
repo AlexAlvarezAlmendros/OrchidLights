@@ -74,6 +74,18 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     /* The beat, straight from the engine's own generator: a metronome drawn
        from a local timer would drift against the chasers it claims to count. */
     connect(doc->masterTimer(), &MasterTimer::beat, this, &LiveFeed::onBeat);
+    /* The mask changed: every open page re-reads what it may offer. */
+    connect(m_engine, &EngineHost::accessChanged, this, [this] {
+        QJsonObject message;
+        message["type"] = "access";
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+    });
     connect(doc->masterTimer(), &MasterTimer::functionListChanged,
             this, &LiveFeed::onFunctionListChanged, Qt::QueuedConnection);
 
@@ -379,12 +391,40 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         }
 
         client.authenticated = true;
+        client.trusted = true;
 
         QJsonObject ok;
         ok["type"] = "authenticated";
         sendJson(socket, ok);
 
         sendFunctions(socket);
+        return;
+    }
+
+    /* An already-open client may still present the token -- the shell does,
+       so a masked desk keeps answering ITS controls. */
+    if (type == QStringLiteral("auth"))
+    {
+        if (m_auth->matches(message.value("token").toString().toUtf8()))
+            client.trusted = true;
+        QJsonObject ok;
+        ok["type"] = "authenticated";
+        ok["trusted"] = client.trusted;
+        sendJson(socket, ok);
+        return;
+    }
+
+    /* The kiosk mask: with VC control closed, everything that MOVES light is
+       refused for untrusted sockets. Subscribing and watching stay open --
+       the mask hides levers, not eyes. */
+    if (client.trusted == false
+        && (m_engine->accessMask() & EngineHost::AccessVcControl) == 0
+        && type != QStringLiteral("subscribe") && type != QStringLiteral("unsubscribe"))
+    {
+        QJsonObject error;
+        error["type"] = "error";
+        error["error"] = QStringLiteral("The access mask of this desk closes the controls");
+        sendJson(socket, error);
         return;
     }
 

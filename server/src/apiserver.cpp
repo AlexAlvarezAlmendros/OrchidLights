@@ -273,6 +273,66 @@ void ApiServer::registerRoutes()
         return m_auth.authorize(request) == false;
     };
 
+    /* The kiosk gate: 0 lets the request through, 401 is a failed token, 403
+       is an area the mask closed. GETs always pass -- the mask hides levers,
+       not eyes -- and the STRICT token bypasses it entirely: the mask is what
+       a kiosk phone gets, not what the operator's own shell gets. */
+    const auto refused = [this](const QHttpServerRequest &request) -> int {
+        if (m_auth.authorize(request) == false)
+            return 401;
+        if (request.method() == QHttpServerRequest::Method::Get)
+            return 0;
+
+        const quint32 mask = m_engine->accessMask();
+        if (mask == EngineHost::AccessAll)
+            return 0;
+        if (m_auth.authorizeStrict(request))
+            return 0;
+
+        const QString path = request.url().path();
+        quint32 area = 0;
+        if (path.startsWith(QStringLiteral("/api/v1/functions")))
+        {
+            const bool show = path.contains(QStringLiteral("/tracks"))
+                || path.contains(QStringLiteral("/items"))
+                || path.endsWith(QStringLiteral("/time"))
+                || path.endsWith(QStringLiteral("/solo"));
+            area = show ? EngineHost::AccessShow : EngineHost::AccessFunctions;
+        }
+        else if (path.startsWith(QStringLiteral("/api/v1/fixtures"))
+                 || path.startsWith(QStringLiteral("/api/v1/fixture-groups"))
+                 || path.startsWith(QStringLiteral("/api/v1/channel-groups"))
+                 || path.startsWith(QStringLiteral("/api/v1/plan")))
+        {
+            area = EngineHost::AccessFixtures;
+        }
+        else if (path.startsWith(QStringLiteral("/api/v1/vc")))
+        {
+            area = EngineHost::AccessVcEditing;
+        }
+        else if (path.startsWith(QStringLiteral("/api/v1/simpledesk")))
+        {
+            area = EngineHost::AccessSimpleDesk;
+        }
+        else if (path.startsWith(QStringLiteral("/api/v1/universes"))
+                 || path.startsWith(QStringLiteral("/api/v1/io"))
+                 || path.startsWith(QStringLiteral("/api/v1/inputprofiles"))
+                 || path.startsWith(QStringLiteral("/api/v1/beat")))
+        {
+            area = EngineHost::AccessIO;
+        }
+
+        if (area != 0 && (mask & area) == 0)
+            return 403;
+        return 0;
+    };
+
+    const auto maskForbidden = [] {
+        return jsonError(StatusCode::Forbidden,
+                         QStringLiteral("The access mask of this desk closes that area"));
+    };
+    Q_UNUSED(denied)
+
     /* Read-only routes are pinned to GET. A route registered without a method
        answers every verb, which is not merely untidy: it is how the layout's
        GET handler quietly swallowed its own PUT, returning the old value and
@@ -364,9 +424,9 @@ void ApiServer::registerRoutes()
         });
     }
 
-    m_server->route("/api/v1/status", QHttpServerRequest::Method::Get, [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/status", QHttpServerRequest::Method::Get, [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonObject body;
         body["name"] = QStringLiteral(APPNAME);
@@ -394,9 +454,9 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/fixtures", QHttpServerRequest::Method::Get, [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/fixtures", QHttpServerRequest::Method::Get, [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
         return QHttpServerResponse(JsonView::fixtures(doc));
     });
 
@@ -405,9 +465,9 @@ void ApiServer::registerRoutes()
        for -- but pointing a fader at "Dimmer" instead of at channel 5 is the
        difference between patching and guessing. */
     m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -446,15 +506,15 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/functions", QHttpServerRequest::Method::Get, [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/functions", QHttpServerRequest::Method::Get, [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
         return QHttpServerResponse(JsonView::functions(doc));
     });
 
-    m_server->route("/api/v1/universes", QHttpServerRequest::Method::Get, [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/universes", QHttpServerRequest::Method::Get, [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
         return QHttpServerResponse(JsonView::universes(doc));
     });
 
@@ -469,9 +529,9 @@ void ApiServer::registerRoutes()
      * observes the result through GET /functions. */
     m_server->route("/api/v1/functions/<arg>/start",
                     QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -491,9 +551,9 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/functions/<arg>/stop",
                     QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -513,9 +573,9 @@ void ApiServer::registerRoutes()
 
     /* Read only, and parsed out of the very XML we preserve, so serving it
        cannot disturb what goes back into the file. */
-    m_server->route("/api/v1/vc", QHttpServerRequest::Method::Get, [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/vc", QHttpServerRequest::Method::Get, [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         VcWidget root;
         if (VirtualConsole::parse(m_engine->preservedSections(), root) == false)
@@ -541,9 +601,9 @@ void ApiServer::registerRoutes()
      * drop every running function, and a control that can black out a rig is
      * not an undo button whatever it is labelled. */
     m_server->route("/api/v1/vc/undo", QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         if (m_engine->undoConsole() == false)
         {
@@ -558,9 +618,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/vc/redo", QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         if (m_engine->redoConsole() == false)
         {
@@ -575,9 +635,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/vc/history", QHttpServerRequest::Method::Get,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonObject body;
         body["undo"] = m_engine->undoDepth();
@@ -586,9 +646,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/vc/widgets/ids", QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         int assigned = 0;
         const VcPatch::Result result = m_engine->assignWidgetIds(assigned);
@@ -601,9 +661,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/vc/widgets", QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
@@ -625,9 +685,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/vc/widgets/<arg>", QHttpServerRequest::Method::Patch,
-                    [this, doc, denied](const QString &widgetId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &widgetId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         widgetId.toUInt(&ok);
@@ -660,9 +720,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/vc/widgets/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, denied](const QString &widgetId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QString &widgetId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         widgetId.toUInt(&ok);
@@ -685,9 +745,9 @@ void ApiServer::registerRoutes()
        response, so this answers manufacturers, then models, then modes -- the
        same three steps an operator takes when patching. */
     m_server->route("/api/v1/library", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QString search = QUrlQuery(request.url().query())
                                    .queryItemValue(QStringLiteral("q")).trimmed();
@@ -708,9 +768,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/library/<arg>", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &manufacturer, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &manufacturer, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QStringList models = doc->fixtureDefCache()->models(manufacturer);
         if (models.isEmpty())
@@ -727,10 +787,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/library/<arg>/<arg>", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &manufacturer, const QString &model,
+                    [doc, denied, refused, maskForbidden](const QString &manufacturer, const QString &model,
                                   const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QLCFixtureDef *definition = doc->fixtureDefCache()->fixtureDef(manufacturer, model);
         if (definition == nullptr)
@@ -756,9 +816,9 @@ void ApiServer::registerRoutes()
     /* The 512 channels of a universe and who holds them. This is the view that
        makes a clash obvious before it becomes a light that will not respond. */
     m_server->route("/api/v1/universes/<arg>/map", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &rawIndex, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int index = rawIndex.toInt(&ok);
@@ -799,9 +859,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixtures", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
@@ -831,9 +891,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixtures/<arg>/clone", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -860,9 +920,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixtures/rgbpanel", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
@@ -902,9 +962,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixtures/<arg>/remap", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -995,9 +1055,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/plan/fixtures/<arg>/linked", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1023,10 +1083,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/plan/fixtures/<arg>/linked/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, doc, denied](const QString &rawId, const QString &rawLinked,
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QString &rawLinked,
                                         const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1049,9 +1109,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1075,9 +1135,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Patch,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1099,9 +1159,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
@@ -1118,9 +1178,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>", QHttpServerRequest::Method::Patch,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1210,9 +1270,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>", QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1233,9 +1293,9 @@ void ApiServer::registerRoutes()
 
     /* Scene body: one channel of one fixture. value -1 clears it. */
     m_server->route("/api/v1/functions/<arg>/values", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1258,9 +1318,9 @@ void ApiServer::registerRoutes()
 
     /* Chaser body: steps. */
     m_server->route("/api/v1/functions/<arg>/steps", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1286,10 +1346,10 @@ void ApiServer::registerRoutes()
     /* Editing one step: fades, hold, duration, its note, or the function it
        points at. Only what the body names is touched. */
     m_server->route("/api/v1/functions/<arg>/steps/<arg>", QHttpServerRequest::Method::Patch,
-                    [doc, denied](const QString &rawId, const QString &rawIndex,
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QString &rawIndex,
                                   const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false, indexOk = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1324,9 +1384,9 @@ void ApiServer::registerRoutes()
        button sends the shuffled order it wants, and what lands in the file is
        exactly that. */
     m_server->route("/api/v1/functions/<arg>/steps/order", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1352,10 +1412,10 @@ void ApiServer::registerRoutes()
     /* A sequence step's own DMX values -- the half that makes a sequence a
        sequence rather than a chaser. */
     m_server->route("/api/v1/functions/<arg>/steps/<arg>/values", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QString &rawId, const QString &rawIndex,
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QString &rawIndex,
                                   const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false, indexOk = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1390,9 +1450,9 @@ void ApiServer::registerRoutes()
 
     /* A copy, QLC+-style: same everything, name suffixed. */
     m_server->route("/api/v1/functions/<arg>/clone", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1413,9 +1473,9 @@ void ApiServer::registerRoutes()
        the same plugins that will play it, so what the editor draws is what
        the show will hear -- or exactly the silence it will not. */
     m_server->route("/api/v1/functions/<arg>/waveform", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1489,9 +1549,9 @@ void ApiServer::registerRoutes()
     /* Bake: the matrix frozen into a Scene + Sequence pair, exactly like
        QLC+ 5's "save to sequence". The matrix itself is untouched. */
     m_server->route("/api/v1/functions/<arg>/bake", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1515,9 +1575,9 @@ void ApiServer::registerRoutes()
        collection carries, a show schedules or a button fires is exactly the
        moment this list earns its place. */
     m_server->route("/api/v1/functions/<arg>/usage", QHttpServerRequest::Method::Get,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1602,10 +1662,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>/steps/<arg>", QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QString &rawId, const QString &rawIndex,
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QString &rawIndex,
                                   const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false, indexOk = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1624,9 +1684,9 @@ void ApiServer::registerRoutes()
 
     /* The algorithms an RGB matrix can run, so a caller is not guessing. */
     m_server->route("/api/v1/algorithms", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray names;
         for (const QString &name : RGBAlgorithm::algorithms(doc))
@@ -1640,9 +1700,9 @@ void ApiServer::registerRoutes()
     /* What a function is made of. Without this a client can change a body it
        cannot see, which is not editing, it is guessing. */
     m_server->route("/api/v1/functions/<arg>/body", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1660,9 +1720,9 @@ void ApiServer::registerRoutes()
        function's own type, because a caller should not have to know which URL
        shape a type happens to use. */
     m_server->route("/api/v1/functions/<arg>/body", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1767,9 +1827,9 @@ void ApiServer::registerRoutes()
 
     /* Collection body: the functions it fires together. */
     m_server->route("/api/v1/functions/<arg>/members", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1798,9 +1858,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixture-groups", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray groups;
         for (const FixtureGroup *group : doc->fixtureGroups())
@@ -1840,9 +1900,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixture-groups", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
@@ -1869,9 +1929,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixture-groups/<arg>", QHttpServerRequest::Method::Patch,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1951,9 +2011,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixture-groups/<arg>/transform", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -1973,9 +2033,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixture-groups/<arg>", QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -2001,9 +2061,9 @@ void ApiServer::registerRoutes()
      * anything, and that is worth being told rather than waiting for.
      */
     m_server->route("/api/v1/input/last", QHttpServerRequest::Method::Get,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const EngineHost::SeenInput seen = m_engine->lastInput();
 
@@ -2043,9 +2103,9 @@ void ApiServer::registerRoutes()
      * remember to save.
      */
     m_server->route("/api/v1/live", QHttpServerRequest::Method::Get,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray values;
         for (const auto &entry : m_engine->levels()->liveValues())
@@ -2063,9 +2123,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/live", QHttpServerRequest::Method::Put,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
@@ -2108,9 +2168,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/live", QHttpServerRequest::Method::Delete,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         m_engine->releaseLive();
 
@@ -2127,17 +2187,17 @@ void ApiServer::registerRoutes()
      * than no plan, because it is believed.
      */
     m_server->route("/api/v1/plan", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         return QHttpServerResponse(JsonView::plan(doc));
     });
 
     m_server->route("/api/v1/plan/fixtures/<arg>", QHttpServerRequest::Method::Put,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -2235,9 +2295,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/plan/fixtures/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -2267,9 +2327,9 @@ void ApiServer::registerRoutes()
      * the truth -- the drawing the plan was built against is not there.
      */
     m_server->route("/api/v1/plan/background", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QString path = doc->monitorProperties()->commonBackgroundImage();
         if (path.isEmpty())
@@ -2286,9 +2346,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/plan/background", QHttpServerRequest::Method::Put,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
         const QString asset = QFileInfo(body.value("asset").toString()).fileName();
@@ -2316,9 +2376,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/plan/background", QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         doc->monitorProperties()->setCommonBackgroundImage(QString());
         doc->setModified();
@@ -2329,9 +2389,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/plan/grid", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
         MonitorProperties *monitor = doc->monitorProperties();
@@ -2391,10 +2451,10 @@ void ApiServer::registerRoutes()
      * values over the length of the show.
      */
     m_server->route("/api/v1/functions/<arg>/tracks/<arg>/solo", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawShow, const QString &rawTrack,
+                    [doc, denied, refused, maskForbidden](const QString &rawShow, const QString &rawTrack,
                                   const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool showOk = false, trackOk = false;
         const quint32 showId = rawShow.toUInt(&showOk);
@@ -2418,9 +2478,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>/time", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QString &rawShow, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawShow, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 showId = rawShow.toUInt(&ok);
@@ -2452,9 +2512,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>/tracks", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 showId = rawId.toUInt(&ok);
@@ -2483,10 +2543,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>/tracks/<arg>", QHttpServerRequest::Method::Patch,
-                    [this, doc, denied](const QString &rawShow, const QString &rawTrack,
+                    [this, doc, denied, refused, maskForbidden](const QString &rawShow, const QString &rawTrack,
                                         const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool showOk = false, trackOk = false;
         const quint32 showId = rawShow.toUInt(&showOk);
@@ -2518,10 +2578,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>/tracks/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, doc, denied](const QString &rawShow, const QString &rawTrack,
+                    [this, doc, denied, refused, maskForbidden](const QString &rawShow, const QString &rawTrack,
                                         const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool showOk = false, trackOk = false;
         const quint32 showId = rawShow.toUInt(&showOk);
@@ -2545,10 +2605,10 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/functions/<arg>/tracks/<arg>/items",
                     QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QString &rawShow, const QString &rawTrack,
+                    [this, doc, denied, refused, maskForbidden](const QString &rawShow, const QString &rawTrack,
                                         const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool showOk = false, trackOk = false;
         const quint32 showId = rawShow.toUInt(&showOk);
@@ -2588,10 +2648,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>/items/<arg>", QHttpServerRequest::Method::Patch,
-                    [this, doc, denied](const QString &rawShow, const QString &rawItem,
+                    [this, doc, denied, refused, maskForbidden](const QString &rawShow, const QString &rawItem,
                                         const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool showOk = false, itemOk = false;
         const quint32 showId = rawShow.toUInt(&showOk);
@@ -2634,10 +2694,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/functions/<arg>/items/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, doc, denied](const QString &rawShow, const QString &rawItem,
+                    [this, doc, denied, refused, maskForbidden](const QString &rawShow, const QString &rawItem,
                                         const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool showOk = false, itemOk = false;
         const quint32 showId = rawShow.toUInt(&showOk);
@@ -2668,9 +2728,9 @@ void ApiServer::registerRoutes()
      * which is why it is edited on the fixture and not in a scene.
      */
     m_server->route("/api/v1/modifiers", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray names;
         for (const QString &name : doc->modifiersCache()->templateNames())
@@ -2688,9 +2748,9 @@ void ApiServer::registerRoutes()
      * both plausible and only one of them is what the lamp needs. Drawn, they
      * are obvious. */
     m_server->route("/api/v1/modifiers/<arg>", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &name, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &name, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         ChannelModifier *modifier = doc->modifiersCache()->modifier(name);
         if (modifier == nullptr)
@@ -2708,9 +2768,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/fixtures/<arg>/modifiers", QHttpServerRequest::Method::Put,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -2773,17 +2833,17 @@ void ApiServer::registerRoutes()
      * three. QLC+ keeps them in the Simple Desk, which is why they were the
      * last thing here with no way in from a browser. */
     m_server->route("/api/v1/channel-groups", QHttpServerRequest::Method::Get,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         return QHttpServerResponse(JsonView::channelGroups(doc, m_engine->levels()));
     });
 
     m_server->route("/api/v1/channel-groups", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
@@ -2806,9 +2866,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/channel-groups/<arg>", QHttpServerRequest::Method::Patch,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -2845,9 +2905,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/channel-groups/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -2870,9 +2930,9 @@ void ApiServer::registerRoutes()
      * looks exactly like a widget that does not work, and an operator can only
      * tell the two apart by being shown the list. */
     m_server->route("/api/v1/audio", QHttpServerRequest::Method::Get,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray inputs;
         for (const QString &name : AudioTriggers::availableInputs())
@@ -2923,9 +2983,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/audio", QHttpServerRequest::Method::Put,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
         const QString input = body.value("input").toString();
@@ -2945,9 +3005,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/io", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         InputOutputMap *map = doc->inputOutputMap();
 
@@ -2986,9 +3046,9 @@ void ApiServer::registerRoutes()
     };
 
     m_server->route("/api/v1/universes", QHttpServerRequest::Method::Post,
-                    [this, doc, denied, writeResult](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, writeResult, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         /* The name travels in the same request that creates the universe.
            This route used to ignore its body, which cost nothing visible: the
@@ -3015,9 +3075,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/universes/<arg>/parameters", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QString &rawIndex, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int index = rawIndex.toInt(&ok);
@@ -3049,9 +3109,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Delete,
-                    [doc, denied, writeResult](const QString &rawIndex, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, writeResult, refused, maskForbidden](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int index = rawIndex.toInt(&ok);
@@ -3064,9 +3124,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Patch,
-                    [doc, denied, writeResult](const QString &rawIndex, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, writeResult, refused, maskForbidden](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int index = rawIndex.toInt(&ok);
@@ -3129,17 +3189,17 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(JsonView::universes(doc));
     });
 
-    m_server->route("/api/v1/layout", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/layout", QHttpServerRequest::Method::Get, [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         return QHttpServerResponse(ConsoleLayout::toJson(m_engine->layout()));
     });
 
     m_server->route("/api/v1/layout", QHttpServerRequest::Method::Put,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonParseError parseError;
         const QJsonDocument document = QJsonDocument::fromJson(request.body(), &parseError);
@@ -3166,9 +3226,9 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/project", QHttpServerRequest::Method::Get, [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/project", QHttpServerRequest::Method::Get, [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonObject body;
         body["path"] = m_engine->projectPath();
@@ -3198,9 +3258,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/project", QHttpServerRequest::Method::Patch,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject patch = QJsonDocument::fromJson(request.body()).object();
         if (patch.contains(QStringLiteral("startupFunction")))
@@ -3222,9 +3282,9 @@ void ApiServer::registerRoutes()
        so the show travels with its pictures. The name is a bare file name --
        no directories, no dot-dot -- and only image types QImage can read. */
     m_server->route("/api/v1/assets", QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QUrlQuery query(request.url());
         const QString name = QFileInfo(query.queryItemValue(QStringLiteral("name"))).fileName();
@@ -3268,9 +3328,9 @@ void ApiServer::registerRoutes()
     /* Palettes: one value with a name, referenced from scenes -- retint the
        palette and every look that carries it retints with it. */
     m_server->route("/api/v1/palettes", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray palettes;
         for (const QLCPalette *palette : doc->palettes())
@@ -3296,9 +3356,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/palettes", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
         quint32 newId = QLCPalette::invalidId();
@@ -3314,9 +3374,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/palettes/<arg>", QHttpServerRequest::Method::Patch,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -3334,9 +3394,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/palettes/<arg>", QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -3355,9 +3415,9 @@ void ApiServer::registerRoutes()
     /* Apply: the palette resolved against fixtures, held on the LIVE desk --
        which is exactly what lets the dump capture an applied palette. */
     m_server->route("/api/v1/palettes/<arg>/apply", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 id = rawId.toUInt(&ok);
@@ -3395,9 +3455,9 @@ void ApiServer::registerRoutes()
        per request -- they are a handful of small XML files -- and served with
        names, because a gel without its name is just a hex code. */
     m_server->route("/api/v1/colorfilters", QHttpServerRequest::Method::Get,
-                    [denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray books;
         const QString directory = InstallPaths::colorFilters();
@@ -3459,9 +3519,9 @@ void ApiServer::registerRoutes()
        arrives, answering WHICH lines it refuses. Stateless -- nothing is
        created or modified. */
     m_server->route("/api/v1/script/check", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
         Script probe(doc);
@@ -3476,9 +3536,9 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
-    m_server->route("/api/v1/projects", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+    m_server->route("/api/v1/projects", QHttpServerRequest::Method::Get, [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonArray names;
         for (const QString &name : m_engine->availableProjects())
@@ -3496,9 +3556,9 @@ void ApiServer::registerRoutes()
        should make for the convenience of it. */
     m_server->route("/api/v1/project/load/<arg>",
                     QHttpServerRequest::Method::Post,
-                    [this, denied](const QString &name, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QString &name, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QString path = m_engine->resolveProjectName(name);
         if (path.isEmpty())
@@ -3520,9 +3580,9 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/project/save",
                     QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QString errorMessage;
         if (m_engine->saveProject(QString(), errorMessage) == false)
@@ -3587,9 +3647,9 @@ void ApiServer::registerRoutes()
        the user directory can be edited -- the system ones ship with the
        installation and are every project's shared vocabulary. */
     m_server->route("/api/v1/inputprofiles/<arg>", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QString &name, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &name, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QLCInputProfile *profile = doc->inputOutputMap()->profile(name);
         if (profile == nullptr)
@@ -3619,9 +3679,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/inputprofiles", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
         const QString manufacturer = body.value("manufacturer").toString().trimmed();
@@ -3669,10 +3729,10 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/inputprofiles/<arg>/channels/<arg>", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QString &name, const QString &rawChannel,
+                    [doc, denied, refused, maskForbidden](const QString &name, const QString &rawChannel,
                                   const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 number = rawChannel.toUInt(&ok);
@@ -3725,10 +3785,10 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/inputprofiles/<arg>/channels/<arg>",
                     QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QString &name, const QString &rawChannel,
+                    [doc, denied, refused, maskForbidden](const QString &name, const QString &rawChannel,
                                   const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const quint32 number = rawChannel.toUInt(&ok);
@@ -3762,9 +3822,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/inputprofiles/<arg>", QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QString &name, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QString &name, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QLCInputProfile *profile = doc->inputOutputMap()->profile(name);
         if (profile == nullptr)
@@ -3791,9 +3851,9 @@ void ApiServer::registerRoutes()
     /* The global beat: QLC+'s BPM toolbar. Internal means the engine's own
        metronome; chasers whose tempo is Beats advance on it. */
     m_server->route("/api/v1/beat", QHttpServerRequest::Method::Get,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         /* Through InputOutputMap rather than straight at the timer: the
            generator type is what the .qxw persists, and a project can arrive
@@ -3806,9 +3866,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/beat", QHttpServerRequest::Method::Put,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
         InputOutputMap *map = doc->inputOutputMap();
@@ -3849,14 +3909,83 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response);
     });
 
+    /* The kiosk access mask: which areas an untrusted client may touch.
+       Read by anyone (the web hides what it may not offer); written only
+       with the STRICT token -- a kiosk phone must not widen its own cage. */
+    m_server->route("/api/v1/access", QHttpServerRequest::Method::Get,
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const quint32 mask = m_engine->accessMask();
+        QJsonObject body;
+        body["fixtures"] = bool(mask & EngineHost::AccessFixtures);
+        body["functions"] = bool(mask & EngineHost::AccessFunctions);
+        body["vcControl"] = bool(mask & EngineHost::AccessVcControl);
+        body["vcEditing"] = bool(mask & EngineHost::AccessVcEditing);
+        body["simpleDesk"] = bool(mask & EngineHost::AccessSimpleDesk);
+        body["show"] = bool(mask & EngineHost::AccessShow);
+        body["io"] = bool(mask & EngineHost::AccessIO);
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/access", QHttpServerRequest::Method::Put,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        quint32 mask = m_engine->accessMask();
+        const QString preset = body.value("preset").toString();
+        if (preset == QStringLiteral("all"))
+            mask = EngineHost::AccessAll;
+        else if (preset == QStringLiteral("operate"))
+        {
+            /* Operating, not building: the console and the desk answer, the
+               editors do not. */
+            mask = EngineHost::AccessVcControl | EngineHost::AccessSimpleDesk;
+        }
+        else if (preset == QStringLiteral("kiosk"))
+            mask = EngineHost::AccessVcControl;
+        else if (preset.isEmpty() == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"preset\" is all, operate or kiosk"));
+        }
+
+        const auto bit = [&body, &mask](const char *key, quint32 flag) {
+            const QJsonValue value = body.value(QLatin1String(key));
+            if (value.isBool() == false)
+                return;
+            if (value.toBool())
+                mask |= flag;
+            else
+                mask &= ~flag;
+        };
+        bit("fixtures", EngineHost::AccessFixtures);
+        bit("functions", EngineHost::AccessFunctions);
+        bit("vcControl", EngineHost::AccessVcControl);
+        bit("vcEditing", EngineHost::AccessVcEditing);
+        bit("simpleDesk", EngineHost::AccessSimpleDesk);
+        bit("show", EngineHost::AccessShow);
+        bit("io", EngineHost::AccessIO);
+
+        m_engine->setAccessMask(mask);
+
+        QJsonObject response;
+        response["mask"] = qint64(m_engine->accessMask());
+        return QHttpServerResponse(response);
+    });
+
     /* Global undo: every edit above went through a snapshot guard, and the
        console rides along as markers into its own string-swap history. The
        live desk and the run state are OUTSIDE on purpose: stopping a chaser
        is not an edit, and undo must never cut a running show. */
     m_server->route("/api/v1/undo", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QString error;
         QString label;
@@ -3875,9 +4004,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/redo", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QString error;
         QString label;
@@ -3896,9 +4025,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/history", QHttpServerRequest::Method::Get,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QJsonObject body;
         body["entries"] = m_undo->history();
@@ -4014,11 +4143,11 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/project/recover", QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
         /* Ordinary auth: this loads a file the daemon itself wrote next to
            the project, never a path a client chose. */
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         QString errorMessage;
         if (m_engine->recoverAutosave(errorMessage) == false)
@@ -4053,9 +4182,9 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/project/save/<arg>",
                     QHttpServerRequest::Method::Post,
-                    [this, denied](const QString &name, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QString &name, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QString path = m_engine->resolveProjectName(name);
         if (path.isEmpty())
@@ -4076,9 +4205,9 @@ void ApiServer::registerRoutes()
 
     /* The one control every lighting desk has a physical button for. */
     m_server->route("/api/v1/blackout", QHttpServerRequest::Method::Post,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         doc->masterTimer()->stopAllFunctions();
         doc->inputOutputMap()->setBlackout(true);
@@ -4089,9 +4218,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/blackout", QHttpServerRequest::Method::Delete,
-                    [doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         doc->inputOutputMap()->setBlackout(false);
 
@@ -4101,9 +4230,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/grandmaster", QHttpServerRequest::Method::Get,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const EngineHost::GrandMasterState state = m_engine->grandMaster();
         QJsonObject body;
@@ -4124,9 +4253,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/grandmaster", QHttpServerRequest::Method::Put,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
 
@@ -4206,9 +4335,9 @@ void ApiServer::registerRoutes()
        desk apart from /live. Universe indices here are the 1-based ids the
        /universes list shows. */
     m_server->route("/api/v1/simpledesk/<arg>", QHttpServerRequest::Method::Get,
-                    [this, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int universe = rawUniverse.toInt(&ok) - 1;
@@ -4227,9 +4356,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/simpledesk/<arg>/channels", QHttpServerRequest::Method::Put,
-                    [this, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int universe = rawUniverse.toInt(&ok) - 1;
@@ -4272,10 +4401,10 @@ void ApiServer::registerRoutes()
 
     m_server->route("/api/v1/simpledesk/<arg>/channels/<arg>",
                     QHttpServerRequest::Method::Delete,
-                    [this, denied](const QString &rawUniverse, const QString &rawChannel,
+                    [this, denied, refused, maskForbidden](const QString &rawUniverse, const QString &rawChannel,
                                    const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int universe = rawUniverse.toInt(&ok) - 1;
@@ -4293,9 +4422,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/simpledesk/<arg>", QHttpServerRequest::Method::Delete,
-                    [this, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int universe = rawUniverse.toInt(&ok) - 1;
@@ -4314,9 +4443,9 @@ void ApiServer::registerRoutes()
        number. `bare` counts what the desk holds on unpatched addresses --
        values a scene has no words for, said instead of silently shrunk. */
     m_server->route("/api/v1/dump", QHttpServerRequest::Method::Get,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QList<EngineHost::DumpValue> values = m_engine->dumpableValues();
         QSet<int> groups;
@@ -4335,9 +4464,9 @@ void ApiServer::registerRoutes()
     });
 
     m_server->route("/api/v1/dump", QHttpServerRequest::Method::Post,
-                    [this, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
         const QString name = asked.value(QStringLiteral("name")).toString();
@@ -4378,9 +4507,9 @@ void ApiServer::registerRoutes()
        means here exactly what it means in QLC+ 5 -- including the relative
        commands, which read the universe's current values as their base. */
     m_server->route("/api/v1/simpledesk/<arg>/keypad", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QString &rawUniverse, const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QString &rawUniverse, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         bool ok = false;
         const int universe = rawUniverse.toInt(&ok) - 1;
@@ -4426,9 +4555,9 @@ void ApiServer::registerRoutes()
        this the panic button, and a panic that can only snap to black makes
        operators hesitate to press it. */
     m_server->route("/api/v1/stop", QHttpServerRequest::Method::Post,
-                    [this, doc, denied](const QHttpServerRequest &request) {
-        if (denied(request))
-            return unauthorized();
+                    [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
 
         const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
         const int fadeMs = asked.value(QStringLiteral("fadeMs")).toInt(0);
