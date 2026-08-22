@@ -516,6 +516,8 @@ export const api = {
       fadeInMode?: string
       fadeOutMode?: string
       durationMode?: string
+      timeDivision?: string
+      bpm?: number
     },
   ) =>
     json<FunctionState>(`/api/v1/functions/${id}`, {
@@ -588,6 +590,24 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ data }),
     }),
+  /** Solo, the reference way: the chosen track unmutes, the rest mute. */
+  soloTrack: (showId: number, trackId: number, solo: boolean) =>
+    json<unknown>(`/api/v1/functions/${showId}/tracks/${trackId}/solo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ solo }),
+    }),
+  /** Time surgery at the cursor: insert stretches and pushes, cut shrinks
+   *  and pulls back. */
+  showTime: (showId: number, action: 'insert' | 'cut', at: number, amount: number) =>
+    json<{ stretched?: number; shrunk?: number; moved: number }>(
+      `/api/v1/functions/${showId}/time`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, at, amount }),
+      },
+    ),
   /** Peak per bucket, 0-100, over the whole audio file. */
   waveform: (id: number, points = 200) =>
     json<{ points: number[]; duration: number }>(

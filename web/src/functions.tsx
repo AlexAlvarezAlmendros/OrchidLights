@@ -58,6 +58,7 @@ export function Functions({
   shows,
   revision,
   onToggle,
+  onTransport,
   onChanged,
 }: {
   functions: FunctionState[]
@@ -65,9 +66,11 @@ export function Functions({
   running: Set<number>
   /** Where each running show has got to, by function id. The daemon's clock,
    *  not ours: a local timer drifts and keeps going after the show ends. */
-  shows: Record<number, number>
+  shows: Record<number, { elapsed: number; paused: boolean }>
   revision: number
   onToggle: (id: number) => void
+  /** Seek, pause, resume and stop on the live feed. */
+  onTransport: (id: number, action: string, at?: number) => void
   onChanged: () => void
 }) {
   const [selected, setSelected] = useState<number | null>(null)
@@ -337,9 +340,11 @@ export function Functions({
           functions={functions}
           fixtures={fixtures}
           revision={revision}
-          elapsed={shows[current.id]}
+          elapsed={shows[current.id]?.elapsed}
+          paused={shows[current.id]?.paused === true}
           running={running.has(current.id)}
           onRun={run}
+          onTransport={onTransport}
           onClose={() => setSelected(null)}
         />
       )}
@@ -353,8 +358,10 @@ function FunctionEditor({
   fixtures,
   revision,
   elapsed,
+  paused,
   running,
   onRun,
+  onTransport,
   onClose,
 }: {
   fn: FunctionState
@@ -362,8 +369,10 @@ function FunctionEditor({
   fixtures: FixtureState[]
   revision: number
   elapsed: number | undefined
+  paused: boolean
   running: boolean
   onRun: (action: () => Promise<unknown>) => Promise<void>
+  onTransport: (id: number, action: string, at?: number) => void
   onClose: () => void
 }) {
   const [name, setName] = useState(fn.name)
@@ -547,8 +556,10 @@ function FunctionEditor({
           body={body}
           functions={functions}
           elapsed={elapsed}
+          paused={paused}
           running={running}
           onRun={onRun}
+          onTransport={onTransport}
           onReload={reloadBody}
         />
       )}

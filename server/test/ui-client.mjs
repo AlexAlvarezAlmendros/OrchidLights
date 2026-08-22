@@ -3413,6 +3413,141 @@ try {
   check('the rig tools act: wizard, remap, import dialog, linked lamp',
     rigTools === 'ok', rigTools)
 
+  /* F16 through the screen: the timeline is a transport. A cursor lands where
+     the finger says, play starts THERE, a track goes solo, the ruler counts
+     in beats, and time surgery moves real milliseconds. */
+  const showManager = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const born = []
+
+    const cleanup = async () => {
+      for (const id of born.reverse())
+        await fetch('/api/v1/functions/' + id + '?force=true', { method: 'DELETE' })
+      document.querySelector('article.card header button[aria-label="Cerrar"]')?.click()
+      await wait(300)
+    }
+
+    try {
+      const make = async (type, name) => {
+        const made = await (await fetch('/api/v1/functions', { method: 'POST', headers: json,
+          body: JSON.stringify({ type, name }) })).json()
+        born.push(made.id)
+        return made.id
+      }
+      const uno = await make('Scene', 'PasoUnoF16')
+      const dos = await make('Scene', 'PasoDosF16')
+      const show = await make('Show', 'ShowF16')
+      const trackMade = await (await fetch('/api/v1/functions/' + show + '/tracks', {
+        method: 'POST', headers: json, body: JSON.stringify({ name: 'PistaF16' }) })).json()
+      const track = trackMade.id
+      const item = async (fn, start) => (await (await fetch(
+        '/api/v1/functions/' + show + '/tracks/' + track + '/items', {
+          method: 'POST', headers: json,
+          body: JSON.stringify({ function: fn, start, duration: 5000 }) })).json()).id
+      const itemUno = await item(uno, 0)
+      await item(dos, 5000)
+      const otherTrack = (await (await fetch('/api/v1/functions/' + show + '/tracks', {
+        method: 'POST', headers: json, body: JSON.stringify({ name: 'PistaDosF16' }) })).json()).id
+
+      /* Open the show's editor. */
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Funciones')?.click()
+      await wait(900)
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      if (searchBox) {
+        setI.call(searchBox, 'ShowF16')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+        await wait(500)
+      }
+      ;[...document.querySelectorAll('.fn-name, button')]
+        .find(b => b.textContent.trim() === 'ShowF16')?.click()
+      await wait(1200)
+
+      const transport = document.querySelector('.timeline-transport')
+      if (!transport) return 'the timeline has no transport'
+
+      /* The cursor lands where the finger says. */
+      const surface = document.querySelector('.timeline-scroll > div')
+      if (!surface) return 'the timeline has no surface'
+      const box = surface.getBoundingClientRect()
+      surface.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, clientX: box.left + 120, clientY: box.top + 10 }))
+      await wait(400)
+      const cursorLine = document.querySelector('.timecursor')
+      if (!cursorLine) return 'the cursor never appeared'
+
+      /* Time surgery from the buttons: the cursor sits at 2 s (120px at 60
+         px/s), inside the first item. */
+      ;[...transport.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === '+⏱')?.click()
+      await wait(1000)
+      let bodyNow = await (await fetch('/api/v1/functions/' + show + '/body')).json()
+      let first = bodyNow.tracks.find(t => t.id === track).functions
+        .find(f => f.id === itemUno)
+      if (first.duration !== 7000) {
+        return 'insert at the cursor left the item at ' + first.duration
+      }
+      ;[...transport.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === '−⏱')?.click()
+      await wait(1000)
+      bodyNow = await (await fetch('/api/v1/functions/' + show + '/body')).json()
+      first = bodyNow.tracks.find(t => t.id === track).functions
+        .find(f => f.id === itemUno)
+      if (first.duration !== 5000) {
+        return 'cut at the cursor left the item at ' + first.duration
+      }
+
+      /* Solo from the track head. */
+      const heads = [...document.querySelectorAll('.track-head')]
+      const mine = heads.find(h => h.querySelector('input')?.value === 'PistaF16')
+      if (!mine) return 'the track head is not drawn'
+      ;[...mine.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'S')?.click()
+      await wait(1000)
+      bodyNow = await (await fetch('/api/v1/functions/' + show + '/body')).json()
+      const other = bodyNow.tracks.find(t => t.id === otherTrack)
+      if (other?.mute !== true) return 'solo muted nothing'
+      ;[...mine.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'S')?.click()
+      await wait(800)
+
+      /* The ruler counts in beats when told to. */
+      const tempoSelect = [...transport.querySelectorAll('select')].at(0)
+      const setS = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setS.call(tempoSelect, 'BPM_4_4')
+      tempoSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(1000)
+      bodyNow = await (await fetch('/api/v1/functions/' + show + '/body')).json()
+      if (bodyNow.timeDivision !== 'BPM_4_4') {
+        return 'the division select set ' + bodyNow.timeDivision
+      }
+      const firstTick = document.querySelector('.ruler .tick')
+      if ((firstTick?.textContent ?? '') !== '1') {
+        return 'the ruler does not count bars: first tick says ' + firstTick?.textContent
+      }
+
+      /* Play starts AT the cursor. */
+      ;[...transport.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('▶'))?.click()
+      await wait(900)
+      const fns = await (await fetch('/api/v1/functions')).json()
+      const runningShow = fns.find(f => f.id === show)
+      if (runningShow?.running !== true) return 'play started nothing'
+      ;[...transport.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === '⏹')?.click()
+      await wait(700)
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the timeline is a transport: cursor, surgery, solo, beats, play-from',
+    showManager === 'ok', showManager)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

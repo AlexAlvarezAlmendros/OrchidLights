@@ -226,6 +226,98 @@ try {
   const back = await body()
   check('leaving the show as it started', back.tracks?.length === 1 && back.duration === 1600,
         `${back.tracks?.length} tracks, ${back.duration} ms`)
+
+  /* --- F16: the ruler counts in beats when the show says so --------------- */
+
+  const tempoSet = await patch(`/functions/${SHOW}`, { timeDivision: 'BPM_3_4', bpm: 90 })
+  check('the show takes a time division', tempoSet.ok, `${tempoSet.status}`)
+  const counted = await body()
+  check('and repeats it', counted.timeDivision === 'BPM_3_4' && counted.bpm === 90,
+        `${counted.timeDivision} @ ${counted.bpm}`)
+  const badTempo = await patch(`/functions/${SHOW}`, { timeDivision: 'Waltz' })
+  check('an invented division is refused', badTempo.status === 400, `${badTempo.status}`)
+
+  /* --- F16: solo, the reference way --------------------------------------- */
+
+  const soloTrack = await post(`/functions/${SHOW}/tracks`, { name: 'SoloHumo' })
+  const soloTrackId = (await soloTrack.json()).id
+  const soloed = await post(`/functions/${SHOW}/tracks/${TRACK}/solo`, { solo: true })
+  check('a track can go solo', soloed.ok, `${soloed.status}`)
+  const during = await body()
+  check('solo means every OTHER track mutes',
+        during.tracks.find((t) => t.id === TRACK)?.mute === false
+          && during.tracks.find((t) => t.id === soloTrackId)?.mute === true,
+        JSON.stringify(during.tracks.map((t) => [t.id, t.mute])))
+  await post(`/functions/${SHOW}/tracks/${TRACK}/solo`, { solo: false })
+  const unsoloed = await body()
+  check('un-solo unmutes them all', unsoloed.tracks.every((t) => t.mute === false),
+        JSON.stringify(unsoloed.tracks.map((t) => t.mute)))
+  await fetch(`${base}/api/v1/functions/${SHOW}/tracks/${soloTrackId}`, { method: 'DELETE' })
+
+  /* --- F16: time surgery at the cursor ------------------------------------ */
+
+  const itemsNow = (await body()).tracks[0].functions
+  const rojoItem = itemsNow.find((f) => f.name === 'Rojo')?.id
+  const verdeItem = itemsNow.find((f) => f.name === 'Verde')?.id
+
+  const inserted = await (await post(`/functions/${SHOW}/time`, {
+    action: 'insert', at: 400, amount: 2000,
+  })).json()
+  check('inserting 2 s inside Rojo stretches it and pushes Verde',
+        inserted.stretched === 1 && inserted.moved === 1, JSON.stringify(inserted))
+  const grown = (await body()).tracks[0].functions
+  check('the arithmetic is exact: Rojo 2800 ms, Verde starts at 2800',
+        grown.find((f) => f.id === rojoItem)?.duration === 2800
+          && grown.find((f) => f.id === verdeItem)?.start === 2800,
+        grown.map((f) => `${f.name}@${f.start}+${f.duration}`).join(' '))
+
+  const cutBack = await (await post(`/functions/${SHOW}/time`, {
+    action: 'cut', at: 400, amount: 1000,
+  })).json()
+  check('cutting 1 s shrinks Rojo and pulls Verde back',
+        cutBack.shrunk === 1 && cutBack.moved === 1, JSON.stringify(cutBack))
+  const shrunkNow = (await body()).tracks[0].functions
+  check('again exact: Rojo 1800 ms, Verde at 1800',
+        shrunkNow.find((f) => f.id === rojoItem)?.duration === 1800
+          && shrunkNow.find((f) => f.id === verdeItem)?.start === 1800,
+        shrunkNow.map((f) => `${f.name}@${f.start}+${f.duration}`).join(' '))
+
+  const emptyAir = await post(`/functions/${SHOW}/time`, {
+    action: 'insert', at: 60000, amount: 1000,
+  })
+  check('the cursor in empty air is refused', emptyAir.status === 400, `${emptyAir.status}`)
+
+  /* Back to the file's own shape, through the same primitives an editor
+     drags with. */
+  await patch(`/functions/${SHOW}/items/${rojoItem}`, { duration: 800 })
+  await patch(`/functions/${SHOW}/items/${verdeItem}`, { start: 800 })
+
+  /* --- F16: the cursor is a transport -- seek, pause, resume -------------- */
+
+  positions.length = 0
+  socket.send(JSON.stringify({ type: 'function', id: SHOW, action: 'start', at: 900 }))
+  await sleep(250)
+  check('started at 900 ms the show opens on Verde, Rojo never lit',
+        dmx?.[GREEN] === 255 && dmx?.[RED] === 0,
+        `red=${dmx?.[RED]} green=${dmx?.[GREEN]}`)
+  check('and the clock says so', positions.some((p) => p.running && p.elapsed >= 900),
+        positions.map((p) => p.elapsed).join(','))
+
+  socket.send(JSON.stringify({ type: 'function', id: SHOW, action: 'pause' }))
+  await sleep(500)
+  const frozenAt = positions.filter((p) => p.paused).map((p) => p.elapsed)
+  socket.send(JSON.stringify({ type: 'function', id: SHOW, action: 'resume' }))
+  await sleep(250)
+  check('pause freezes the clock without dropping the light',
+        frozenAt.length >= 2 && frozenAt[0] === frozenAt[frozenAt.length - 1]
+          && dmx?.[GREEN] === 255,
+        `elapsed ${frozenAt.join(',')} green=${dmx?.[GREEN]}`)
+  const resumed = positions.filter((p) => p.paused === false && p.running).map((p) => p.elapsed)
+  check('resume lets it run on', resumed.length > 0
+          && resumed[resumed.length - 1] > (frozenAt[0] ?? 0),
+        resumed.join(','))
+  socket.send(JSON.stringify({ type: 'function', id: SHOW, action: 'stop' }))
+  await sleep(400)
 } finally {
   socket.close()
 }

@@ -451,6 +451,35 @@ namespace DocWriter
                        const quint32 *duration, const QString *color, const bool *locked);
     Result removeShowItem(Doc *doc, quint32 showId, quint32 itemId);
 
+    /** Time or beats: how the ruler counts, saved with the show. */
+    Result setShowTimeDivision(Doc *doc, quint32 showId, const QString &type, int bpm);
+
+    /**
+     * Solo, the reference way (qmlui/showmanager.cpp:358): the chosen track
+     * unmutes and every other one mutes; un-solo unmutes them all. Not a flag
+     * on the track -- QLC+ stores only mute, and solo IS a way of setting it.
+     */
+    Result setShowTrackSolo(Doc *doc, quint32 showId, quint32 trackId, bool solo);
+
+    /**
+     * Insert time at the cursor: items the cursor stands inside grow by the
+     * amount, everything after it slides right -- ported from
+     * qmlui/showmanager.cpp:1143. Locked items hold still. Chasers and
+     * sequences do not stretch (their length is their steps); they still
+     * slide.
+     */
+    Result insertShowTime(Doc *doc, quint32 showId, quint32 at, quint32 amount,
+                          int &stretched, int &moved);
+
+    /**
+     * Cut time at the cursor: the inverse -- items the cursor stands inside
+     * shrink (never below a second), then everything after slides left. The
+     * reference refuses when the cursor stands in empty air, and so does
+     * this: cutting nothing is a misclick, not an edit.
+     */
+    Result cutShowTime(Doc *doc, quint32 showId, quint32 at, quint32 amount,
+                       int &shrunk, int &moved);
+
     Result addFixtureGroup(Doc *doc, const QString &name, const QList<quint32> &fixtureIds,
                            quint32 &groupId);
     Result removeFixtureGroup(Doc *doc, quint32 groupId);

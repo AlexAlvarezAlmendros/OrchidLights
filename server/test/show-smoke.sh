@@ -72,6 +72,10 @@ assert tracks[0][1] == 'Luces', tracks[0]
 
 items = re.findall(r'<ShowFunction ID="(\d+)" StartTime="(\d+)" Duration="(\d+)"', show.group(1))
 assert items == [('1', '0', '800'), ('2', '800', '800')], ('the timeline did not save as it was', items)
+
+division = re.search(r'<TimeDivision Type="([^"]+)" BPM="(\d+)"', show.group(1))
+assert division is not None, 'the time division is not in the saved file'
+assert division.groups() == ('BPM_3_4', '90'), ('the beat division did not save', division.groups())
 CHECK
 
 echo "Show manager smoke test passed."

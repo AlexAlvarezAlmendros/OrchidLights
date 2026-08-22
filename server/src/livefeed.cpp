@@ -788,9 +788,19 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
            WidgetActions. */
         const QString action = message.value("action").toString();
         if (action == QStringLiteral("start"))
-            WidgetActions::startFunction(m_engine, function->id());
+        {
+            /* "at" seeks: a show started at 42000 opens on second 42, which is
+               how a timeline cursor becomes a transport (the reference passes
+               the cursor to Function::start the same way). */
+            WidgetActions::startFunction(m_engine, function->id(),
+                                         quint32(qMax(0, message.value("at").toInt(0))));
+        }
         else if (action == QStringLiteral("stop"))
             WidgetActions::stopFunction(m_engine, function->id());
+        else if (action == QStringLiteral("pause"))
+            function->setPause(true);
+        else if (action == QStringLiteral("resume"))
+            function->setPause(false);
         else if (action == QStringLiteral("flash"))
             WidgetActions::flashFunction(m_engine, function->id(),
                                          message.value("override").toBool(false),
@@ -957,6 +967,7 @@ void LiveFeed::flush()
         message["type"] = "show";
         message["id"] = qint64(function->id());
         message["running"] = running;
+        message["paused"] = function->isPaused();
         message["elapsed"] = qint64(running ? function->elapsed() : 0);
 
         const QString payload =

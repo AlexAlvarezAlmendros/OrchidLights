@@ -1697,6 +1697,225 @@ DocWriter::Result DocWriter::removeShowItem(Doc *doc, quint32 showId, quint32 it
     return Result::success();
 }
 
+DocWriter::Result DocWriter::setShowTimeDivision(Doc *doc, quint32 showId, const QString &type,
+                                                 int bpm)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    const Show::TimeDivision division = Show::stringToTempo(type);
+    if (Show::tempoToString(division) != type)
+    {
+        return Result::failure(QStringLiteral(
+            "\"%1\" is not a time division. Use Time, BPM_4_4, BPM_3_4 or BPM_2_4").arg(type));
+    }
+    if (bpm < 1 || bpm > 500)
+        return Result::failure(QStringLiteral("BPM must be between 1 and 500"));
+
+    show->setTimeDivision(division, bpm);
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setShowTrackSolo(Doc *doc, quint32 showId, quint32 trackId, bool solo)
+{
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+
+    Track *chosen = show->track(trackId);
+    if (chosen == nullptr)
+    {
+        return Result::failure(QStringLiteral("No track with id %1 in \"%2\"")
+                                   .arg(trackId).arg(show->name()));
+    }
+
+    for (Track *track : show->tracks())
+    {
+        if (track == chosen)
+            track->setMute(false);
+        else
+            track->setMute(solo);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+namespace
+{
+    /** Whether the item's function is one whose bar can stretch and shrink.
+     *  Chasers and sequences are their steps; audio and video only loop. */
+    bool stretchable(const Doc *doc, const ShowFunction *item)
+    {
+        const Function *function = doc->function(item->functionID());
+        if (function == nullptr)
+            return false;
+
+        switch (function->type())
+        {
+            case Function::AudioType:
+            case Function::VideoType:
+                return function->runOrder() == Function::Loop;
+            case Function::SceneType:
+            case Function::CollectionType:
+            case Function::EFXType:
+            case Function::RGBMatrixType:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** Every item of the show whose start lies strictly after the cursor,
+     *  slid by delta -- sorted so no slide lands on a neighbour mid-move. */
+    void slideItemsAfter(Doc *doc, Show *show, quint32 at, qint64 delta, int &moved)
+    {
+        QList<ShowFunction *> sliding;
+        for (Track *track : show->tracks())
+        {
+            for (ShowFunction *item : track->showFunctions())
+            {
+                if (qint64(item->startTime()) > qint64(at))
+                    sliding.append(item);
+            }
+        }
+
+        std::sort(sliding.begin(), sliding.end(),
+                  [delta](const ShowFunction *a, const ShowFunction *b) {
+                      return delta > 0 ? a->startTime() > b->startTime()
+                                       : a->startTime() < b->startTime();
+                  });
+
+        for (ShowFunction *item : sliding)
+        {
+            const qint64 landing = qMax<qint64>(0, qint64(item->startTime()) + delta);
+            item->setStartTime(quint32(landing));
+            moved++;
+        }
+
+        Q_UNUSED(doc)
+    }
+}
+
+DocWriter::Result DocWriter::insertShowTime(Doc *doc, quint32 showId, quint32 at, quint32 amount,
+                                            int &stretched, int &moved)
+{
+    stretched = 0;
+    moved = 0;
+
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+    if (amount == 0)
+        return Result::failure(QStringLiteral("Insert an amount of time, in milliseconds"));
+
+    if (show->isRunning() && show->stopAndWait() == false)
+    {
+        return Result::failure(QStringLiteral("\"%1\" did not stop in time; refusing to change "
+                                              "it while it runs").arg(show->name()));
+    }
+
+    /* The reference acts only when the cursor touches something: inside an
+       item, or with items after it to push. Empty air is a misclick. */
+    bool hasTarget = false;
+    bool hasAfter = false;
+    for (Track *track : show->tracks())
+    {
+        for (ShowFunction *item : track->showFunctions())
+        {
+            const quint32 start = item->startTime();
+            if (start > at)
+                hasAfter = true;
+            if (item->isLocked() == false && at >= start && at <= start + item->duration(doc))
+                hasTarget = true;
+        }
+    }
+    if (hasTarget == false && hasAfter == false)
+    {
+        return Result::failure(
+            QStringLiteral("The cursor stands in empty air: nothing to stretch or push"));
+    }
+
+    slideItemsAfter(doc, show, at, qint64(amount), moved);
+
+    for (Track *track : show->tracks())
+    {
+        for (ShowFunction *item : track->showFunctions())
+        {
+            const quint32 start = item->startTime();
+            if (item->isLocked() || at < start || at > start + item->duration(doc))
+                continue;
+            if (stretchable(doc, item) == false)
+                continue;
+
+            item->setDuration(item->duration(doc) + amount);
+            stretched++;
+        }
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::cutShowTime(Doc *doc, quint32 showId, quint32 at, quint32 amount,
+                                         int &shrunk, int &moved)
+{
+    shrunk = 0;
+    moved = 0;
+
+    QString error;
+    Show *show = showById(doc, showId, error);
+    if (show == nullptr)
+        return Result::failure(error);
+    if (amount == 0)
+        return Result::failure(QStringLiteral("Cut an amount of time, in milliseconds"));
+
+    if (show->isRunning() && show->stopAndWait() == false)
+    {
+        return Result::failure(QStringLiteral("\"%1\" did not stop in time; refusing to change "
+                                              "it while it runs").arg(show->name()));
+    }
+
+    /* A bar never shrinks below a second: the reference keeps a minimum so a
+       cut cannot leave an item too thin to grab. */
+    const quint32 minimum = 1000;
+
+    for (Track *track : show->tracks())
+    {
+        for (ShowFunction *item : track->showFunctions())
+        {
+            const quint32 start = item->startTime();
+            const quint32 length = item->duration(doc);
+            if (item->isLocked() || at < start || at > start + length)
+                continue;
+            if (stretchable(doc, item) == false || length <= minimum)
+                continue;
+
+            const quint32 cut = qMin(amount, length - minimum);
+            item->setDuration(length - cut);
+            shrunk++;
+        }
+    }
+
+    /* The reference refuses a cut that touched nothing rather than sliding
+       the tail into the void. */
+    if (shrunk == 0)
+    {
+        return Result::failure(
+            QStringLiteral("The cursor is not inside anything that can shrink"));
+    }
+
+    slideItemsAfter(doc, show, at, -qint64(amount), moved);
+
+    doc->setModified();
+    return Result::success();
+}
+
 /*****************************************************************************
  * Channels groups
  *****************************************************************************/
