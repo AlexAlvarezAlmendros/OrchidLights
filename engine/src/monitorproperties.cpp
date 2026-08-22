@@ -956,7 +956,9 @@ bool MonitorProperties::saveXML(QXmlStreamWriter *doc, const Doc *mainDocument) 
             doc->writeAttribute(KXMLQLCMonitorItemXPosition, QString::number(item.m_position.x()));
             doc->writeAttribute(KXMLQLCMonitorItemYPosition, QString::number(item.m_position.y()));
 
-#ifdef QMLUI
+            /* The full three coordinates, like the QMLUI build: the loader on
+               every build (this one and QLC+ 5's) reads them, so writing only
+               X and Y here was the one thing keeping height out of the file. */
             doc->writeAttribute(KXMLQLCMonitorItemZPosition, QString::number(item.m_position.z()));
 
             // write rotation, if set
@@ -966,10 +968,6 @@ bool MonitorProperties::saveXML(QXmlStreamWriter *doc, const Doc *mainDocument) 
                 doc->writeAttribute(KXMLQLCMonitorItemYRotation, QString::number(item.m_rotation.y()));
             if (item.m_rotation.z() != 0)
                 doc->writeAttribute(KXMLQLCMonitorItemZRotation, QString::number(item.m_rotation.z()));
-#else
-            if (item.m_rotation != QVector3D(0, 0, 0))
-                doc->writeAttribute(KXMLQLCMonitorFixtureRotation, QString::number(item.m_rotation.y()));
-#endif
             if (item.m_color.isValid())
                 doc->writeAttribute(KXMLQLCMonitorFixtureGelColor, item.m_color.name());
 

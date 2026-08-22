@@ -172,7 +172,9 @@ const head2Item = barItems.find((s) => s.includes('Head="2"'))
 check('head 0 of the bar is in the file with gel, zoom, rotation and Hidden',
   head0Item !== undefined && head0Item.includes('Hidden="True"')
     && head0Item.includes('FixedZoom="25"') && head0Item.includes('GelColor="#ff0000"')
-    && head0Item.includes('Rotation="90"'),
+    /* YRot since F18: the unified save writes the full rotation the way the
+       QMLUI build does, and the legacy Rotation attribute retired with it. */
+    && head0Item.includes('YRot="90"'),
   head0Item ?? barItems.join(' | '))
 check('head 2 of the bar is its own FxItem, locked and tilt-inverted',
   head2Item !== undefined && head2Item.includes('Locked="True"')

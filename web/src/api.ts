@@ -230,9 +230,16 @@ export interface PlanFixture {
    *  every unplaced lamp at the origin looks like a plan, and is not. */
   x?: number
   y?: number
+  /** Height in millimetres; absent while the lamp sits on the floor. */
+  z?: number
   rotation?: number
+  rotationX?: number
+  rotationZ?: number
   gel?: string
   zoom?: number
+  /** Real footprint in millimetres, from the definition's physical block. */
+  width?: number
+  depth?: number
   hidden?: boolean
   locked?: boolean
   invertPan?: boolean
@@ -255,6 +262,8 @@ export interface PlanFixture {
     white?: number
     amber?: number
     uv?: number
+    pan?: number
+    tilt?: number
   }
 }
 
@@ -834,7 +843,10 @@ export const api = {
       linked?: number | undefined
       x?: number
       y?: number
+      z?: number
       rotation?: number
+      rotationX?: number
+      rotationZ?: number
       gel?: string
       zoom?: number
       hidden?: boolean
@@ -850,6 +862,21 @@ export const api = {
     }),
   clearPlanPosition: (id: number) =>
     json<unknown>(`/api/v1/plan/fixtures/${id}`, { method: 'DELETE' }),
+  /** The stage itself: size in metres or feet. */
+  setPlanGrid: (body: { width?: number; height?: number; depth?: number; units?: string }) =>
+    json<unknown>('/api/v1/plan/grid', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /** Hang an uploaded asset behind the plan, or take it down. */
+  setPlanBackground: (asset: string) =>
+    json<unknown>('/api/v1/plan/background', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset }),
+    }),
+  removePlanBackground: () => json<unknown>('/api/v1/plan/background', { method: 'DELETE' }),
 
   /** The channel modifier templates the daemon loaded, by name. */
   modifiers: () => json<{ modifiers: string[] }>('/api/v1/modifiers'),

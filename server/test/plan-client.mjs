@@ -36,6 +36,7 @@ socket.addEventListener('message', (event) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const base = new URL(url.replace(/^ws/, 'http')).origin
 
+const json = { 'Content-Type': 'application/json' }
 const plan = () => fetch(`${base}/api/v1/plan`).then((r) => r.json())
 
 const place = (id, position) =>
@@ -186,13 +187,11 @@ try {
         moved?.x === 2000 && moved?.y === 800 && moved?.gel === '#ff8800' && moved?.rotation === 45,
         `${moved?.x},${moved?.y} @${moved?.rotation} ${moved?.gel}`)
 
-  /* A plan is a top view and this build of the engine saves only X and Y, so a
-     height would be held and then lost. Refused rather than accepted and
-     forgotten -- a lamp that moves when the project is reopened is worse than
-     one that could never be raised. */
-  const height = await place(BARRA, { x: 100, z: 2500 })
-  check('a height is refused rather than silently dropped', height.status === 400,
-        height.ok ? '(accepted)' : (await height.json()).error)
+  /* Once refused because the save would have lost it; the save now writes
+     the third coordinate (F18), so a height simply works -- proven end to end
+     further down and in the .qxw check. */
+  const height = await place(BARRA, { x: 100, z: 900 })
+  check('a height is accepted now that the file keeps it', height.ok, `${height.status}`)
 
   const notANumber = await place(BARRA, { x: 'izquierda' })
   check('a position that is not a number is refused', notANumber.status === 400,
@@ -225,7 +224,54 @@ try {
   const background = await fetch(`${base}/api/v1/plan/background`)
   check('and the route says so', background.status === 404, `${background.status}`)
 
-  /* Put it back, so the saved file has something in it to check. */
+  /* --- F18: the plan grows a third coordinate and a stage of its own ------ */
+
+  const raised = await place(BARRA, { x: 500, y: 500, z: 2500, rotationX: 30 })
+  check('a lamp takes a height and a hang tilt', raised.ok, `${raised.status}`)
+  const lifted = (await plan()).fixtures.find((f) => f.id === BARRA)
+  check('and the plan repeats them', lifted?.z === 2500 && lifted?.rotationX === 30,
+        JSON.stringify([lifted?.z, lifted?.rotationX]))
+
+  const resized = await fetch(`${base}/api/v1/plan/grid`, {
+    method: 'PUT', headers: json,
+    body: JSON.stringify({ width: 12, depth: 8, units: 'meters' }),
+  })
+  check('the stage can be resized', resized.ok, `${resized.status}`)
+  const staged = await plan()
+  check('and the plan says the new stage',
+        staged.grid.width === 12 && staged.grid.depth === 8,
+        JSON.stringify(staged.grid))
+  const povRefused = await fetch(`${base}/api/v1/plan/grid`, {
+    method: 'PUT', headers: json, body: JSON.stringify({ pointOfView: 'front' }),
+  })
+  check('a point of view is refused with the reason (it would remap every position)',
+        povRefused.status === 400, `${povRefused.status}`)
+  const badUnits = await fetch(`${base}/api/v1/plan/grid`, {
+    method: 'PUT', headers: json, body: JSON.stringify({ units: 'cubits' }),
+  })
+  check('an invented unit is refused', badUnits.status === 400, `${badUnits.status}`)
+
+  /* A one-pixel PNG becomes the backdrop, and comes off again. */
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64')
+  const uploaded = await fetch(`${base}/api/v1/assets?name=fondo.png`, {
+    method: 'POST', body: pixel,
+  })
+  check('a backdrop uploads as an asset', uploaded.ok, `${uploaded.status}`)
+  const hung = await fetch(`${base}/api/v1/plan/background`, {
+    method: 'PUT', headers: json, body: JSON.stringify({ asset: 'fondo.png' }),
+  })
+  check('and hangs behind the plan', hung.ok, `${hung.status}`)
+  const withBackdrop = await fetch(`${base}/api/v1/plan/background`)
+  check('the backdrop serves', withBackdrop.status === 200, `${withBackdrop.status}`)
+  const unhung = await fetch(`${base}/api/v1/plan/background`, { method: 'DELETE' })
+  check('and comes off again', unhung.ok, `${unhung.status}`)
+  const bare = await fetch(`${base}/api/v1/plan/background`)
+  check('leaving the 404 with its reason', bare.status === 404, `${bare.status}`)
+
+  /* Put it back, so the saved file has something in it to check. The height
+     and the tilt STAY: preserving them across a move is the whole point. */
   await place(BARRA, { x: 1200, y: 800, rotation: 45, gel: '#ff8800' })
 } finally {
   socket.close()

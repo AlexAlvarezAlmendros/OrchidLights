@@ -2148,10 +2148,13 @@ void ApiServer::registerRoutes()
             return true;
         };
 
-        double x = 0, y = 0, rotation = 0;
+        double x = 0, y = 0, z = 0, rotation = 0, rotationX = 0, rotationZ = 0;
         const bool hasX = number("x", x);
         const bool hasY = number("y", y);
+        const bool hasZ = number("z", z);
         const bool hasRotation = number("rotation", rotation);
+        const bool hasRotationX = number("rotationX", rotationX);
+        const bool hasRotationZ = number("rotationZ", rotationZ);
         const QString gel = body.value("gel").toString();
         const int head = body.value("head").toInt(0);
         const int linked = body.value("linked").toInt(0);
@@ -2183,22 +2186,10 @@ void ApiServer::registerRoutes()
             return jsonError(StatusCode::BadRequest,
                              QStringLiteral("\"zoom\" is a beam width in degrees"));
 
-        /* A plan is a top view, and this build of the engine writes only X and Y
-           to the file (monitorproperties.cpp:959 puts the third coordinate
-           behind QMLUI). Accepting a height would hold it until the next save
-           and then lose it, and a lamp that moves when the project is reopened
-           is worse than one that could never be raised. */
-        if (body.contains("z"))
-        {
-            return jsonError(StatusCode::BadRequest,
-                             QStringLiteral("A plan is a top view: send \"x\" and \"y\". A height "
-                                            "would not survive being saved."));
-        }
-
         /* A body that names a key with something that is not a number is a
            mistake, not an omission. Ignoring it would move a lamp to where it
            already was and answer 200. */
-        for (const char *key : {"x", "y", "rotation"})
+        for (const char *key : {"x", "y", "z", "rotation", "rotationX", "rotationZ"})
         {
             const QJsonValue value = body.value(QLatin1String(key));
             if (value.isUndefined() == false && value.isDouble() == false)
@@ -2212,7 +2203,10 @@ void ApiServer::registerRoutes()
         DocWriter::PlanItemPatch patch;
         patch.x = hasX ? &x : nullptr;
         patch.y = hasY ? &y : nullptr;
+        patch.z = hasZ ? &z : nullptr;
         patch.rotation = hasRotation ? &rotation : nullptr;
+        patch.rotationX = hasRotationX ? &rotationX : nullptr;
+        patch.rotationZ = hasRotationZ ? &rotationZ : nullptr;
         patch.gel = body.contains("gel") ? &gel : nullptr;
         patch.zoom = body.contains("zoom") ? &zoom : nullptr;
         patch.hidden = hasHidden ? &hidden : nullptr;
@@ -2283,6 +2277,104 @@ void ApiServer::registerRoutes()
         }
 
         return QHttpServerResponse::fromFile(path);
+    });
+
+    m_server->route("/api/v1/plan/background", QHttpServerRequest::Method::Put,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const QString asset = QFileInfo(body.value("asset").toString()).fileName();
+        if (asset.isEmpty())
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send {\"asset\": name} -- a file uploaded to "
+                                            "/api/v1/assets"));
+        }
+
+        const QString path = m_engine->projectsDirectory()
+            + QStringLiteral("/assets/") + asset;
+        if (QFileInfo::exists(path) == false)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("There is no asset named \"%1\"").arg(asset));
+        }
+
+        doc->monitorProperties()->setCommonBackgroundImage(path);
+        doc->setModified();
+
+        QJsonObject response;
+        response["background"] = asset;
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/plan/background", QHttpServerRequest::Method::Delete,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        doc->monitorProperties()->setCommonBackgroundImage(QString());
+        doc->setModified();
+
+        QJsonObject response;
+        response["background"] = QJsonValue();
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/plan/grid", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        MonitorProperties *monitor = doc->monitorProperties();
+
+        QVector3D size = monitor->gridSize();
+        if (body.contains("width"))
+            size.setX(float(body.value("width").toDouble(size.x())));
+        if (body.contains("height"))
+            size.setY(float(body.value("height").toDouble(size.y())));
+        if (body.contains("depth"))
+            size.setZ(float(body.value("depth").toDouble(size.z())));
+        if (size.x() < 1 || size.z() < 1 || size.x() > 1000 || size.z() > 1000)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("A stage is between 1 and 1000 units on a side"));
+        }
+        monitor->setGridSize(size);
+
+        if (body.contains("units"))
+        {
+            const QString units = body.value("units").toString();
+            if (units == QStringLiteral("meters"))
+                monitor->setGridUnits(MonitorProperties::Meters);
+            else if (units == QStringLiteral("feet"))
+                monitor->setGridUnits(MonitorProperties::Feet);
+            else
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("\"units\" is meters or feet"));
+        }
+
+        /* No point-of-view here on purpose: setting one REMAPS every stored
+           position into the 3D space of the qmlui build (monitorproperties.cpp:115),
+           and a 2D plan whose lamps teleport when a dropdown changes is a lie.
+           The four views arrive with the 3D stage (F22), which speaks that
+           space natively. */
+        if (body.contains("pointOfView"))
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("The point of view belongs to the 3D stage; setting "
+                                            "it would remap every 2D position"));
+        }
+
+        doc->setModified();
+
+        QJsonObject response;
+        response["width"] = size.x();
+        response["height"] = size.y();
+        response["depth"] = size.z();
+        return QHttpServerResponse(response);
     });
 
     /* Shows: the multi-track timeline.

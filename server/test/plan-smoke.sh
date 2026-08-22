@@ -72,12 +72,18 @@ assert len(items) == 1, ('exactly the one fixture the client left placed', items
 attrs = dict(re.findall(r'(\w+)="([^"]*)"', items[0]))
 assert attrs.get('ID') == '2', attrs
 assert attrs.get('XPos') == '1200' and attrs.get('YPos') == '800', attrs
-assert attrs.get('Rotation') == '45', attrs
 assert attrs.get('GelColor') == '#ff8800', attrs
 
-# XPos and YPos, not a third coordinate. This build of the engine writes only
-# those two, which is why the API refuses a height instead of losing one.
-assert 'ZPos' not in attrs, ('a height was written that will not be read back', attrs)
+# The third coordinate and the full rotation, in the SAME attributes the QMLUI
+# build writes: a height set here must survive the file and open in QLC+ 5.
+assert attrs.get('ZPos') == '2500', ('the height did not survive the save', attrs)
+assert attrs.get('YRot') == '45', ('the plan rotation moved attribute', attrs)
+assert attrs.get('XRot') == '30', ('the hang tilt did not survive', attrs)
+
+grid = re.search(r'<Grid ([^/>]*)/?>', monitor.group(1))
+assert grid is not None, 'the grid is not in the saved file'
+gattrs = dict(re.findall(r'(\w+)="([^"]*)"', grid.group(1)))
+assert gattrs.get('Width') == '12' and gattrs.get('Depth') == '8', gattrs
 CHECK
 
 echo "Plan smoke test passed."

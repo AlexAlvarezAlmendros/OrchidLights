@@ -92,6 +92,13 @@ export function Plan({
     x: number
     y: number
   } | null>(null)
+  /* A rectangle dragged over empty stage selects everything inside it. */
+  const [marquee, setMarquee] = useState<{
+    x0: number
+    y0: number
+    x1: number
+    y1: number
+  } | null>(null)
 
   const reload = useCallback(() => {
     api
@@ -246,7 +253,25 @@ export function Plan({
               '--rows': grid.depth,
             } as React.CSSProperties
           }
+          onPointerDown={(e) => {
+            /* Only the bare stage starts a rectangle: lamps grab their own
+               pointer first. */
+            const target = e.target as HTMLElement
+            if (target !== surface.current && !target.classList.contains('plan-background')) return
+            const at = toStage(e)
+            if (at !== null) setMarquee({ x0: at.x, y0: at.y, x1: at.x, y1: at.y })
+          }}
           onPointerMove={(e) => {
+            if (marquee !== null) {
+              const at = toStage(e)
+              /* Functional on purpose: a fast sweep can outrun the render
+                 that refreshed this closure. */
+              if (at !== null)
+                setMarquee((current) =>
+                  current !== null ? { ...current, x1: at.x, y1: at.y } : current,
+                )
+              return
+            }
             const held = pending.current
             if (held !== null && drag === null) {
               const far = Math.abs(e.clientX - held.x) > 8 || Math.abs(e.clientY - held.y) > 8
@@ -268,6 +293,30 @@ export function Plan({
             if (at !== null) setDrag({ id: drag.id, linked: drag.linked, head: drag.head, ...at })
           }}
           onPointerUp={() => {
+            if (marquee !== null) {
+              const left = Math.min(marquee.x0, marquee.x1)
+              const right = Math.max(marquee.x0, marquee.x1)
+              const top = Math.min(marquee.y0, marquee.y1)
+              const bottom = Math.max(marquee.y0, marquee.y1)
+              setMarquee(null)
+              /* A real sweep selects; a stray tap on the stage keeps the
+                 selection as it was. */
+              if (right - left > 200 || bottom - top > 200) {
+                setChosen(
+                  placed
+                    .filter(
+                      (f) =>
+                        (f.x ?? 0) >= left &&
+                        (f.x ?? 0) <= right &&
+                        (f.y ?? 0) >= top &&
+                        (f.y ?? 0) <= bottom,
+                    )
+                    .map((f) => f.id),
+                )
+              }
+              return
+            }
+
             const held = pending.current
             pending.current = null
 
@@ -299,6 +348,19 @@ export function Plan({
           }}
         >
           {backgroundUrl !== null && <img className="plan-background" src={backgroundUrl} alt="" />}
+
+          {marquee !== null && (
+            <div
+              className="plan-marquee"
+              aria-hidden="true"
+              style={{
+                left: `${(Math.min(marquee.x0, marquee.x1) / across) * 100}%`,
+                top: `${(Math.min(marquee.y0, marquee.y1) / deep) * 100}%`,
+                width: `${(Math.abs(marquee.x1 - marquee.x0) / across) * 100}%`,
+                height: `${(Math.abs(marquee.y1 - marquee.y0) / deep) * 100}%`,
+              }}
+            />
+          )}
 
           {/* Linked lamps: the same patch drawn again, dashed to say so.
               Dragged and removed like the original; the daemon knows which
@@ -356,6 +418,7 @@ export function Plan({
             <Lamp
               key={fixture.id}
               fixture={fixture}
+              aim={blackout ? null : aimOf(fixture, universes)}
               /* While it is being dragged the lamp is drawn where the finger is,
                not where the daemon still has it. */
               at={
@@ -447,6 +510,8 @@ export function Plan({
                   : `${selected.length - mixable} de ${selected.length} no mezclan color.`}
               </p>
             )}
+
+            {selected.length >= 2 && <Arrange selected={selected} onDone={reload} onFail={fail} />}
 
             {selected.length === 1 && selected[0] !== undefined && (
               <LampProps key={selected[0].id} fixture={selected[0]} onDone={reload} onFail={fail} />
@@ -540,6 +605,78 @@ export function Plan({
         </details>
       )}
 
+      <details className="plan-tray">
+        <summary>Escenario</summary>
+        <div className="fields">
+          <label className="field">
+            <span>Ancho ({grid.units === 'feet' ? 'pies' : 'm'})</span>
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              defaultValue={grid.width}
+              onBlur={(e) =>
+                Number(e.target.value) !== grid.width &&
+                api
+                  .setPlanGrid({ width: Number(e.target.value) })
+                  .then(reload)
+                  .catch(fail)
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Fondo ({grid.units === 'feet' ? 'pies' : 'm'})</span>
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              defaultValue={grid.depth}
+              onBlur={(e) =>
+                Number(e.target.value) !== grid.depth &&
+                api
+                  .setPlanGrid({ depth: Number(e.target.value) })
+                  .then(reload)
+                  .catch(fail)
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Unidades</span>
+            <select
+              value={grid.units}
+              onChange={(e) => api.setPlanGrid({ units: e.target.value }).then(reload).catch(fail)}
+            >
+              <option value="meters">Metros</option>
+              <option value="feet">Pies</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Imagen de fondo</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/svg+xml"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file === undefined) return
+                api
+                  .uploadAsset(file)
+                  .then(() => api.setPlanBackground(file.name))
+                  .then(reload)
+                  .catch(fail)
+              }}
+            />
+          </label>
+          {plan.background && (
+            <button
+              type="button"
+              onClick={() => api.removePlanBackground().then(reload).catch(fail)}
+            >
+              Quitar fondo
+            </button>
+          )}
+        </div>
+      </details>
+
       {/* A hidden lamp that simply vanished could never be brought back. */}
       {hidden.length > 0 && (
         <details className="plan-tray">
@@ -560,6 +697,78 @@ export function Plan({
           </div>
         </details>
       )}
+    </div>
+  )
+}
+
+/**
+ * Align and distribute, the two moves QLC+'s 2D offers a selection: a row of
+ * pars eyeballed into place becomes a ROW, and the daemon holds the exact
+ * millimetres the smoke can read back.
+ */
+function Arrange({
+  selected,
+  onDone,
+  onFail,
+}: {
+  selected: PlanFixture[]
+  onDone: () => void
+  onFail: (e: unknown) => void
+}) {
+  const placed = selected.filter((f) => f.x !== undefined && f.y !== undefined)
+
+  const move = (moves: { id: number; x?: number; y?: number }[]) =>
+    Promise.all(
+      moves.map((m) =>
+        api.setPlanPosition(m.id, {
+          ...(m.x !== undefined ? { x: m.x } : {}),
+          ...(m.y !== undefined ? { y: m.y } : {}),
+        }),
+      ),
+    )
+      .then(onDone)
+      .catch(onFail)
+
+  const alignRow = () => {
+    const y = Math.round(placed.reduce((sum, f) => sum + (f.y ?? 0), 0) / placed.length)
+    move(placed.map((f) => ({ id: f.id, y })))
+  }
+  const alignColumn = () => {
+    const x = Math.round(placed.reduce((sum, f) => sum + (f.x ?? 0), 0) / placed.length)
+    move(placed.map((f) => ({ id: f.id, x })))
+  }
+  const distribute = (axis: 'x' | 'y') => {
+    const sorted = [...placed].sort((a, b) => (a[axis] ?? 0) - (b[axis] ?? 0))
+    const first = sorted[0]?.[axis] ?? 0
+    const last = sorted[sorted.length - 1]?.[axis] ?? 0
+    const step = sorted.length > 1 ? (last - first) / (sorted.length - 1) : 0
+    move(sorted.map((f, i) => ({ id: f.id, [axis]: Math.round(first + i * step) })))
+  }
+
+  if (placed.length < 2) return null
+
+  return (
+    <div className="arrange">
+      <button type="button" title="Alinear en fila (misma profundidad)" onClick={alignRow}>
+        ⇤⇥
+      </button>
+      <button type="button" title="Alinear en columna (misma anchura)" onClick={alignColumn}>
+        ⤒⤓
+      </button>
+      <button
+        type="button"
+        title="Distribuir a lo ancho, equidistantes"
+        onClick={() => distribute('x')}
+      >
+        ⇹
+      </button>
+      <button
+        type="button"
+        title="Distribuir en profundidad, equidistantes"
+        onClick={() => distribute('y')}
+      >
+        ⇳
+      </button>
     </div>
   )
 }
@@ -644,6 +853,32 @@ function LampProps({
             onChange={(e) => write({ rotation: Number(e.target.value) })}
           />
         </label>
+        {head === 0 && (
+          <label className="field">
+            <span>Altura (mm)</span>
+            <input
+              type="number"
+              min={0}
+              max={30000}
+              title="A cuántos milímetros del suelo cuelga; el fichero la guarda y la 3D la usará"
+              value={'z' in (item ?? {}) ? ((item as PlanFixture).z ?? 0) : 0}
+              onChange={(e) => write({ z: Number(e.target.value) })}
+            />
+          </label>
+        )}
+        {head === 0 && (
+          <label className="field">
+            <span>Inclinación (X°)</span>
+            <input
+              type="number"
+              min={-180}
+              max={180}
+              title="La percha: cómo cuelga el aparato, no hacia dónde apunta"
+              value={'rotationX' in (item ?? {}) ? ((item as PlanFixture).rotationX ?? 0) : 0}
+              onChange={(e) => write({ rotationX: Number(e.target.value) })}
+            />
+          </label>
+        )}
         <label className="field">
           <span>Zoom fijo</span>
           <input
@@ -693,6 +928,7 @@ function LampProps({
 function Lamp({
   fixture,
   at,
+  aim,
   across,
   deep,
   chosen,
@@ -703,6 +939,8 @@ function Lamp({
   fixture: PlanFixture
   /** Where the finger has it, while it is being dragged. */
   at: { x: number; y: number } | null
+  /** Where the head points, when it has pan or tilt to point with. */
+  aim: { angle: number; lean: number } | null
   /** The stage, in millimetres, so a position can be a fraction of it. */
   across: number
   deep: number
@@ -715,6 +953,13 @@ function Lamp({
   const x = at?.x ?? fixture.x ?? 0
   const y = at?.y ?? fixture.y ?? 0
 
+  /* The real footprint when the definition declares one: a two-metre bar
+     drawn as the same dot as a PAR is a plan that lies about rigging room. */
+  const footprint =
+    fixture.width !== undefined && fixture.width > 400
+      ? { width: `${Math.min(40, (fixture.width / across) * 100)}%` }
+      : {}
+
   return (
     <div
       className="lamp"
@@ -726,6 +971,7 @@ function Lamp({
         left: `${(x / across) * 100}%`,
         top: `${(y / deep) * 100}%`,
         transform: `translate(-50%, -50%) rotate(${fixture.rotation ?? 0}deg)`,
+        ...footprint,
         /* Lit: filled, ringed in its own colour, and throwing a halo. The
            halo is the whole point of drawing a rig from above -- a flat disc
            says which lamp, a glow says which lamp is on, and that is the
@@ -741,6 +987,16 @@ function Lamp({
       }}
       onDoubleClick={onRemove}
     >
+      {aim !== null && (
+        <span
+          className="lamp-aim"
+          aria-hidden="true"
+          style={{
+            transform: `rotate(${aim.angle}deg)`,
+            height: `${20 + aim.lean * 80}%`,
+          }}
+        />
+      )}
       {/* The label carries the position while the lamp is moving. Placing a rig
           means putting a lamp *somewhere*, and "somewhere" on a plan is a
           measurement, not a feeling. */}
@@ -809,6 +1065,35 @@ export function colourValues(
 export function parseHex(hex: string): { r: number; g: number; b: number } {
   const n = Number.parseInt(hex.replace('#', ''), 16)
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
+}
+
+/**
+ * Where a moving head points, read straight off the frame: pan as an angle,
+ * tilt as how far off straight-down the beam leans. Inverted flags flip the
+ * reading -- which is the flags' whole job, and the promise F15a left open.
+ */
+export function aimOf(
+  fixture: PlanFixture,
+  universes: Record<number, Uint8Array>,
+): { angle: number; lean: number } | null {
+  const roles = fixture.roles
+  if (roles.pan === undefined && roles.tilt === undefined) return null
+  const frame = universes[fixture.universe]
+  if (frame === undefined) return null
+
+  let pan = roles.pan !== undefined ? (frame[fixture.address + roles.pan] ?? 0) : 128
+  let tilt = roles.tilt !== undefined ? (frame[fixture.address + roles.tilt] ?? 0) : 255
+  if (fixture.invertPan === true) pan = 255 - pan
+  if (fixture.invertTilt === true) tilt = 255 - tilt
+
+  return {
+    /* Pan sweeps the needle around the symbol; the fixture's own plan
+       rotation is added by the transform it sits inside. */
+    angle: (pan / 255) * 360 - 180,
+    /* Tilt stretches it: centred beam (straight down) shows a stub, full
+       throw a long needle. */
+    lean: Math.abs(tilt - 128) / 128,
+  }
 }
 
 export function colourOf(

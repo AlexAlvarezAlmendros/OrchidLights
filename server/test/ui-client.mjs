@@ -3674,6 +3674,169 @@ try {
   check('the I/O depth acts: output slots, BPM dock with a live LED, profile workshop',
     ioDepth === 'ok', ioDepth)
 
+  /* F18 through the screen: the 2D grows depth. A rectangle sweeps a
+     selection, align writes exact millimetres, a moving head's needle follows
+     the DMX and flips with invertPan, and the stage itself is editable. */
+  const planDepth = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const born = []
+    let gridBefore = null
+
+    const cleanup = async () => {
+      for (const id of born) {
+        await fetch('/api/v1/plan/fixtures/' + id, { method: 'DELETE' })
+        await fetch('/api/v1/fixtures/' + id, { method: 'DELETE' })
+      }
+      if (gridBefore !== null) {
+        await fetch('/api/v1/plan/grid', { method: 'PUT', headers: json,
+          body: JSON.stringify({ width: gridBefore.width, depth: gridBefore.depth }) })
+      }
+      await wait(300)
+    }
+
+    try {
+      const before = await (await fetch('/api/v1/fixtures')).json()
+      const taken = new Set()
+      for (const f of before) {
+        if (f.universe !== 1) continue
+        for (let c = f.address - 1; c < f.address - 1 + f.channels; c++) taken.add(c)
+      }
+      const hole = (width) => {
+        for (let c = 0; c <= 512 - width; c++) {
+          let free = true
+          for (let i = 0; i < width; i++) if (taken.has(c + i)) { free = false; break }
+          if (free) { for (let i = 0; i < width; i++) taken.add(c + i); return c }
+        }
+        return -1
+      }
+      const a = hole(4), b = hole(4), m = hole(16)
+      if (a < 0 || b < 0 || m < 0) return 'ok'
+
+      const make = async (body) => {
+        const made = await (await fetch('/api/v1/fixtures', { method: 'POST', headers: json,
+          body: JSON.stringify(body) })).json()
+        if (!made.created) return null
+        born.push(...made.created)
+        return made.created[0]
+      }
+      const lampA = await make({ manufacturer: 'Generic', model: 'Generic RGBW',
+        mode: 'RGBW', name: 'PlanA', universe: 1, address: a + 1 })
+      const lampB = await make({ manufacturer: 'Generic', model: 'Generic RGBW',
+        mode: 'RGBW', name: 'PlanB', universe: 1, address: b + 1 })
+      const mover = await make({ manufacturer: 'Martin', model: 'MAC500',
+        mode: 'DMX4', universe: 1, address: m + 1 })
+      if (lampA === null || lampB === null || mover === null) {
+        return 'the probes were refused'
+      }
+
+      const place = (id, body) => fetch('/api/v1/plan/fixtures/' + id, {
+        method: 'PUT', headers: json, body: JSON.stringify(body) })
+      await place(lampA, { x: 1000, y: 1000 })
+      await place(lampB, { x: 2000, y: 1400 })
+      await place(mover, { x: 3000, y: 3000 })
+
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Planta')?.click()
+      await wait(1200)
+
+      const stage = document.querySelector('.plan-stage')
+      if (!stage) return 'there is no stage'
+      const box = stage.getBoundingClientRect()
+      const plan = await (await fetch('/api/v1/plan')).json()
+      const across = plan.grid.units === 'feet' ? plan.grid.width * 304.8 : plan.grid.width * 1000
+      const deep = plan.grid.units === 'feet' ? plan.grid.depth * 304.8 : plan.grid.depth * 1000
+      const px = (mmX) => box.left + (mmX / across) * box.width
+      const py = (mmY) => box.top + (mmY / deep) * box.height
+
+      /* The rectangle sweep, over empty stage from above-left of A to
+         below-right of B. */
+      const down = new PointerEvent('pointerdown', { bubbles: true,
+        clientX: px(500), clientY: py(600) })
+      Object.defineProperty(down, 'target', { value: stage })
+      stage.dispatchEvent(down)
+      /* A breath between the events: React refreshes its handlers between
+         renders, and a same-tick move lands in the closure from BEFORE the
+         rectangle existed. A real finger never manages that. */
+      await wait(120)
+      stage.dispatchEvent(new PointerEvent('pointermove', { bubbles: true,
+        clientX: px(2500), clientY: py(1800) }))
+      await wait(200)
+      if (!document.querySelector('.plan-marquee')) return 'the sweep draws no rectangle'
+      stage.dispatchEvent(new PointerEvent('pointerup', { bubbles: true,
+        clientX: px(2500), clientY: py(1800) }))
+      await wait(500)
+      const headline = document.querySelector('.selection-head strong')?.textContent ?? ''
+      if (!headline.includes('2')) {
+        return 'the sweep selected: "' + headline + '"'
+          + ' chosen=' + document.querySelectorAll('.lamp[data-chosen="true"]').length
+          + ' lamps=' + document.querySelectorAll('.lamp').length
+          + ' marqueeLeft=' + !!document.querySelector('.plan-marquee')
+          + ' a=' + JSON.stringify([px(500) - box.left, py(600) - box.top])
+      }
+
+      /* Align writes exact millimetres: the average of 1000 and 1400. */
+      const alignButton = document.querySelector('.arrange button[title*="Alinear en fila"]')
+      if (!alignButton) return 'the selection offers no align'
+      alignButton.click()
+      await wait(1200)
+      const planAfter = await (await fetch('/api/v1/plan')).json()
+      const rowA = planAfter.fixtures.find(f => f.id === lampA)
+      const rowB = planAfter.fixtures.find(f => f.id === lampB)
+      if (rowA?.y !== 1200 || rowB?.y !== 1200) {
+        return 'align landed on ' + rowA?.y + ' and ' + rowB?.y
+      }
+
+      /* The mover's needle follows the DMX, and invertPan flips it. */
+      const moverPlan = planAfter.fixtures.find(f => f.id === mover)
+      if (moverPlan?.roles?.pan === undefined) return 'the mover reports no pan role'
+      await fetch('/api/v1/live', { method: 'PUT', headers: json,
+        body: JSON.stringify({ values: [
+          { fixture: mover, channel: moverPlan.roles.pan, value: 255 },
+          { fixture: mover, channel: moverPlan.roles.intensity ?? 0, value: 255 },
+        ] }) })
+      await wait(900)
+      const needle = document.querySelector('.lamp[data-fixture="' + mover + '"] .lamp-aim')
+      if (!needle) return 'the mover has no needle'
+      const straight = needle.style.transform
+      await place(mover, { invertPan: true })
+      await wait(900)
+      const flipped = document.querySelector(
+        '.lamp[data-fixture="' + mover + '"] .lamp-aim')?.style.transform
+      if (straight === flipped) {
+        return 'invertPan flipped nothing: ' + straight + ' vs ' + flipped
+      }
+      await fetch('/api/v1/live', { method: 'DELETE' })
+
+      /* The stage itself is editable, and put back. */
+      gridBefore = { width: plan.grid.width, depth: plan.grid.depth }
+      const stageTray = [...document.querySelectorAll('summary')]
+        .find(s => s.textContent.trim() === 'Escenario')
+      if (!stageTray) return 'there is no stage tray'
+      stageTray.click()
+      await wait(300)
+      const widthBox = [...stageTray.parentElement.querySelectorAll('label')]
+        .find(l => (l.querySelector('span')?.textContent ?? '').startsWith('Ancho'))
+        ?.querySelector('input')
+      if (!widthBox) return 'the stage tray has no width'
+      const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setI.call(widthBox, String(gridBefore.width + 3))
+      widthBox.dispatchEvent(new Event('input', { bubbles: true }))
+      widthBox.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      await wait(900)
+      const resized = await (await fetch('/api/v1/plan')).json()
+      if (resized.grid.width !== gridBefore.width + 3) {
+        return 'the stage did not resize: ' + resized.grid.width
+      }
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the 2D grows depth: sweep, align in millimetres, a needle that inverts, an editable stage',
+    planDepth === 'ok', planDepth)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches
