@@ -11,6 +11,7 @@ add_executable(${module_name}
     consolelayout.cpp consolelayout.h
     docwriter.cpp docwriter.h
     projectimport.cpp projectimport.h
+    undoring.cpp undoring.h
     enginehost.cpp enginehost.h
     fixturelibrary.cpp fixturelibrary.h
     installpaths.cpp installpaths.h
