@@ -230,6 +230,9 @@ jobs:
       - name: VC parity smoke test (side faders on the wire, pages turned by input)
         run: ./server/test/vcparity-smoke.sh orchidlightsd
 
+      - name: Fixture smoke test (batches, clone, heads, group grid)
+        run: ./server/test/fixture-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

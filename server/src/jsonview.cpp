@@ -24,6 +24,7 @@
 #include "levelsource.h"
 
 #include "qlcfixturemode.h"
+#include "qlcphysical.h"
 #include "qlcfixturedef.h"
 #include "inputoutputmap.h"
 #include "outputpatch.h"
@@ -110,6 +111,30 @@ QJsonObject JsonView::fixture(const Fixture *fixture)
     }
     if (modifiers > 0)
         json["modifiers"] = modifiers;
+
+    json["heads"] = fixture->heads();
+
+    /* What the lamp weighs and draws, for the summary a rigger prints. The
+       definition's physical block is optional, so only what it actually says
+       is repeated here -- an invented zero reads as "weightless", not
+       "unknown". */
+    if (mode != nullptr)
+    {
+        const QLCPhysical physical = mode->physical();
+        QJsonObject phys;
+        if (physical.weight() > 0)
+            phys["weight"] = physical.weight();
+        if (physical.powerConsumption() > 0)
+            phys["power"] = physical.powerConsumption();
+        if (physical.width() > 0)
+            phys["width"] = physical.width();
+        if (physical.height() > 0)
+            phys["height"] = physical.height();
+        if (physical.depth() > 0)
+            phys["depth"] = physical.depth();
+        if (phys.isEmpty() == false)
+            json["physical"] = phys;
+    }
 
     return json;
 }
@@ -770,7 +795,70 @@ QJsonObject JsonView::plan(const Doc *doc)
             const QColor gel = monitor->fixtureGelColor(fixture->id(), 0, 0);
             if (gel.isValid())
                 entry["gel"] = gel.name();
+
+            const int zoom = monitor->fixtureFixedZoom(fixture->id(), 0, 0);
+            if (zoom > 0)
+                entry["zoom"] = zoom;
+
+            const quint32 flags = monitor->fixtureFlags(fixture->id(), 0, 0);
+            if (flags & MonitorProperties::HiddenFlag)
+                entry["hidden"] = true;
+            if (flags & MonitorProperties::LockedFlag)
+                entry["locked"] = true;
+            if (flags & MonitorProperties::InvertedPanFlag)
+                entry["invertPan"] = true;
+            if (flags & MonitorProperties::InvertedTiltFlag)
+                entry["invertTilt"] = true;
+
+            /* A multi-head bar stores an item per head beyond the fixture's
+               own. Saying which heads carry properties is what lets a client
+               edit them without inventing entries for the rest. */
+            QJsonArray headItems;
+            for (quint32 subID : monitor->fixtureIDList(fixture->id()))
+            {
+                const quint16 headIndex = monitor->fixtureHeadIndex(subID);
+                const quint16 linkedIndex = monitor->fixtureLinkedIndex(subID);
+                if (headIndex == 0 || linkedIndex != 0)
+                    continue;
+
+                QJsonObject item;
+                item["head"] = headIndex;
+
+                const QVector3D headPos =
+                    monitor->fixturePosition(fixture->id(), headIndex, 0);
+                item["x"] = headPos.x();
+                item["y"] = headPos.y();
+                item["rotation"] =
+                    monitor->fixtureRotation(fixture->id(), headIndex, 0).y();
+
+                const QColor headGel =
+                    monitor->fixtureGelColor(fixture->id(), headIndex, 0);
+                if (headGel.isValid())
+                    item["gel"] = headGel.name();
+
+                const int headZoom =
+                    monitor->fixtureFixedZoom(fixture->id(), headIndex, 0);
+                if (headZoom > 0)
+                    item["zoom"] = headZoom;
+
+                const quint32 headFlags =
+                    monitor->fixtureFlags(fixture->id(), headIndex, 0);
+                if (headFlags & MonitorProperties::HiddenFlag)
+                    item["hidden"] = true;
+                if (headFlags & MonitorProperties::LockedFlag)
+                    item["locked"] = true;
+                if (headFlags & MonitorProperties::InvertedPanFlag)
+                    item["invertPan"] = true;
+                if (headFlags & MonitorProperties::InvertedTiltFlag)
+                    item["invertTilt"] = true;
+
+                headItems.append(item);
+            }
+            if (headItems.isEmpty() == false)
+                entry["headItems"] = headItems;
         }
+
+        entry["heads"] = fixture->heads();
 
         /* Which channels decide what this lamp looks like.
          *

@@ -3068,3 +3068,174 @@ button.linkish.left {
 .pad-presets .chip {
   cursor: pointer;
 }
+
+/* ---- Universe view: 512 channels, cell by cell -------------------------- */
+
+.uview-grid {
+  display: grid;
+  grid-template-columns: repeat(32, 1fr);
+  gap: 1px;
+  margin-top: 0.75rem;
+}
+
+.uview-cell {
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 0.55rem;
+  line-height: 1;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.uview-cell[data-held="true"] {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
+/* ---- DIP switch bank ----------------------------------------------------- */
+
+.dip-bank {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  width: fit-content;
+}
+
+.dip-switch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.dip-lever {
+  display: block;
+  width: 0.9rem;
+  height: 2rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: linear-gradient(var(--surface-raised) 50%, var(--surface) 50%);
+  position: relative;
+}
+
+.dip-lever::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 45%;
+  bottom: 2px;
+  border-radius: 2px;
+  background: var(--text-dim);
+}
+
+.dip-lever[data-on="true"]::after {
+  top: 2px;
+  bottom: auto;
+  background: var(--live);
+}
+
+.dip-label {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+
+/* ---- The rigger's summary ------------------------------------------------ */
+
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+}
+
+.summary-table th,
+.summary-table td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.summary-table tfoot td {
+  font-weight: 600;
+  border-bottom: none;
+}
+
+@media print {
+  /* Only the summary prints: visibility (not display) so the card's own
+     ancestors keep their boxes while everything else goes blank. */
+  body {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    color: #000;
+    background: #fff;
+  }
+  .print-area summary,
+  .print-area button {
+    display: none;
+  }
+  .print-area .summary-table th,
+  .print-area .summary-table td {
+    border-color: #999;
+  }
+}
+
+/* ---- The group as a 2D grid ---------------------------------------------- */
+
+.group-grid {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.grid-turns {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.grid-cells {
+  display: grid;
+  gap: 2px;
+  margin-top: 0.6rem;
+}
+
+.grid-cell {
+  min-width: 0;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.15rem;
+}
+
+/* ---- Lamp properties on the plan ----------------------------------------- */
+
+.lamp-props {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.lamp-props summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}

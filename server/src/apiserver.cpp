@@ -41,6 +41,8 @@
 #include "audioplugincache.h"
 #include "audiorenderer.h"
 #include "docwriter.h"
+#include "grouphead.h"
+#include "qlcpoint.h"
 #include "chaser.h"
 #include "chaserstep.h"
 #include "collection.h"
@@ -819,6 +821,35 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response, StatusCode::Created);
     });
 
+    m_server->route("/api/v1/fixtures/<arg>/clone", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        QList<quint32> ids;
+        const DocWriter::Result result = m_engine->withFixturesLocked([&] {
+            return DocWriter::cloneFixtures(doc, id, body.value("quantity").toInt(1),
+                                            body.value("gap").toInt(0), ids);
+        });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonArray created;
+        for (quint32 newId : ids)
+            created.append(qint64(newId));
+
+        QJsonObject response;
+        response["created"] = created;
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
     m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Delete,
                     [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
         if (denied(request))
@@ -1562,10 +1593,30 @@ void ApiServer::registerRoutes()
             for (quint32 id : group->fixtureList())
                 members.append(qint64(id));
 
+            /* The grid is the group: which way an effect snakes across the rig
+               is decided by which head sits in which cell. */
+            QJsonArray cells;
+            const QMap<QLCPoint, GroupHead> heads = group->headsMap();
+            for (auto it = heads.constBegin(); it != heads.constEnd(); ++it)
+            {
+                QJsonObject cell;
+                cell["x"] = it.key().x();
+                cell["y"] = it.key().y();
+                cell["fixture"] = qint64(it.value().fxi);
+                cell["head"] = it.value().head;
+                cells.append(cell);
+            }
+
+            QJsonObject size;
+            size["width"] = group->size().width();
+            size["height"] = group->size().height();
+
             QJsonObject entry;
             entry["id"] = qint64(group->id());
             entry["name"] = group->name();
             entry["fixtures"] = members;
+            entry["size"] = size;
+            entry["cells"] = cells;
             groups.append(entry);
         }
 
@@ -1613,34 +1664,95 @@ void ApiServer::registerRoutes()
 
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
-        /* Absent is not empty. A PATCH that forgot the key, or a malformed
-           body, would otherwise read as "remove every fixture from this
-           group". */
-        if (body.value("fixtures").isArray() == false)
+        /* Three shapes of patch: a name, a flat member list, a full grid.
+           Absent is not empty -- only the keys that are present act, so a
+           rename does not read as "remove every fixture from this group". */
+        if (body.contains("name"))
         {
-            return jsonError(StatusCode::BadRequest,
-                             QStringLiteral("Send a \"fixtures\" array. To empty the group, "
-                                            "send an empty one."));
+            const DocWriter::Result result =
+                DocWriter::renameFixtureGroup(doc, id, body.value("name").toString());
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
         }
 
-        QList<quint32> members;
-        for (const QJsonValue &value : body.value("fixtures").toArray())
+        if (body.contains("cells"))
         {
-            if (value.isDouble() == false || value.toInt(-1) < 0)
+            if (body.value("cells").isArray() == false || body.value("size").isObject() == false)
             {
                 return jsonError(StatusCode::BadRequest,
-                                 QStringLiteral("Fixture ids must be non-negative numbers"));
+                                 QStringLiteral("A grid patch is {\"size\": {\"width\", "
+                                                "\"height\"}, \"cells\": [{x, y, fixture, "
+                                                "head}]}"));
             }
-            members.append(quint32(value.toInt()));
+
+            const QJsonObject size = body.value("size").toObject();
+            QList<DocWriter::GroupCell> cells;
+            for (const QJsonValue &value : body.value("cells").toArray())
+            {
+                const QJsonObject raw = value.toObject();
+                DocWriter::GroupCell cell;
+                cell.x = raw.value("x").toInt(-1);
+                cell.y = raw.value("y").toInt(-1);
+                cell.fixture = quint32(raw.value("fixture").toInt(-1));
+                cell.head = raw.value("head").toInt(0);
+                cells.append(cell);
+            }
+
+            const DocWriter::Result result =
+                DocWriter::setFixtureGroupGrid(doc, id, size.value("width").toInt(0),
+                                               size.value("height").toInt(0), cells);
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+        else if (body.contains("fixtures"))
+        {
+            if (body.value("fixtures").isArray() == false)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("Send a \"fixtures\" array. To empty the group, "
+                                                "send an empty one."));
+            }
+
+            QList<quint32> members;
+            for (const QJsonValue &value : body.value("fixtures").toArray())
+            {
+                if (value.isDouble() == false || value.toInt(-1) < 0)
+                {
+                    return jsonError(StatusCode::BadRequest,
+                                     QStringLiteral("Fixture ids must be non-negative numbers"));
+                }
+                members.append(quint32(value.toInt()));
+            }
+
+            const DocWriter::Result result = DocWriter::setFixtureGroupMembers(doc, id, members);
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
         }
 
-        const DocWriter::Result result = DocWriter::setFixtureGroupMembers(doc, id, members);
+        QJsonObject response;
+        response["id"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/fixture-groups/<arg>/transform", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Group id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const DocWriter::Result result =
+            DocWriter::transformFixtureGroup(doc, id, body.value("op").toString());
         if (result.ok == false)
             return jsonError(StatusCode::BadRequest, result.error);
 
         QJsonObject response;
         response["id"] = qint64(id);
-        response["fixtures"] = body.value("fixtures");
+        response["op"] = body.value("op");
         return QHttpServerResponse(response);
     });
 
@@ -1831,6 +1943,34 @@ void ApiServer::registerRoutes()
         const bool hasY = number("y", y);
         const bool hasRotation = number("rotation", rotation);
         const QString gel = body.value("gel").toString();
+        const int head = body.value("head").toInt(0);
+        const int zoom = body.value("zoom").toInt(-1);
+
+        /* The flags must be booleans when present: a "hidden" of "yes" that
+           quietly read as false would answer 200 and hide nothing. */
+        bool hidden = false, locked = false, invertPan = false, invertTilt = false;
+        bool hasHidden = false, hasLocked = false, hasInvertPan = false, hasInvertTilt = false;
+        const auto flag = [&body](const char *key, bool &into, bool &present) -> bool {
+            const QJsonValue value = body.value(QLatin1String(key));
+            if (value.isUndefined())
+                return true;
+            if (value.isBool() == false)
+                return false;
+            into = value.toBool();
+            present = true;
+            return true;
+        };
+        if (flag("hidden", hidden, hasHidden) == false
+            || flag("locked", locked, hasLocked) == false
+            || flag("invertPan", invertPan, hasInvertPan) == false
+            || flag("invertTilt", invertTilt, hasInvertTilt) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("hidden, locked, invertPan and invertTilt are booleans"));
+        }
+        if (body.contains("zoom") && body.value("zoom").isDouble() == false)
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"zoom\" is a beam width in degrees"));
 
         /* A plan is a top view, and this build of the engine writes only X and Y
            to the file (monitorproperties.cpp:959 puts the third coordinate
@@ -1858,11 +1998,20 @@ void ApiServer::registerRoutes()
             }
         }
 
+        DocWriter::PlanItemPatch patch;
+        patch.x = hasX ? &x : nullptr;
+        patch.y = hasY ? &y : nullptr;
+        patch.rotation = hasRotation ? &rotation : nullptr;
+        patch.gel = body.contains("gel") ? &gel : nullptr;
+        patch.zoom = body.contains("zoom") ? &zoom : nullptr;
+        patch.hidden = hasHidden ? &hidden : nullptr;
+        patch.locked = hasLocked ? &locked : nullptr;
+        patch.invertPan = hasInvertPan ? &invertPan : nullptr;
+        patch.invertTilt = hasInvertTilt ? &invertTilt : nullptr;
+
         DocWriter::Result result = DocWriter::Result::success();
         m_engine->withFixturesLocked([&]() {
-            result = DocWriter::setPlanPosition(doc, id, hasX ? &x : nullptr, hasY ? &y : nullptr,
-                                                hasRotation ? &rotation : nullptr,
-                                                body.contains("gel") ? &gel : nullptr);
+            result = DocWriter::setPlanItem(doc, id, head, patch);
             return true;
         });
 
