@@ -168,6 +168,25 @@ QString InstallPaths::colorFilters()
                        QStringLiteral("*.qxcf"));
 }
 
+QString InstallPaths::meshes()
+{
+    /* MESHESDIR, like the colour filters, is a QMLUI-only constant; the
+       shipped directory always sits next to the fixtures. Probed by a file
+       it must contain, because the meshes live in SUBDIRECTORIES and the
+       generic emptiness check only looks at the top. */
+    QStringList candidates;
+    candidates << QFileInfo(QString(FIXTUREDIR)).path() + QStringLiteral("/meshes");
+    candidates << anchoredToBinary(QStringLiteral("share/orchidlights/meshes"));
+    candidates << QDir(QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/../../../resources/meshes")).absolutePath();
+    for (const QString &candidate : candidates)
+    {
+        if (QFileInfo::exists(candidate + QStringLiteral("/fixtures/moving_head.dae")))
+            return QDir(candidate).absolutePath();
+    }
+    return QString();
+}
+
 QString InstallPaths::modifierTemplates()
 {
     return shippedData(QLCModifiersCache::systemTemplateDirectory().absolutePath(),

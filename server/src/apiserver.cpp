@@ -2435,6 +2435,30 @@ void ApiServer::registerRoutes()
      * network. A project that names a file that is gone gets a 404, which is
      * the truth -- the drawing the plan was built against is not there.
      */
+    /* The 3D meshes, served like the web itself: static, harmless, and
+       needed by any browser drawing the stage. Two path segments only, each
+       sanitised to a bare file name -- no dots, no walking out. */
+    m_server->route("/api/v1/meshes/<arg>/<arg>", QHttpServerRequest::Method::Get,
+                    [](const QString &rawCategory, const QString &rawName,
+                       const QHttpServerRequest &) {
+        const QString category = QFileInfo(rawCategory).fileName();
+        const QString name = QFileInfo(rawName).fileName();
+        if (category.contains(QStringLiteral("..")) || name.contains(QStringLiteral("..")))
+            return jsonError(StatusCode::BadRequest, QStringLiteral("No"));
+
+        const QString root = InstallPaths::meshes();
+        if (root.isEmpty())
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("This install ships no meshes"));
+
+        const QString path = root + QLatin1Char('/') + category + QLatin1Char('/') + name;
+        if (QFileInfo::exists(path) == false)
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No mesh named %1/%2").arg(category, name));
+
+        return QHttpServerResponse::fromFile(path);
+    });
+
     m_server->route("/api/v1/plan/background", QHttpServerRequest::Method::Get,
                     [doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
         if (const int refusal = refused(request))

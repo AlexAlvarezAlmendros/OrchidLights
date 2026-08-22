@@ -69,6 +69,9 @@ public:
     /** The colour filter collections (.qxcf): the gel books. */
     static QString colorFilters();
 
+    /** The 3D meshes shipped with the app (.dae per fixture type, stage). */
+    static QString meshes();
+
     /** Shipped input profiles. Empty when none was found. */
     static QString inputProfiles();
 

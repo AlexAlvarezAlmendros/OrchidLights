@@ -303,6 +303,8 @@ export interface ChannelRef {
 export interface FixtureState {
   id: number
   name: string
+  /** QLC+'s own type string: Moving Head, Color Changer, Smoke… */
+  type?: string
   universe: number
   address: number
   channels: number

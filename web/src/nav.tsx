@@ -55,6 +55,12 @@ const ICONS: Record<View, React.ReactNode> = {
       <path d="M4 19h16" />
     </>
   ),
+  stage3d: (
+    <>
+      <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" />
+      <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" />
+    </>
+  ),
 }
 
 const LABELS: Record<View, string> = {
@@ -63,9 +69,10 @@ const LABELS: Record<View, string> = {
   setup: 'Patch',
   desk: 'Mesa',
   plan: 'Planta',
+  stage3d: 'Escenario',
 }
 
-export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan']
+export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan', 'stage3d']
 
 export function Nav({
   view,

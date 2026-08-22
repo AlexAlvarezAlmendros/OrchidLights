@@ -3406,3 +3406,32 @@ body[data-kiosk="1"] .bpm-dock {
   object-fit: contain;
   background: #000;
 }
+
+/* ---- 3D stage ------------------------------------------------------------ */
+
+.stage3d {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.stage3d-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.stage3d-canvas {
+  flex: 1;
+  min-height: 320px;
+}
+
+.stage3d-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
