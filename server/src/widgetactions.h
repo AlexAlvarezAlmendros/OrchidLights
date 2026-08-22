@@ -37,7 +37,7 @@ namespace WidgetActions
 {
     /** Start a function the way a tap does: enforcing that the members of a
      *  solo frame are mutually exclusive. Nothing happens if it runs. */
-    void startFunction(EngineHost *engine, quint32 functionId);
+    void startFunction(EngineHost *engine, quint32 functionId, quint32 startTime = 0);
 
     /** Stop it if it runs; nothing happens if it does not. */
     void stopFunction(EngineHost *engine, quint32 functionId);

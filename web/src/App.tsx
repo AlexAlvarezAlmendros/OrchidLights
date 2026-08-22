@@ -103,7 +103,7 @@ export function App() {
   /* Where each running show has got to, by function id. The daemon sends it
      while one plays; a local timer would drift and would keep counting after
      the show had stopped. */
-  const [shows, setShows] = useState<Record<number, number>>({})
+  const [shows, setShows] = useState<Record<number, { elapsed: number; paused: boolean }>>({})
   /* The latest frame of each universe, kept only while the plan is open.
      Sixty frames a second through React state would re-render the whole app;
      the plan is the one screen that needs them, so nothing else subscribes. */
@@ -255,9 +255,9 @@ export function App() {
       onFramePage: (id, page) => setSharedPages((current) => ({ ...current, [id]: page })),
       onUniverse: (universe, channels) =>
         setFrames((current) => ({ ...current, [universe]: channels })),
-      onShow: (id, elapsed, running) =>
+      onShow: (id, elapsed, running, paused) =>
         setShows((current) => {
-          if (running) return { ...current, [id]: elapsed }
+          if (running) return { ...current, [id]: { elapsed, paused } }
           const { [id]: _gone, ...rest } = current
           return rest
         }),
@@ -406,6 +406,13 @@ export function App() {
   )
 
   const toggle = useCallback((id: number) => live.current?.toggle(id, running.has(id)), [running])
+
+  /* The show transport: seek, pause, resume, stop -- straight onto the feed,
+     because a timeline cursor is a transport only if pressing play starts the
+     engine THERE. */
+  const transport = useCallback((id: number, action: string, at?: number) => {
+    live.current?.send({ type: 'function', id, action, ...(at !== undefined ? { at } : {}) })
+  }, [])
 
   const flash = useCallback(
     (id: number, on: boolean, flags?: { override?: boolean; forceLTP?: boolean }) =>
@@ -1217,6 +1224,7 @@ export function App() {
               running={running}
               revision={revision}
               onToggle={toggle}
+              onTransport={transport}
               onChanged={reloadFunctions}
             />
           </main>

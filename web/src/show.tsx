@@ -38,8 +38,10 @@ export function ShowTimeline({
   body,
   functions,
   elapsed,
+  paused,
   running,
   onRun,
+  onTransport,
   onReload,
 }: {
   fn: FunctionState
@@ -47,12 +49,19 @@ export function ShowTimeline({
   functions: FunctionState[]
   /** Milliseconds into the show, or undefined when it is not playing. */
   elapsed: number | undefined
+  paused: boolean
   running: boolean
   onRun: (action: () => Promise<unknown>) => Promise<void>
+  /** Seek, pause, resume and stop on the live feed. */
+  onTransport: (id: number, action: string, at?: number) => void
   onReload: () => void
 }) {
   const [zoom, setZoom] = useState(60) // pixels per second
   const [adding, setAddingTo] = useState<number | null>(null)
+  /* The cursor: where time surgery happens and where play starts from. Local
+     on purpose -- it is an intention, not engine state. */
+  const [cursor, setCursor] = useState<number | null>(null)
+  const [amount, setAmount] = useState(2)
 
   const tracks = body.tracks ?? []
   const duration = body.duration ?? 0
@@ -93,6 +102,96 @@ export function ShowTimeline({
         </button>
       </header>
 
+      <div className="timeline-transport">
+        <button
+          type="button"
+          title={cursor !== null ? `Reproducir desde ${formatTime(cursor)}` : 'Reproducir'}
+          onClick={() => onTransport(fn.id, 'start', cursor ?? 0)}
+          disabled={running && !paused}
+        >
+          ▶{cursor !== null ? ` ${formatTime(cursor)}` : ''}
+        </button>
+        <button
+          type="button"
+          disabled={!running}
+          aria-pressed={paused}
+          title={paused ? 'Reanudar' : 'Pausar'}
+          onClick={() => onTransport(fn.id, paused ? 'resume' : 'pause')}
+        >
+          ⏸
+        </button>
+        <button
+          type="button"
+          disabled={!running}
+          title="Parar"
+          onClick={() => onTransport(fn.id, 'stop')}
+        >
+          ⏹
+        </button>
+
+        <span className="spacer" />
+
+        <label className="field">
+          <span>Compás</span>
+          <select
+            value={body.timeDivision ?? 'Time'}
+            onChange={(e) =>
+              apply(() => api.patchFunction(fn.id, { timeDivision: e.target.value }))
+            }
+          >
+            <option value="Time">Tiempo</option>
+            <option value="BPM_4_4">4/4</option>
+            <option value="BPM_3_4">3/4</option>
+            <option value="BPM_2_4">2/4</option>
+          </select>
+        </label>
+        {body.timeDivision !== undefined && body.timeDivision !== 'Time' && (
+          <label className="field">
+            <span>BPM</span>
+            <input
+              type="number"
+              min={1}
+              max={500}
+              defaultValue={body.bpm ?? 120}
+              onBlur={(e) => apply(() => api.patchFunction(fn.id, { bpm: Number(e.target.value) }))}
+            />
+          </label>
+        )}
+
+        <label className="field">
+          <span>Segundos</span>
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={amount}
+            onChange={(e) => setAmount(Number(e.target.value))}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={cursor === null}
+          title="Insertar tiempo en el cursor: lo que el cursor pisa se estira, lo de después se desplaza"
+          onClick={() =>
+            cursor !== null &&
+            apply(() => api.showTime(fn.id, 'insert', cursor, Math.round(amount * 1000)))
+          }
+        >
+          +⏱
+        </button>
+        <button
+          type="button"
+          disabled={cursor === null}
+          title="Cortar tiempo en el cursor: lo que el cursor pisa encoge, lo de después vuelve"
+          onClick={() =>
+            cursor !== null &&
+            apply(() => api.showTime(fn.id, 'cut', cursor, Math.round(amount * 1000)))
+          }
+        >
+          −⏱
+        </button>
+      </div>
+
       {tracks.length === 0 && (
         <p className="hint">
           Este show no tiene pistas. Una pista sostiene una escena y lleva encima las funciones
@@ -107,6 +206,11 @@ export function ShowTimeline({
               key={track.id}
               showId={fn.id}
               track={track}
+              soloed={
+                tracks.length > 1 &&
+                track.mute === false &&
+                tracks.every((t) => t.id === track.id || t.mute === true)
+              }
               functions={functions}
               onApply={apply}
               onAdd={() => setAddingTo(adding === track.id ? null : track.id)}
@@ -116,10 +220,20 @@ export function ShowTimeline({
         </div>
 
         <div className="timeline-lanes">
-          <Ruler span={span} zoom={zoom} />
+          <Ruler span={span} zoom={zoom} division={body.timeDivision} bpm={body.bpm} />
 
           <div className="timeline-scroll">
-            <div style={{ width, position: 'relative' }}>
+            <div
+              style={{ width, position: 'relative' }}
+              onPointerDown={(e) => {
+                /* The cursor goes where the finger says, snapped like a drag.
+                   Bars stop propagation, so only the empty lane and the ruler
+                   place it. */
+                const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                const at = Math.max(0, ((e.clientX - box.left) / zoom) * 1000)
+                setCursor(Math.round(at / SNAP) * SNAP)
+              }}
+            >
               {tracks.map((track) => (
                 <Lane key={track.id} showId={fn.id} track={track} zoom={zoom} onApply={apply} />
               ))}
@@ -131,6 +245,14 @@ export function ShowTimeline({
                 <div
                   className="playhead"
                   style={{ left: `${(elapsed / 1000) * zoom}px` }}
+                  aria-hidden="true"
+                />
+              )}
+
+              {cursor !== null && (
+                <div
+                  className="timecursor"
+                  style={{ left: `${(cursor / 1000) * zoom}px` }}
                   aria-hidden="true"
                 />
               )}
@@ -158,6 +280,7 @@ const endOf = (latest: number, item: ShowItem) => Math.max(latest, item.start + 
 function TrackHead({
   showId,
   track,
+  soloed,
   functions,
   onApply,
   onAdd,
@@ -165,6 +288,8 @@ function TrackHead({
 }: {
   showId: number
   track: ShowTrack
+  /** This track is the only unmuted one: QLC+ stores solo AS the mutes. */
+  soloed: boolean
   functions: FunctionState[]
   onApply: (action: () => Promise<unknown>) => Promise<void>
   onAdd: () => void
@@ -219,6 +344,15 @@ function TrackHead({
           onClick={() => onApply(() => api.patchTrack(showId, track.id, { mute: !track.mute }))}
         >
           {track.mute ? '🔇' : '🔊'}
+        </button>
+
+        <button
+          type="button"
+          aria-pressed={soloed}
+          title="Solo: esta pista suena, las demás callan"
+          onClick={() => onApply(() => api.soloTrack(showId, track.id, !soloed))}
+        >
+          S
         </button>
 
         <button type="button" aria-pressed={adding} title="Añadir función" onClick={onAdd}>
@@ -402,6 +536,8 @@ function Bar({
       onPointerUp={end}
       onPointerCancel={end}
     >
+      {item.type === 'Audio' && !item.missing && <BarWave functionId={item.function} />}
+
       <span className="bar-label">
         {item.name}
         {item.missing ? ' ⚠' : ''}
@@ -519,8 +655,68 @@ function AddItem({
   )
 }
 
-/** The ruler. Seconds while they fit, then every five or ten. */
-function Ruler({ span, zoom }: { span: number; zoom: number }) {
+/**
+ * The audio file's own shape behind its bar: real peaks from the daemon's
+ * decoder, not decoration. Kept small (120 buckets) because a timeline can
+ * carry several songs and each one is a decode on first paint.
+ */
+function BarWave({ functionId }: { functionId: number }) {
+  const [wave, setWave] = useState<number[] | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .waveform(functionId, 120)
+      .then((result) => live && setWave(result.points))
+      .catch(() => live && setWave(null))
+    return () => {
+      live = false
+    }
+  }, [functionId])
+
+  if (wave === null) return null
+
+  return (
+    <div className="bar-wave" aria-hidden="true">
+      {wave.map((peak, index) => (
+        // The slot is the identity: fixed buckets over the file.
+        // biome-ignore lint/suspicious/noArrayIndexKey: the index is the bucket
+        <span key={index} style={{ height: `${Math.max(2, peak)}%` }} />
+      ))}
+    </div>
+  )
+}
+
+/** The ruler. Seconds while they fit, then every five or ten -- or beats,
+ *  when the show counts in a time signature: one tick per bar, numbered. */
+function Ruler({
+  span,
+  zoom,
+  division,
+  bpm,
+}: {
+  span: number
+  zoom: number
+  division?: string | undefined
+  bpm?: number | undefined
+}) {
+  if (division !== undefined && division !== 'Time' && bpm !== undefined && bpm > 0) {
+    const beats = division === 'BPM_4_4' ? 4 : division === 'BPM_3_4' ? 3 : 2
+    const bar = (60_000 / bpm) * beats
+    const marks: number[] = []
+    for (let t = 0, i = 0; t <= span; t += bar, i++) marks.push(i)
+
+    return (
+      <div className="ruler" style={{ width: `${(span / 1000) * zoom}px` }}>
+        {marks.map((i) => (
+          <span key={i} className="tick" style={{ left: `${((i * bar) / 1000) * zoom}px` }}>
+            {i + 1}
+          </span>
+        ))}
+      </div>
+    )
+  }
+
   const step = zoom >= 80 ? 1000 : zoom >= 30 ? 5000 : 10_000
   const marks: number[] = []
   for (let t = 0; t <= span; t += step) marks.push(t)

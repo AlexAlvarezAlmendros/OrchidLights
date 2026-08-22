@@ -1158,6 +1158,24 @@ void ApiServer::registerRoutes()
                 return jsonError(StatusCode::BadRequest, result.error);
         }
 
+        if (patch.contains("timeDivision") || patch.contains("bpm"))
+        {
+            const Function *function = doc->function(id);
+            const QString division = patch.contains("timeDivision")
+                ? patch.value("timeDivision").toString()
+                : (function != nullptr && function->type() == Function::ShowType
+                       ? Show::tempoToString(
+                             qobject_cast<const Show *>(function)->timeDivisionType())
+                       : QString());
+            const int bpm = patch.value("bpm").toInt(
+                function != nullptr && function->type() == Function::ShowType
+                    ? qobject_cast<const Show *>(function)->timeDivisionBPM()
+                    : 120);
+            const DocWriter::Result result = DocWriter::setShowTimeDivision(doc, id, division, bpm);
+            if (result.ok == false)
+                return jsonError(StatusCode::BadRequest, result.error);
+        }
+
         if (patch.contains("tempoType"))
         {
             const DocWriter::Result result =
@@ -2272,6 +2290,67 @@ void ApiServer::registerRoutes()
      * carries functions placed in time; the sequences on it are that scene's
      * values over the length of the show.
      */
+    m_server->route("/api/v1/functions/<arg>/tracks/<arg>/solo", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QString &rawShow, const QString &rawTrack,
+                                  const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool showOk = false, trackOk = false;
+        const quint32 showId = rawShow.toUInt(&showOk);
+        const quint32 trackId = rawTrack.toUInt(&trackOk);
+        if (showOk == false || trackOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        if (body.value("solo").isBool() == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Send {\"solo\": true|false}"));
+
+        const DocWriter::Result result =
+            DocWriter::setShowTrackSolo(doc, showId, trackId, body.value("solo").toBool());
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["track"] = qint64(trackId);
+        response["solo"] = body.value("solo");
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/functions/<arg>/time", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QString &rawShow, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 showId = rawShow.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Show id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const QString action = body.value("action").toString();
+        const quint32 at = quint32(qMax(0, body.value("at").toInt(0)));
+        const quint32 amount = quint32(qMax(0, body.value("amount").toInt(0)));
+
+        int primary = 0, moved = 0;
+        DocWriter::Result result = DocWriter::Result::success();
+        if (action == QStringLiteral("insert"))
+            result = DocWriter::insertShowTime(doc, showId, at, amount, primary, moved);
+        else if (action == QStringLiteral("cut"))
+            result = DocWriter::cutShowTime(doc, showId, at, amount, primary, moved);
+        else
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"action\" is insert or cut"));
+
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response[action == QStringLiteral("insert") ? "stretched" : "shrunk"] = primary;
+        response["moved"] = moved;
+        return QHttpServerResponse(response);
+    });
+
     m_server->route("/api/v1/functions/<arg>/tracks", QHttpServerRequest::Method::Post,
                     [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
         if (denied(request))

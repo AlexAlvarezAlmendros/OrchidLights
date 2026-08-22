@@ -22,7 +22,7 @@ export interface LiveHandlers {
   onPad?: (id: number, x: number, y: number) => void
   /** Where a running show has got to, in milliseconds. Sent at the flush rate
    *  while one plays, and once more with running: false when it ends. */
-  onShow?: (id: number, elapsed: number, running: boolean) => void
+  onShow?: (id: number, elapsed: number, running: boolean, paused: boolean) => void
   /** An external control moved. Carried live because binding a widget to one
    *  means watching for the next thing the operator touches. */
   onInput?: (universe: number, channel: number, value: number) => void
@@ -115,7 +115,12 @@ export class Live {
           this.handlers.onChannelGroup?.(message.id, message.value)
           break
         case 'show':
-          this.handlers.onShow?.(message.id, message.elapsed, message.running)
+          this.handlers.onShow?.(
+            message.id,
+            message.elapsed,
+            message.running,
+            message.paused === true,
+          )
           break
         case 'framepage':
           this.handlers.onFramePage?.(message.id, message.page)

@@ -27,7 +27,7 @@
 #include "mastertimer.h"
 #include "virtualconsole.h"
 
-void WidgetActions::startFunction(EngineHost *engine, quint32 functionId)
+void WidgetActions::startFunction(EngineHost *engine, quint32 functionId, quint32 startTime)
 {
     Doc *doc = engine->doc();
     Function *function = doc->function(functionId);
@@ -46,7 +46,7 @@ void WidgetActions::startFunction(EngineHost *engine, quint32 functionId)
             other->stop(FunctionParent::master());
     }
 
-    function->start(doc->masterTimer(), FunctionParent::master());
+    function->start(doc->masterTimer(), FunctionParent::master(), startTime);
 }
 
 void WidgetActions::stopFunction(EngineHost *engine, quint32 functionId)
