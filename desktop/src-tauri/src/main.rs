@@ -86,12 +86,103 @@ fn resolve_close(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// Ctrl+F11 from the page: the window's own fullscreen, not the browser's.
+#[tauri::command]
+fn toggle_fullscreen(window: tauri::WebviewWindow) {
+    let now = window.is_fullscreen().unwrap_or(false);
+    let _ = window.set_fullscreen(!now);
+}
+
+/// A second window onto the same engine: the desk on one monitor, the plan
+/// on another. The window is only another client of the same daemon, which
+/// is the whole architecture in one line.
+#[tauri::command]
+fn open_view_window(app: tauri::AppHandle, view: String) -> Result<(), String> {
+    let state = app
+        .try_state::<ShellState>()
+        .ok_or("el motor aún no está listo")?;
+    let path = match view.as_str() {
+        "desk" | "mesa" => "#/mesa",
+        "plan" | "planta" => "#/planta",
+        "functions" | "funciones" => "#/funciones",
+        _ => "#/vc",
+    };
+    let url = match &state.token {
+        Some(token) => format!("{}/{path}#token={token}", state.sidecar.base_url()),
+        None => format!("{}/{path}", state.sidecar.base_url()),
+    };
+    let label = format!("view-{}", view.replace(|c: char| !c.is_alphanumeric(), ""));
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("URL inválida: {e}"))?;
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(parsed))
+        .title(format!("OrchidLights · {view}"))
+        .inner_size(1000.0, 700.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The kiosk's door: with a PIN configured, only the PIN opens it.
+#[tauri::command]
+fn leave_kiosk(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    pin: Option<String>,
+) -> Result<bool, String> {
+    let Some(mode) = app.try_state::<BootMode>() else {
+        return Ok(false);
+    };
+    if !mode.kiosk {
+        return Ok(false);
+    }
+    if let Some(expected) = &mode.kiosk_pin {
+        if pin.as_deref() != Some(expected.as_str()) {
+            return Ok(false);
+        }
+    }
+    let _ = window.set_fullscreen(false);
+    // Back to the whole desk: same origin, no kiosk flag.
+    if let Some(state) = app.try_state::<ShellState>() {
+        let url = match &state.token {
+            Some(token) => format!("{}/#token={token}", state.sidecar.base_url()),
+            None => state.sidecar.base_url().to_string(),
+        };
+        if let Ok(parsed) = url.parse() {
+            let _ = window.navigate(parsed);
+        }
+        // The daemon's cage opens with it, or the phones stay locked out.
+        if let Some(token) = &state.token {
+            let _ = ureq::put(&format!("{}/api/v1/access", state.sidecar.base_url()))
+                .set("Authorization", &format!("Bearer {token}"))
+                .set("Content-Type", "application/json")
+                .send_string("{\"preset\":\"all\"}");
+        }
+    }
+    Ok(true)
+}
+
 fn main() {
     // A project given on the command line rides along to the daemon.
     let project: Option<PathBuf> = std::env::args()
         .skip(1)
         .find(|arg| arg.ends_with(".qxw"))
         .map(PathBuf::from);
+
+    // --kiosk: fullscreen, the console and nothing else, a PIN to leave.
+    // --operate: the access mask closes the editors before anybody types.
+    let kiosk = std::env::args().any(|arg| arg == "--kiosk");
+    let operate = std::env::args().any(|arg| arg == "--operate");
+    let kiosk_pin: Option<String> = {
+        let args: Vec<String> = std::env::args().collect();
+        args.iter()
+            .position(|arg| arg == "--kiosk-pin")
+            .and_then(|at| args.get(at + 1))
+            .cloned()
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -124,7 +215,10 @@ fn main() {
             pick_open_file,
             pick_save_file,
             take_pending_open,
-            resolve_close
+            resolve_close,
+            toggle_fullscreen,
+            open_view_window,
+            leave_kiosk
         ])
         .manage(PendingOpen::default())
         .setup(move |app| {
@@ -144,18 +238,29 @@ fn main() {
 
             // Everything slow happens off the main thread; the splash owns
             // the screen meanwhile.
-            std::thread::spawn(move || match boot(&handle, resources, project.as_deref()) {
-                Ok(()) => {}
-                Err(trouble) => {
-                    // Stderr as well as the splash: a headless run (the smoke
-                    // test, a CI box) has no window to read.
-                    eprintln!("orchidlights-desktop: {trouble}");
-                    let detail = trouble.replace('`', "'").replace('\\', "/");
-                    let _ = window.eval(format!(
-                        "document.body.dataset.state='error';\
+            std::thread::spawn(move || {
+                match boot(
+                    &handle,
+                    resources,
+                    project.as_deref(),
+                    BootMode {
+                        kiosk,
+                        operate,
+                        kiosk_pin: kiosk_pin.clone(),
+                    },
+                ) {
+                    Ok(()) => {}
+                    Err(trouble) => {
+                        // Stderr as well as the splash: a headless run (the smoke
+                        // test, a CI box) has no window to read.
+                        eprintln!("orchidlights-desktop: {trouble}");
+                        let detail = trouble.replace('`', "'").replace('\\', "/");
+                        let _ = window.eval(format!(
+                            "document.body.dataset.state='error';\
                          document.getElementById('state').textContent='No se pudo arrancar';\
                          document.getElementById('trouble').textContent={detail:?};"
-                    ));
+                        ));
+                    }
                 }
             });
 
@@ -237,10 +342,18 @@ fn is_dirty(state: &ShellState) -> bool {
 }
 
 /// Start the daemon, wait for it, hand the window over to it.
+#[derive(Clone, Default)]
+struct BootMode {
+    kiosk: bool,
+    operate: bool,
+    kiosk_pin: Option<String>,
+}
+
 fn boot(
     handle: &tauri::AppHandle,
     resources: Option<PathBuf>,
     project: Option<&std::path::Path>,
+    mode: BootMode,
 ) -> Result<(), String> {
     let layout = layout::resolve(resources)?;
     let user_dir = layout::user_dir()?;
@@ -260,19 +373,45 @@ fn boot(
                 // every start. Read after readiness, never before.
                 let token = layout::read_token(&user_dir);
 
+                // Kiosk rides in the URL so a reload keeps the cage on.
+                let view = if mode.kiosk { "#/vc?kiosk=1" } else { "" };
                 let url = match &token {
-                    Some(token) => format!("{}/#token={token}", sidecar.base_url()),
-                    None => sidecar.base_url().to_string(),
+                    Some(token) => format!("{}/{view}#token={token}", sidecar.base_url()),
+                    None => format!("{}/{view}", sidecar.base_url()),
                 };
+
+                // Operate and kiosk close the daemon's own doors, not just
+                // this window's: the phones on the same desk obey the same
+                // mask. Needs the token; without one the daemon refuses, and
+                // saying so beats pretending.
+                if mode.operate || mode.kiosk {
+                    let preset = if mode.kiosk { "kiosk" } else { "operate" };
+                    match &token {
+                        Some(token) => {
+                            let _ = ureq::put(&format!("{}/api/v1/access", sidecar.base_url()))
+                                .set("Authorization", &format!("Bearer {token}"))
+                                .set("Content-Type", "application/json")
+                                .send_string(&format!("{{\"preset\":\"{preset}\"}}"));
+                        }
+                        None => eprintln!(
+                            "orchidlights-desktop: sin token no se puede fijar la máscara {preset}"
+                        ),
+                    }
+                }
 
                 watch(handle.clone(), sidecar.clone());
                 arm_signals(sidecar.clone(), token.clone());
                 arm_panic_shortcut(handle, sidecar.base_url().to_string(), token.clone());
+                arm_tray(handle, sidecar.base_url().to_string(), token.clone());
                 handle.manage(ShellState { sidecar, token });
+                handle.manage(mode.clone());
 
                 let window = handle
                     .get_webview_window("main")
                     .ok_or("la ventana principal desapareció")?;
+                if mode.kiosk {
+                    let _ = window.set_fullscreen(true);
+                }
                 let parsed = url.parse().map_err(|e| format!("URL inválida: {e}"))?;
                 window.navigate(parsed).map_err(|e| e.to_string())?;
                 return Ok(());
@@ -295,6 +434,105 @@ fn boot(
 /// QLC+'s own panic combination. Global because mid-show the operator may be
 /// in a media player when everything needs to stop; the web page binds the
 /// same keys for browsers, where "global" is not a thing a page can have.
+/// The tray: the three things worth reaching without finding the window.
+/// Panic and blackout go straight to the daemon -- the tray must work even
+/// when the webview is wedged, which is exactly when it is needed.
+fn arm_tray(handle: &tauri::AppHandle, base: String, token: Option<String>) {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder};
+    use tauri::tray::TrayIconBuilder;
+
+    // A tray needs a session bus with a StatusNotifier host behind it. On a
+    // bare xvfb (the CI) there is neither, and asking GTK for one can wedge
+    // the main loop -- which then never delivers the open-request evals the
+    // single-instance flow depends on. No bus, no tray, said out loud.
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none()
+        || std::env::var_os("ORCHID_NO_TRAY").is_some()
+    {
+        eprintln!("orchidlights-desktop: sin bandeja (sin bus de sesión o ORCHID_NO_TRAY)");
+        return;
+    }
+
+    let handle = handle.clone();
+    let build = move || -> tauri::Result<()> {
+        let panic_item = MenuItemBuilder::with_id("panic", "Pánico (parar todo)").build(&handle)?;
+        let blackout_item = MenuItemBuilder::with_id("blackout", "Blackout").build(&handle)?;
+        let show_item = MenuItemBuilder::with_id("show", "Mostrar la mesa").build(&handle)?;
+        let desk_item =
+            MenuItemBuilder::with_id("window-desk", "Nueva ventana: Mesa").build(&handle)?;
+        let plan_item =
+            MenuItemBuilder::with_id("window-plan", "Nueva ventana: Planta").build(&handle)?;
+        let quit_item = MenuItemBuilder::with_id("quit", "Salir").build(&handle)?;
+        let menu = MenuBuilder::new(&handle)
+            .items(&[
+                &panic_item,
+                &blackout_item,
+                &show_item,
+                &desk_item,
+                &plan_item,
+                &quit_item,
+            ])
+            .build()?;
+
+        let base = base.clone();
+        let token = token.clone();
+        TrayIconBuilder::with_id("orchid")
+            .icon(
+                handle
+                    .default_window_icon()
+                    .cloned()
+                    .unwrap_or_else(|| tauri::image::Image::new_owned(vec![0, 0, 0, 255], 1, 1)),
+            )
+            .menu(&menu)
+            .on_menu_event(move |app, event| {
+                let authed = |request: ureq::Request| match &token {
+                    Some(token) => request.set("Authorization", &format!("Bearer {token}")),
+                    None => request,
+                };
+                match event.id().as_ref() {
+                    "panic" => {
+                        let _ = authed(ureq::post(&format!("{base}/api/v1/stop")))
+                            .set("Content-Type", "application/json")
+                            .send_string("{}");
+                    }
+                    "blackout" => {
+                        let _ = authed(ureq::post(&format!("{base}/api/v1/blackout")))
+                            .set("Content-Type", "application/json")
+                            .send_string("{}");
+                    }
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "window-desk" => {
+                        let _ = open_view_window(app.clone(), "desk".into());
+                    }
+                    "window-plan" => {
+                        let _ = open_view_window(app.clone(), "plan".into());
+                    }
+                    "quit" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.eval(
+                                "window.dispatchEvent(new CustomEvent('orchid-close-request'))",
+                            );
+                        } else {
+                            app.exit(0);
+                        }
+                    }
+                    _ => {}
+                }
+            })
+            .build(&handle)?;
+        Ok(())
+    };
+
+    if let Err(trouble) = build() {
+        // A desk without a tray still works; say so and carry on.
+        eprintln!("orchidlights-desktop: sin bandeja: {trouble}");
+    }
+}
+
 fn arm_panic_shortcut(handle: &tauri::AppHandle, base: String, token: Option<String>) {
     use tauri_plugin_global_shortcut::{
         Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,

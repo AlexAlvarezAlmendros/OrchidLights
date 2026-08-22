@@ -94,6 +94,8 @@ private:
     struct Client
     {
         bool authenticated = false;
+        /** Presented the real token: the access mask does not apply to it. */
+        bool trusted = false;
         QSet<quint32> universes;  //!< 0-based engine ids
     };
 

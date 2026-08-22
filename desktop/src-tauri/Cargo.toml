@@ -13,7 +13,7 @@ license = "Apache-2.0"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 # Native open/save dialogs -- the one thing a browser genuinely cannot do.
 # Driven from Rust only; the webview gets no direct dialog permission.

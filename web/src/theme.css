@@ -3382,3 +3382,11 @@ button.linkish.left {
   display: flex;
   gap: 0.35rem;
 }
+
+/* ---- Kiosk: the console and nothing else --------------------------------- */
+
+body[data-kiosk="1"] .rail,
+body[data-kiosk="1"] .projectmenu,
+body[data-kiosk="1"] .bpm-dock {
+  display: none;
+}

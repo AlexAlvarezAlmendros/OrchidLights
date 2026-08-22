@@ -13,6 +13,7 @@
  * they are in.
  */
 
+import { t } from './i18n'
 import type { View } from './views'
 
 const ICONS: Record<View, React.ReactNode> = {
@@ -69,17 +70,22 @@ export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan']
 export function Nav({
   view,
   theme,
+  visible,
   onView,
   onTheme,
+  onSettings,
 }: {
   view: View
   theme: 'stage' | 'blackout'
+  /** What the access mask leaves on offer. The console always is. */
+  visible: View[]
   onView: (view: View) => void
   onTheme: () => void
+  onSettings: () => void
 }) {
   return (
     <nav className="rail" aria-label="Vistas">
-      {VIEWS.map((target) => (
+      {VIEWS.filter((target) => visible.includes(target)).map((target) => (
         <button
           key={target}
           type="button"
@@ -88,7 +94,7 @@ export function Nav({
           onClick={() => onView(target)}
         >
           <Glyph>{ICONS[target]}</Glyph>
-          <span>{LABELS[target]}</span>
+          <span>{t(LABELS[target])}</span>
         </button>
       ))}
 
@@ -111,7 +117,15 @@ export function Nav({
             </>
           )}
         </Glyph>
-        <span>{theme === 'stage' ? 'Oscuro' : 'Pase'}</span>
+        <span>{theme === 'stage' ? t('Oscuro') : t('Pase')}</span>
+      </button>
+
+      <button type="button" className="rail-item" title={t('Ajustes')} onClick={onSettings}>
+        <Glyph>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" />
+        </Glyph>
+        <span>{t('Ajustes')}</span>
       </button>
     </nav>
   )

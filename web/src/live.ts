@@ -27,6 +27,7 @@ export interface LiveHandlers {
    *  means watching for the next thing the operator touches. */
   onInput?: (universe: number, channel: number, value: number) => void
   onBeat?: (bpm: number) => void
+  onAccess?: () => void
   onFramePage?: (id: number, page: number) => void
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
@@ -131,6 +132,9 @@ export class Live {
           break
         case 'beat':
           this.handlers.onBeat?.(message.bpm)
+          break
+        case 'access':
+          this.handlers.onAccess?.()
           break
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)

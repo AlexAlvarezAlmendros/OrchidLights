@@ -351,6 +351,28 @@ public:
      *  fixture cannot inherit its id and its sliders with it. */
     int forgetFixture(quint32 fixtureId);
 
+    /* ---- Kiosk access mask ------------------------------------------- *
+     *
+     * Which AREAS an untrusted client may touch, QLC+'s own bits
+     * (qmlui/app.h:151). The strict token bypasses it: the mask is what a
+     * kiosk phone gets, not what the operator's shell gets. All bits on by
+     * default -- a mask nobody set must not lock anybody out.
+     */
+    enum AccessArea
+    {
+        AccessFixtures   = (1 << 0),
+        AccessFunctions  = (1 << 1),
+        AccessVcControl  = (1 << 2),
+        AccessVcEditing  = (1 << 3),
+        AccessSimpleDesk = (1 << 4),
+        AccessShow       = (1 << 5),
+        AccessIO         = (1 << 6),
+        AccessAll        = 0x7F
+    };
+
+    quint32 accessMask() const { return m_accessMask; }
+    void setAccessMask(quint32 mask);
+
     /**
      * The live desk: absolute values pinned on individual channels.
      *
@@ -437,6 +459,9 @@ signals:
      */
     void consoleChanged();
 
+    /** The kiosk access mask changed; surfaces re-read what they may show. */
+    void accessChanged();
+
     /** A different project is loaded. Everything a client is showing is stale,
      *  including the parts nothing else reports. */
     void projectReplaced();
@@ -496,6 +521,7 @@ private:
      * restores the way a hand-written inverse of every operation can.
      */
     QList<WorkspaceLoader::Preserved> m_undo;
+    quint32 m_accessMask = AccessAll;
     QList<WorkspaceLoader::Preserved> m_redo;
 
     /** Remember the console as it stands, before changing it. */
