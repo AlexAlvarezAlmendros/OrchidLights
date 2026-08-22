@@ -2916,6 +2916,164 @@ try {
   check('the console bears every widget type, and the newcomers act',
     consoleF14 === 'ok', consoleF14)
 
+  /* F14b through the screen: a frame grows pages whose pager ROUND-TRIPS
+     through the daemon, the cue list declares its side fader, the pad saves
+     a preset, and the button-bank generator builds real buttons. */
+  const consoleDepth = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const made = []
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+
+    const cleanup = async () => {
+      document.querySelector('article.card header button[aria-label="Cerrar"]')?.click()
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+      await wait(400)
+      for (const id of made) await fetch('/api/v1/vc/widgets/' + id, { method: 'DELETE' })
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      if (searchBox && searchBox.value !== '') {
+        const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setI.call(searchBox, '')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+    }
+
+    try {
+      /* A paged frame, born over the API, paged through the SCREEN. */
+      const frame = await (await fetch('/api/v1/vc/widgets', {
+        method: 'POST', headers: json,
+        body: JSON.stringify({ type: 'frame', caption: 'PaginadoUI',
+          geometry: { x: 0, y: 3000, width: 300, height: 160 },
+          pages: 2, pageShortcuts: [{ page: 0, name: 'Colores' }, { page: 1, name: 'Blancos' }] }) })).json()
+      made.push(Number(frame.id))
+
+      const pad = await (await fetch('/api/v1/vc/widgets', {
+        method: 'POST', headers: json,
+        body: JSON.stringify({ type: 'xypad', caption: 'PadUI',
+          geometry: { x: 320, y: 3000, width: 200, height: 200 } }) })).json()
+      made.push(Number(pad.id))
+      /* A head WITH pan/tilt, or the pad honestly draws itself unusable --
+         it counts steerable heads, and a dimmer steers nothing. */
+      const beforeMover = new Set((await (await fetch('/api/v1/fixtures')).json()).map(f => f.id))
+      await fetch('/api/v1/fixtures', { method: 'POST', headers: json,
+        body: JSON.stringify({ manufacturer: 'Martin', model: 'MAC500', mode: 'DMX1',
+          universe: 1, address: 450 }) })
+      const mover = (await (await fetch('/api/v1/fixtures')).json())
+        .find(f => !beforeMover.has(f.id))
+      if (!mover) return 'no mover could be patched'
+      const headSet = await fetch('/api/v1/vc/widgets/' + pad.id, {
+        method: 'PATCH', headers: json,
+        body: JSON.stringify({ padHeads: [{ fixture: mover.id, head: 0 }] }) })
+      if (!headSet.ok) return 'the pad refused its head: ' + headSet.status
+
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Consola')?.click()
+      await wait(900)
+
+      const pager = [...document.querySelectorAll('.frame-pages')].at(-1)
+      if (!pager) return 'the paged frame drew no pager'
+      const tabs = [...pager.querySelectorAll('button')]
+      if (tabs.map(t => t.textContent.trim()).join('|') !== 'Colores|Blancos') {
+        return 'the shortcut names are not on the tabs: '
+          + tabs.map(t => t.textContent.trim()).join('|')
+      }
+
+      /* The click round-trips: the pressed state only moves when the daemon
+         broadcasts the turn back. */
+      tabs[1].click()
+      await wait(900)
+      if (tabs[1].getAttribute('aria-pressed') !== 'true') {
+        return 'the page turn never came back from the daemon'
+      }
+
+      /* The pad saves its position as a preset, and the chip appears. */
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Editar'))?.click()
+      await wait(700)
+      const drawnPad = [...document.querySelectorAll('.widget')]
+        .find(w => w.textContent.includes('PadUI'))
+      if (!drawnPad) return 'the pad is not on screen'
+      drawnPad.click()
+      await wait(900)
+      const editor = document.querySelector('.editor')
+      ;[...(editor?.querySelectorAll('button') ?? [])]
+        .find(b => b.textContent.trim() === 'Guardar posición como preset')?.click()
+      await wait(800)
+      const withPreset = walk(await (await fetch('/api/v1/vc')).json())
+        .find(w => w.id === Number(pad.id))
+      if ((withPreset?.padPresets?.length ?? 0) !== 1) {
+        return 'the preset never landed: ' + JSON.stringify(withPreset?.padPresets)
+      }
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+      await wait(800)
+      const chip = [...document.querySelectorAll('.pad-presets .chip')].at(-1)
+      if (!chip) {
+        const padNow = walk(await (await fetch('/api/v1/vc')).json())
+          .find(w => w.id === Number(pad.id))
+        return 'the preset chip never drew: ' + JSON.stringify({
+          padHeads: padNow?.padHeads,
+          presets: padNow?.padPresets?.length,
+          xypads: [...document.querySelectorAll('.widget.xypad')].length,
+          unsupported: [...document.querySelectorAll('.widget.unsupported')]
+            .map(u => u.textContent.trim().slice(0, 20)),
+        })
+      }
+
+      /* The button bank generator, from the functions view's selection. */
+      const fnA = (await (await fetch('/api/v1/functions', { method: 'POST', headers: json,
+        body: JSON.stringify({ type: 'Scene', name: 'BancoA' }) })).json()).id
+      const fnB = (await (await fetch('/api/v1/functions', { method: 'POST', headers: json,
+        body: JSON.stringify({ type: 'Scene', name: 'BancoB' }) })).json()).id
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Funciones')?.click()
+      await wait(900)
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Selección')?.click()
+      await wait(400)
+      for (const name of ['BancoA', 'BancoB']) {
+        const row = [...document.querySelectorAll('.table-row')]
+          .find(r => r.querySelector('button.linkish')?.textContent === name)
+        const box = row?.querySelector('input[type=checkbox]')
+        if (!box) return 'no checkbox for ' + name
+        box.click()
+        await wait(200)
+      }
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Crear botonera')?.click()
+      await wait(1500)
+
+      const console_ = await (await fetch('/api/v1/vc')).json()
+      const bank = walk(console_).find(w =>
+        (w.type === 'frame') && w.caption === 'Botonera')
+      const bankButtons = bank ? walk(bank).filter(w => w.type === 'button') : []
+      if (!bank || bankButtons.length !== 2
+          || !bankButtons.some(b => b.functionId === fnA)
+          || !bankButtons.some(b => b.functionId === fnB)) {
+        return 'the bank came out wrong: ' + JSON.stringify({
+          bank: bank?.id, buttons: bankButtons.map(b => b.functionId) })
+      }
+      made.push(bank.id)
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Selección')?.click()
+
+      for (const fn of [fnA, fnB]) {
+        await fetch('/api/v1/functions/' + fn + '?force=true', { method: 'DELETE' })
+      }
+      /* The pad leaves before its mover, or the fixture delete is refused. */
+      await fetch('/api/v1/vc/widgets/' + pad.id, { method: 'DELETE' })
+      made.splice(made.indexOf(Number(pad.id)), 1)
+      await fetch('/api/v1/fixtures/' + mover.id, { method: 'DELETE' })
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the console depth acts: pages round-trip, presets land, banks build',
+    consoleDepth === 'ok', consoleDepth)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

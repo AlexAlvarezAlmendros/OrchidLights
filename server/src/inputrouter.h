@@ -73,8 +73,16 @@ private:
 
     EngineHost *m_engine;
 
-    /** (input universe << 32 | channel) -> the widgets that control moves. */
-    QHash<quint64, QList<VcWidget>> m_table;
+    /** One routed control: the widget plus WHICH of its hands the wire is
+     *  holding -- the main one, or a frame's page turners. */
+    struct Routed
+    {
+        VcWidget widget;
+        enum Control { Main, NextPage, PrevPage } control = Main;
+    };
+
+    /** (input universe << 32 | channel) -> the controls that input moves. */
+    QHash<quint64, QList<Routed>> m_table;
 
     /** Last value seen per control, for edge detection. Buttons act on
      *  transitions (0 -> pressed, pressed -> 0), never on a fader sweeping

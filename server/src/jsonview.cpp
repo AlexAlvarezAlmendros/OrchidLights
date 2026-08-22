@@ -891,6 +891,45 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
     if (widget.sliderStyle.isEmpty() == false)
         json["sliderStyle"] = widget.sliderStyle;
 
+    if (widget.pagesLoop)
+        json["pagesLoop"] = true;
+    if (widget.pageShortcuts.isEmpty() == false)
+    {
+        QJsonArray shortcuts;
+        for (const auto &shortcut : widget.pageShortcuts)
+        {
+            QJsonObject entry;
+            entry["page"] = shortcut.first;
+            entry["name"] = shortcut.second;
+            shortcuts.append(entry);
+        }
+        json["pageShortcuts"] = shortcuts;
+    }
+    if (widget.sideFaderMode.isEmpty() == false
+        && widget.sideFaderMode != QStringLiteral("None"))
+        json["sideFaderMode"] = widget.sideFaderMode;
+
+    if (widget.padPresets.isEmpty() == false)
+    {
+        QJsonArray presets;
+        for (const VcWidget::PadPreset &preset : widget.padPresets)
+        {
+            QJsonObject entry;
+            entry["id"] = preset.id;
+            entry["type"] = preset.type;
+            entry["name"] = preset.name;
+            if (preset.functionId != UINT_MAX)
+                entry["function"] = qint64(preset.functionId);
+            if (preset.x >= 0)
+            {
+                entry["x"] = preset.x;
+                entry["y"] = preset.y;
+            }
+            presets.append(entry);
+        }
+        json["padPresets"] = presets;
+    }
+
     if (widget.schedules.isEmpty() == false)
     {
         QJsonArray schedules;

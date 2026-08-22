@@ -77,13 +77,27 @@ void InputRouter::rebuild()
         for (const VcWidget &child : widget->children)
             stack.append(&child);
 
+        /* A frame's page turners are controls of their own, input or not on
+           the widget itself. */
+        if (widget->hasNextPageInput)
+        {
+            m_table[keyOf(widget->nextPageUniverse, widget->nextPageChannel)]
+                .append({*widget, Routed::NextPage});
+        }
+        if (widget->hasPrevPageInput)
+        {
+            m_table[keyOf(widget->prevPageUniverse, widget->prevPageChannel)]
+                .append({*widget, Routed::PrevPage});
+        }
+
         if (widget->hasInput == false)
             continue;
 
         if (widget->type == QStringLiteral("button")
             || widget->type == QStringLiteral("slider"))
         {
-            m_table[keyOf(widget->inputUniverse, widget->inputChannel)].append(*widget);
+            m_table[keyOf(widget->inputUniverse, widget->inputChannel)]
+                .append({*widget, Routed::Main});
         }
         else
         {
@@ -119,8 +133,19 @@ void InputRouter::onInput(quint32 universe, quint32 channel, uchar value)
     if (found == m_table.constEnd())
         return;
 
-    for (const VcWidget &widget : found.value())
+    for (const Routed &routed : found.value())
     {
+        const VcWidget &widget = routed.widget;
+
+        if (routed.control != Routed::Main)
+        {
+            /* A page turner: one press, one page. */
+            if (rising)
+                m_engine->stepFramePage(widget.id,
+                                        routed.control == Routed::NextPage ? 1 : -1);
+            continue;
+        }
+
         if (widget.type == QStringLiteral("slider"))
         {
             /* An absolute control: every value counts, edges do not. No echo

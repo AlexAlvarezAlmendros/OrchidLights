@@ -20,11 +20,14 @@ export function XYPad({
   style,
   position,
   onMove,
+  onToggle,
 }: {
   widget: VcWidget
   style: React.CSSProperties
   position: { x: number; y: number }
   onMove: (id: number, x: number, y: number) => void
+  /** Fire a preset's function (EFX / Scene presets). */
+  onToggle?: (id: number) => void
 }) {
   const surface = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
@@ -84,6 +87,34 @@ export function XYPad({
       <span className="fader-value">
         {Math.round(position.x * 100)} · {Math.round(position.y * 100)}
       </span>
+
+      {(widget.padPresets?.length ?? 0) > 0 && (
+        <div className="pad-presets">
+          {widget.padPresets?.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className="chip"
+              title={
+                preset.type === 'Position' ? 'Recuerda esta posición' : `Dispara ${preset.type}`
+              }
+              onClick={() => {
+                if (
+                  preset.type === 'Position' &&
+                  preset.x !== undefined &&
+                  widget.id !== undefined
+                ) {
+                  onMove(widget.id, preset.x, preset.y ?? 0)
+                } else if (preset.function !== undefined) {
+                  onToggle?.(preset.function)
+                }
+              }}
+            >
+              {preset.name || preset.type}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

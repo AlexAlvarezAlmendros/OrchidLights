@@ -186,6 +186,40 @@ export function Functions({
           <button
             type="button"
             disabled={checked.size === 0}
+            title="Crea un botón en la consola por cada función elegida, en un marco nuevo"
+            onClick={() => {
+              const ids = functions.filter((f) => checked.has(f.id)).map((f) => f.id)
+              run(async () => {
+                const frame = await api.addWidget({
+                  type: 'frame',
+                  caption: batchName.trim() || 'Botonera',
+                  geometry: { x: 0, y: 0, width: 460, height: 220 },
+                })
+                let column = 0
+                for (const id of ids) {
+                  const fn = functions.find((f) => f.id === id)
+                  await api.addWidget({
+                    type: 'button',
+                    parent: Number(frame.id),
+                    caption: fn?.name ?? `#${id}`,
+                    functionId: id,
+                    geometry: {
+                      x: (column % 4) * 110,
+                      y: Math.floor(column / 4) * 70,
+                      width: 100,
+                      height: 60,
+                    },
+                  })
+                  column++
+                }
+              }).catch(() => undefined)
+            }}
+          >
+            Crear botonera
+          </button>
+          <button
+            type="button"
+            disabled={checked.size === 0}
             title="Mueve las elegidas a esa carpeta; vacío las saca a la raíz"
             onClick={() => {
               const folder = batchName.trim()

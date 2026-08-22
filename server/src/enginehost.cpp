@@ -363,6 +363,65 @@ bool EngineHost::setGrandMaster(int value, const QString &channelMode,
     return true;
 }
 
+namespace
+{
+    /* Find one widget in the parsed console by id. */
+    const VcWidget *findWidgetById(const VcWidget &root, quint32 id)
+    {
+        QVector<const VcWidget *> pending{&root};
+        while (pending.isEmpty() == false)
+        {
+            const VcWidget *widget = pending.takeLast();
+            if (widget->hasId && widget->id == id)
+                return widget;
+            for (const VcWidget &child : widget->children)
+                pending.append(&child);
+        }
+        return nullptr;
+    }
+}
+
+int EngineHost::framePage(quint32 widgetId) const
+{
+    return m_framePages.value(widgetId, -1);
+}
+
+bool EngineHost::setFramePage(quint32 widgetId, int page)
+{
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root) == false)
+        return false;
+    const VcWidget *widget = findWidgetById(root, widgetId);
+    if (widget == nullptr || widget->pages <= 1)
+        return false;
+    if (page < 0 || page >= widget->pages)
+        return false;
+
+    m_framePages.insert(widgetId, page);
+    emit framePageChanged(widgetId, page);
+    return true;
+}
+
+bool EngineHost::stepFramePage(quint32 widgetId, int delta)
+{
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root) == false)
+        return false;
+    const VcWidget *widget = findWidgetById(root, widgetId);
+    if (widget == nullptr || widget->pages <= 1)
+        return false;
+
+    int page = m_framePages.value(widgetId, widget->currentPage) + delta;
+    if (widget->pagesLoop)
+        page = ((page % widget->pages) + widget->pages) % widget->pages;
+    else
+        page = qBound(0, page, widget->pages - 1);
+
+    m_framePages.insert(widgetId, page);
+    emit framePageChanged(widgetId, page);
+    return true;
+}
+
 bool EngineHost::moveSlider(quint32 widgetId, uchar value)
 {
     if (m_gmSliders.contains(widgetId))

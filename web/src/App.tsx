@@ -111,6 +111,9 @@ export function App() {
   const [planError, setPlanError] = useState<string | null>(null)
   /* The last external control the daemon saw. Kept so the widget editor can
      learn a binding by watching for the next thing the operator touches. */
+  /* Multipage frames' CURRENT page: daemon-shared, so two phones and a MIDI
+     wing agree on which page is up. */
+  const [sharedPages, setSharedPages] = useState<Record<number, number>>({})
   const [lastInput, setLastInput] = useState<{
     universe: number
     channel: number
@@ -249,6 +252,7 @@ export function App() {
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
       onChannelGroup: (id, value) => setGroupLevels((current) => ({ ...current, [id]: value })),
       onInput: (universe, channel, value) => setLastInput({ universe, channel, value }),
+      onFramePage: (id, page) => setSharedPages((current) => ({ ...current, [id]: page })),
       onUniverse: (universe, channels) =>
         setFrames((current) => ({ ...current, [universe]: channels })),
       onShow: (id, elapsed, running) =>
@@ -500,6 +504,14 @@ export function App() {
       letGo()
     }
   }, [vc, mode, toggle, flash, buttonAction])
+
+  const turnFramePage = useCallback((id: number, page: number) => {
+    live.current?.setFramePage(id, page)
+  }, [])
+
+  const cuelistFader = useCallback((chaser: number, mode: string, value: number) => {
+    live.current?.cuelistSideFader(chaser, mode, value)
+  }, [])
 
   const setSpeed = useCallback((id: number, milliseconds: number) => {
     setLevels((current) => ({ ...current, [id]: milliseconds }))
@@ -1229,7 +1241,14 @@ export function App() {
                   running={running}
                   allFunctions={functions}
                   onToggle={toggle}
-                  desk={{ blackout, onFlash: flash, onAction: buttonAction }}
+                  desk={{
+                    blackout,
+                    onFlash: flash,
+                    onAction: buttonAction,
+                    framePages: sharedPages,
+                    onFramePage: turnFramePage,
+                    onSideFader: cuelistFader,
+                  }}
                   onCueList={cueList}
                   pads={pads}
                   onPad={movePad}
@@ -1280,6 +1299,9 @@ export function App() {
 interface DeskActions {
   blackout: boolean
   onFlash: (id: number, on: boolean, flags?: { override?: boolean; forceLTP?: boolean }) => void
+  framePages: Record<number, number>
+  onFramePage: (id: number, page: number) => void
+  onSideFader: (chaser: number, mode: string, value: number) => void
   onAction: (action: 'Blackout' | 'StopAll') => void
 }
 
@@ -1834,12 +1856,21 @@ function Widget({
         style={style}
         position={pads[widget.id ?? -1] ?? { x: widget.padX ?? 0, y: widget.padY ?? 0 }}
         onMove={onPad}
+        onToggle={onToggle}
       />
     )
   }
 
   if (widget.type === 'cuelist') {
-    return <CueList widget={widget} style={style} functions={allFunctions} onCommand={onCueList} />
+    return (
+      <CueList
+        widget={widget}
+        style={style}
+        functions={allFunctions}
+        onCommand={onCueList}
+        onSideFader={desk.onSideFader}
+      />
+    )
   }
 
   if (widget.speedTargets) {
@@ -1947,7 +1978,15 @@ function NestedFrame({
   onLevel: (id: number, value: number) => void
   onSpeed: (id: number, milliseconds: number) => void
 }) {
-  const [page, setPage] = useState(widget.currentPage ?? 0)
+  /* The page is daemon-shared state (external input turns it, every client
+     follows); the local fallback covers frames with no id. */
+  const [localPage, setLocalPage] = useState(widget.currentPage ?? 0)
+  const page =
+    widget.id !== undefined ? (desk.framePages[widget.id] ?? widget.currentPage ?? 0) : localPage
+  const setPage = (next: number) => {
+    if (widget.id !== undefined) desk.onFramePage(widget.id, next)
+    else setLocalPage(next)
+  }
 
   const children = childrenOnPage(widget, page)
   const rows = groupIntoRows(children)
@@ -1975,7 +2014,7 @@ function NestedFrame({
                   aria-pressed={index === page}
                   onClick={() => setPage(index)}
                 >
-                  {index + 1}
+                  {widget.pageShortcuts?.find((s) => s.page === index)?.name || index + 1}
                 </button>
               ))}
             </nav>

@@ -340,6 +340,25 @@ export interface WidgetPatch {
   startupIntensity?: { enabled: boolean; value: number } | null
   /** A clock's whole agenda, replaced at once. */
   schedules?: { function: number; start: string; stop?: string; weekFlags?: number }[]
+  /** Multipage frames. */
+  pages?: number
+  pagesLoop?: boolean
+  pageInputs?: {
+    next?: { universe: number; channel: number } | null
+    prev?: { universe: number; channel: number } | null
+  }
+  pageShortcuts?: { page: number; name: string }[]
+  /** Cue list side fader mode: None, Crossfade or Steps. */
+  sideFaderMode?: string
+  /** XY pad heads with their travel slices, replaced whole. */
+  padHeads?: {
+    fixture: number
+    head?: number
+    x?: { low?: number; high?: number; reverse?: boolean }
+    y?: { low?: number; high?: number; reverse?: boolean }
+  }[]
+  /** XY pad presets, replaced whole. */
+  padPresets?: { type: string; name: string; x?: number; y?: number; function?: number }[]
 }
 
 /** The show the daemon has open. */

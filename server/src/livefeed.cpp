@@ -31,6 +31,8 @@
 
 #include "livefeed.h"
 
+#include <QtMath>
+
 #include "widgetactions.h"
 #include "simpledesksource.h"
 #include "enginehost.h"
@@ -93,6 +95,23 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
 
     connect(m_engine, &EngineHost::consoleChanged, this, &LiveFeed::onConsoleChanged);
     connect(m_engine, &EngineHost::projectReplaced, this, &LiveFeed::onProjectReplaced);
+
+    /* A frame's page turn reaches every screen: two phones paging one frame
+       must agree, and a page turned by MIDI must turn everywhere. */
+    connect(m_engine, &EngineHost::framePageChanged, this,
+            [this](quint32 widgetId, int page) {
+        QJsonObject message;
+        message["type"] = "framepage";
+        message["id"] = qint64(widgetId);
+        message["page"] = page;
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+    });
 
     /* The dump counter rides BOTH desks' signals: what either desk holds is
        what the dump would capture, and the button in the bar wears this
@@ -608,6 +627,58 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
         Chaser *chaser = qobject_cast<Chaser *>(function);
         const QString action = message.value("action").toString();
 
+        if (action == QStringLiteral("sidefader"))
+        {
+            /* The cue list's side fader. Steps maps the fader onto the step
+               list; Crossfade blends the current cue with the next --
+               arithmetic ported from qmlui/vccuelist.cpp. */
+            const QString mode = message.value("mode").toString();
+            const int value = message.value("value").toInt(-1);
+            if (value < 0 || value > 255 || chaser->stopped())
+                return;
+
+            if (mode == QStringLiteral("Steps"))
+            {
+                const int level = 255 - value;
+                int newStep = level;
+                if (chaser->stepsCount() < 256)
+                {
+                    float stepSize = 256 / float(chaser->stepsCount());
+                    stepSize = qFloor((stepSize * 100000.0) + 0.5) / 100000.0;
+                    if (level >= 256.0 - stepSize)
+                        newStep = chaser->stepsCount() - 1;
+                    else
+                        newStep = qFloor(qreal(level) / qreal(stepSize));
+                }
+                if (newStep == chaser->currentStepIndex())
+                    return;
+                /* Every field: ChaserAction is a bare struct, and a step
+                   switched with an unset intensity is a step at whatever the
+                   stack held -- the first probe read it as a blackout. */
+                ChaserAction stepTo;
+                stepTo.m_action = ChaserSetStepIndex;
+                stepTo.m_stepIndex = newStep;
+                stepTo.m_masterIntensity = 1.0;
+                stepTo.m_stepIntensity = 1.0;
+                stepTo.m_fadeMode = Chaser::FromFunction;
+                chaser->setAction(stepTo);
+            }
+            else if (mode == QStringLiteral("Crossfade"))
+            {
+                /* The reference's arithmetic: mid-travel blends the two cues
+                   (BlendedCrossfade STARTS the far one if need be), and the
+                   ends settle on plain Blended. */
+                const int current = chaser->currentStepIndex();
+                const int next = (current + 1) % qMax(1, chaser->stepsCount());
+                const Chaser::FadeControlMode fade = (value != 0 && value != 255)
+                    ? Chaser::BlendedCrossfade
+                    : Chaser::Blended;
+                chaser->adjustStepIntensity(qreal(value) / 255.0, current, fade);
+                chaser->adjustStepIntensity(qreal(255 - value) / 255.0, next, fade);
+            }
+            return;
+        }
+
         if (action == QStringLiteral("play"))
         {
             if (chaser->isRunning() == false)
@@ -651,6 +722,22 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             return;
         }
 
+        return;
+    }
+
+    if (type == QStringLiteral("framepage"))
+    {
+        const quint32 id = quint32(message.value("id").toInt(-1));
+        const int page = message.value("page").toInt(-1);
+        if (m_engine->setFramePage(id, page) == false)
+        {
+            QJsonObject error;
+            error["type"] = "error";
+            error["error"] = QStringLiteral("No such multipage frame, or page out of range");
+            sendJson(socket, error);
+        }
+        /* No echo needed: the engine signal broadcasts to everyone,
+           the turner included. */
         return;
     }
 

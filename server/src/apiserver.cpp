@@ -600,9 +600,12 @@ void ApiServer::registerRoutes()
         const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
 
         QString newId;
-        const VcPatch::Result result = m_engine->addWidget(body.value("type").toString(),
-                                                           body.value("parent").toString(),
-                                                           body, newId);
+        /* toVariant() first: a JSON number's toString() is silently empty,
+           which parked every "create inside this frame" at the root. */
+        const VcPatch::Result result =
+            m_engine->addWidget(body.value("type").toString(),
+                                body.value("parent").toVariant().toString(),
+                                body, newId);
         if (result.ok == false)
             return jsonError(StatusCode::BadRequest, result.error);
 

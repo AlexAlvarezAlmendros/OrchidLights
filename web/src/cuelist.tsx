@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { type FunctionState, api } from './api'
 import type { VcWidget } from './layout'
+import { Slider } from './slider'
 
 export interface Step {
   index: number
@@ -31,6 +32,7 @@ export function CueList({
   style,
   functions,
   onCommand,
+  onSideFader,
 }: {
   widget: VcWidget
   style: React.CSSProperties
@@ -40,6 +42,8 @@ export function CueList({
     action: 'play' | 'stop' | 'next' | 'previous' | 'step',
     index?: number,
   ) => void
+  /** The side fader, when the widget declares one. */
+  onSideFader?: (chaser: number, mode: string, value: number) => void
 }) {
   const chaser = widget.chaserId
   const [steps, setSteps] = useState<Step[] | null>(null)
@@ -75,7 +79,12 @@ export function CueList({
   const current = state?.running ? (state.step ?? -1) : -1
 
   return (
-    <div className="widget cuelist" style={style} data-running={state?.running === true}>
+    <div
+      className="widget cuelist"
+      style={style}
+      data-running={state?.running === true}
+      data-sidefader={widget.sideFaderMode !== undefined}
+    >
       <div className="cuelist-head">
         <strong>{widget.caption || state?.name || 'Cue list'}</strong>
         <span className="spacer" />
@@ -105,6 +114,25 @@ export function CueList({
           ⏭
         </button>
       </div>
+
+      {widget.sideFaderMode !== undefined && onSideFader !== undefined && (
+        <label className="cuelist-sidefader">
+          <span className="hint">
+            {widget.sideFaderMode === 'Crossfade' ? 'Crossfade' : 'Pasos'}
+          </span>
+          <Slider
+            min={0}
+            max={255}
+            defaultValue={255}
+            aria-label={
+              widget.sideFaderMode === 'Crossfade' ? 'Crossfade al siguiente cue' : 'Fader de pasos'
+            }
+            onChange={(e) =>
+              onSideFader(chaser, widget.sideFaderMode as string, Number(e.target.value))
+            }
+          />
+        </label>
+      )}
 
       {error && <p className="hint">{error}</p>}
 

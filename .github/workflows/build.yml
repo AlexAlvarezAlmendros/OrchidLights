@@ -227,6 +227,9 @@ jobs:
       - name: Clock smoke test (the agenda rings with no browser open)
         run: ./server/test/clock-smoke.sh orchidlightsd
 
+      - name: VC parity smoke test (side faders on the wire, pages turned by input)
+        run: ./server/test/vcparity-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:
