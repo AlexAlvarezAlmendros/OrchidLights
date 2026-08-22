@@ -221,6 +221,9 @@ jobs:
       - name: Script/audio smoke test (checker points at the line, waveform hears silence)
         run: ./server/test/scriptaudio-smoke.sh orchidlightsd
 
+      - name: Palette smoke test (retint without touching the scene, monotonic fanning)
+        run: ./server/test/palette-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

@@ -31,6 +31,22 @@ export interface FunctionUsage {
   startup: boolean
 }
 
+export interface PaletteFanning {
+  type: string
+  layout: string
+  amount: number
+  value: string | number | null
+}
+
+/** One palette: a named value scenes can reference. */
+export interface PaletteState {
+  id: number
+  name: string
+  type: string
+  values: (string | number)[]
+  fanning: PaletteFanning
+}
+
 export interface FunctionBody {
   id: number
   type: string
@@ -93,6 +109,8 @@ export interface FunctionBody {
 
   scene?: number // Sequence
   sceneName?: string
+  /** Scene: the palettes it resolves at start, with names. */
+  palettes?: { id: number; name: string }[]
   /** Chaser speed modes: "common" | "perstep" (+ "default" for duration). */
   fadeInMode?: string
   fadeOutMode?: string
@@ -496,6 +514,38 @@ export const api = {
     json<{ points: number[]; duration: number }>(
       `/api/v1/functions/${id}/waveform?points=${points}`,
     ),
+  /** Palettes: one value with a name; scenes reference them by id. */
+  palettes: () => json<{ palettes: PaletteState[] }>('/api/v1/palettes'),
+  createPalette: (body: {
+    type: string
+    name: string
+    values: (string | number)[]
+    fanning?: PaletteFanning
+  }) =>
+    json<{ id: number }>('/api/v1/palettes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  patchPalette: (
+    id: number,
+    body: { name?: string; values?: (string | number)[]; fanning?: Partial<PaletteFanning> },
+  ) =>
+    json<{ id: number }>(`/api/v1/palettes/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  removePalette: (id: number) =>
+    json<{ removed: number }>(`/api/v1/palettes/${id}`, { method: 'DELETE' }),
+  /** Resolve onto fixtures and hold on the live desk (the dump sees it). */
+  applyPalette: (id: number, fixtures: number[]) =>
+    json<{ applied: number }>(`/api/v1/palettes/${id}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fixtures }),
+    }),
+
   /** The gel books: named colour collections shipped with the daemon. */
   colorFilters: () =>
     json<{ filters: { name: string; colors: { name: string; rgb: string }[] }[] }>(

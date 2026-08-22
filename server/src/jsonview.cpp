@@ -29,6 +29,7 @@
 #include "universe.h"
 #include "fixture.h"
 #include "qlcchannel.h"
+#include "qlcpalette.h"
 #include "rgbalgorithm.h"
 #include "rgbtext.h"
 #include "rgbimage.h"
@@ -290,6 +291,29 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
         }
 
         json["values"] = values;
+
+        /* The palettes this scene resolves at start, with names -- and the
+           fixtures they resolve against, which for a palette-only scene is
+           the whole recipe. */
+        if (scene->palettes().isEmpty() == false)
+        {
+            QJsonArray palettes;
+            for (quint32 id : scene->palettes())
+            {
+                const QLCPalette *palette = doc->palette(id);
+                QJsonObject entry;
+                entry["id"] = qint64(id);
+                entry["name"] =
+                    palette != nullptr ? palette->name() : QStringLiteral("(borrada)");
+                palettes.append(entry);
+            }
+            json["palettes"] = palettes;
+
+            QJsonArray fixtures;
+            for (quint32 id : scene->fixtures())
+                fixtures.append(qint64(id));
+            json["fixtures"] = fixtures;
+        }
         return json;
     }
 

@@ -21,6 +21,7 @@ import {
   type FunctionUsage,
   api,
 } from './api'
+import { Palettes } from './paletas'
 import { ShowTimeline } from './show'
 import { Slider } from './slider'
 
@@ -235,6 +236,8 @@ export function Functions({
           Crear
         </button>
       </div>
+
+      <Palettes fixtures={fixtures} onError={setError} />
 
       {functions.length === 0 && <p className="hint">Este proyecto no tiene funciones.</p>}
 
@@ -453,6 +456,7 @@ function FunctionEditor({
       {body?.type === 'Scene' && (
         <>
           <SceneValues fn={fn} body={body} fixtures={fixtures} onApply={apply} />
+          <ScenePalettes fn={fn} body={body} fixtures={fixtures} onApply={apply} />
           <ChannelTools fn={fn} body={body} fixtures={fixtures} onApply={apply} />
         </>
       )}
@@ -1459,7 +1463,6 @@ function Organization({
   const [usage, setUsage] = useState<FunctionUsage | null>(null)
   const [startup, setStartup] = useState<boolean | null>(null)
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the id on purpose
   useEffect(() => {
     setUsage(null)
     api
@@ -1608,7 +1611,6 @@ function ScriptBody({
 function Waveform({ fn, source }: { fn: FunctionState; source: string }) {
   const [wave, setWave] = useState<number[] | null>(null)
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refetched when the source changes
   useEffect(() => {
     setWave(null)
     if (source === '') return
@@ -1636,6 +1638,85 @@ function Waveform({ fn, source }: { fn: FunctionState; source: string }) {
 }
 
 /**
+ * The palettes a scene carries: resolved at start against the scene's
+ * fixtures, so retinting the palette retints this look without touching it.
+ */
+function ScenePalettes({
+  fn,
+  body,
+  fixtures,
+  onApply,
+}: {
+  fn: FunctionState
+  body: FunctionBody
+  fixtures: FixtureState[]
+  onApply: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [available, setAvailable] = useState<{ id: number; name: string; type: string }[]>([])
+
+  useEffect(() => {
+    api
+      .palettes()
+      .then((r) => setAvailable(r.palettes))
+      .catch(() => setAvailable([]))
+  }, [])
+
+  const attached = body.palettes ?? []
+  if (available.length === 0 && attached.length === 0) return null
+
+  const put = (ids: number[]) =>
+    onApply(() =>
+      api.setBody(fn.id, {
+        palettes: ids,
+        /* The palettes resolve against fixtures; with none named, every
+           fixture in the rig is the honest default for a palette-only look. */
+        fixtures: [
+          ...new Set([...(body.values ?? []).map((v) => v.fixture), ...fixtures.map((f) => f.id)]),
+        ],
+      }),
+    )
+
+  return (
+    <div className="field">
+      <span>Palettes de la escena ({attached.length})</span>
+      <ul className="channels">
+        {attached.map((palette) => (
+          <li key={palette.id}>
+            <span className="grow">{palette.name}</span>
+            <button
+              type="button"
+              aria-label={`Quitar palette ${palette.name}`}
+              onClick={() => put(attached.filter((p) => p.id !== palette.id).map((p) => p.id))}
+            >
+              ✕
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="channel-add">
+        <select
+          value=""
+          aria-label="Añadir palette"
+          onChange={(e) => {
+            if (e.target.value === '') return
+            put([...attached.map((p) => p.id), Number(e.target.value)])
+          }}
+        >
+          <option value="">Añadir palette…</option>
+          {available
+            .filter((p) => !attached.some((a) => a.id === p.id))
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.type})
+              </option>
+            ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
+/**
  * The channel tools: whole kinds of channel at once, through the fixture's
  * own definition. The gels come from the daemon's colour books, and applying
  * one writes the EXACT RGB the book names.
@@ -1656,6 +1737,7 @@ function ChannelTools({
   const [books, setBooks] = useState<{ name: string; colors: { name: string; rgb: string }[] }[]>(
     [],
   )
+  const [lastColor, setLastColor] = useState<string | null>(null)
 
   useEffect(() => {
     api
@@ -1760,9 +1842,30 @@ function ChannelTools({
             <input
               type="color"
               aria-label="Color del fixture"
-              onBlur={(e) => applyColor(e.target.value)}
+              onBlur={(e) => {
+                setLastColor(e.target.value)
+                applyColor(e.target.value)
+              }}
             />
           </label>
+        )}
+
+        {lastColor !== null && (
+          <button
+            type="button"
+            title="Guarda este color como palette reutilizable"
+            onClick={() =>
+              onApply(() =>
+                api.createPalette({
+                  type: 'Color',
+                  name: `Color ${lastColor}`,
+                  values: [lastColor],
+                }),
+              )
+            }
+          >
+            Guardar como palette
+          </button>
         )}
       </div>
 

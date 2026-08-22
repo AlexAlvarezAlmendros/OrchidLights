@@ -48,6 +48,8 @@
 #include "track.h"
 #include "showfunction.h"
 #include "script.h"
+#include "qlcpalette.h"
+#include "scene.h"
 #include "audio.h"
 #include "audiodecoder.h"
 #include <QXmlStreamReader>
@@ -1477,6 +1479,28 @@ void ApiServer::registerRoutes()
                                        hasFixtures ? &fixtures : nullptr);
             break;
         }
+        case Function::SceneType:
+        {
+            /* The palettes a scene carries, plus the fixtures they resolve
+               against. Values keep their own POST route. */
+            if (body.contains(QStringLiteral("palettes")) == false)
+            {
+                result = DocWriter::Result::failure(
+                    QStringLiteral("A scene's body PUT takes {\"palettes\": [ids], "
+                                   "\"fixtures\": [ids]}"));
+                break;
+            }
+            QList<quint32> palettes;
+            for (const QJsonValue &value : body.value(QStringLiteral("palettes")).toArray())
+                palettes.append(quint32(value.toInt(-1)));
+            QList<quint32> fixtures;
+            const bool hasFixtures = body.value(QStringLiteral("fixtures")).isArray();
+            for (const QJsonValue &value : body.value(QStringLiteral("fixtures")).toArray())
+                fixtures.append(quint32(value.toInt(-1)));
+            result = DocWriter::setScenePalettes(doc, id, palettes,
+                                                 hasFixtures ? &fixtures : nullptr);
+            break;
+        }
         case Function::SequenceType:
             result = DocWriter::setSequenceScene(doc, id,
                                                  quint32(body.value("scene").toInt(-1)));
@@ -2682,6 +2706,132 @@ void ApiServer::registerRoutes()
         response["path"] = path;
         response["size"] = qint64(data.size());
         return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    /* Palettes: one value with a name, referenced from scenes -- retint the
+       palette and every look that carries it retints with it. */
+    m_server->route("/api/v1/palettes", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonArray palettes;
+        for (const QLCPalette *palette : doc->palettes())
+        {
+            QJsonObject entry;
+            entry["id"] = qint64(palette->id());
+            entry["name"] = palette->name();
+            entry["type"] = QLCPalette::typeToString(palette->type());
+            entry["values"] = QJsonArray::fromVariantList(palette->values());
+
+            QJsonObject fanning;
+            fanning["type"] = QLCPalette::fanningTypeToString(palette->fanningType());
+            fanning["layout"] = QLCPalette::fanningLayoutToString(palette->fanningLayout());
+            fanning["amount"] = palette->fanningAmount();
+            fanning["value"] = QJsonValue::fromVariant(palette->fanningValue());
+            entry["fanning"] = fanning;
+            palettes.append(entry);
+        }
+
+        QJsonObject body;
+        body["palettes"] = palettes;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/palettes", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        quint32 newId = QLCPalette::invalidId();
+        const DocWriter::Result result =
+            DocWriter::addPalette(doc, body.value(QStringLiteral("type")).toString(),
+                                  body.value(QStringLiteral("name")).toString(), body, newId);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(newId);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/palettes/<arg>", QHttpServerRequest::Method::Patch,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Palette id must be a number"));
+
+        const DocWriter::Result result =
+            DocWriter::updatePalette(doc, id, QJsonDocument::fromJson(request.body()).object());
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/palettes/<arg>", QHttpServerRequest::Method::Delete,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Palette id must be a number"));
+
+        const DocWriter::Result result = DocWriter::removePalette(doc, id);
+        if (result.ok == false)
+            return jsonError(StatusCode::Conflict, result.error);
+
+        QJsonObject response;
+        response["removed"] = qint64(id);
+        return QHttpServerResponse(response);
+    });
+
+    /* Apply: the palette resolved against fixtures, held on the LIVE desk --
+       which is exactly what lets the dump capture an applied palette. */
+    m_server->route("/api/v1/palettes/<arg>/apply", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Palette id must be a number"));
+
+        QLCPalette *palette = doc->palette(id);
+        if (palette == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No such palette"));
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        QList<quint32> fixtures;
+        for (const QJsonValue &value : asked.value(QStringLiteral("fixtures")).toArray())
+        {
+            const int fixtureId = value.toInt(-1);
+            if (fixtureId < 0 || doc->fixture(quint32(fixtureId)) == nullptr)
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("No fixture with id %1").arg(fixtureId));
+            fixtures.append(quint32(fixtureId));
+        }
+        if (fixtures.isEmpty())
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Give {\"fixtures\": [ids]} to apply onto"));
+
+        const QList<SceneValue> resolved = palette->valuesFromFixtures(doc, fixtures);
+        for (const SceneValue &value : resolved)
+            m_engine->levels()->setLiveValue(value.fxi, value.channel, value.value);
+
+        QJsonObject response;
+        response["applied"] = resolved.count();
+        return QHttpServerResponse(response);
     });
 
     /* The gel books: colour filter collections shipped with the daemon. Read
