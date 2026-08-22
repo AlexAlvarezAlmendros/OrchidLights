@@ -506,6 +506,84 @@ namespace
                 widget.currentPage = attributes.value(QStringLiteral("CurrentPage")).toInt();
                 reader.skipCurrentElement();
             }
+            else if (name == QStringLiteral("PagesLoop"))
+            {
+                widget.pagesLoop =
+                    reader.readElementText().trimmed().compare(QStringLiteral("True"),
+                                                               Qt::CaseInsensitive) == 0;
+            }
+            else if (name == QStringLiteral("Next") || name == QStringLiteral("Previous"))
+            {
+                /* The external controls that turn a frame's pages: an <Input>
+                   inside <Next> / <Previous>. */
+                const bool forward = name == QStringLiteral("Next");
+                while (reader.readNextStartElement())
+                {
+                    if (reader.name() == QStringLiteral("Input"))
+                    {
+                        const QXmlStreamAttributes attributes = reader.attributes();
+                        bool universeOk = false, channelOk = false;
+                        const uint universe =
+                            attributes.value(QStringLiteral("Universe")).toUInt(&universeOk);
+                        const uint channel =
+                            attributes.value(QStringLiteral("Channel")).toUInt(&channelOk);
+                        if (universeOk && channelOk)
+                        {
+                            if (forward)
+                            {
+                                widget.hasNextPageInput = true;
+                                widget.nextPageUniverse = quint32(universe);
+                                widget.nextPageChannel = quint32(channel);
+                            }
+                            else
+                            {
+                                widget.hasPrevPageInput = true;
+                                widget.prevPageUniverse = quint32(universe);
+                                widget.prevPageChannel = quint32(channel);
+                            }
+                        }
+                        reader.skipCurrentElement();
+                    }
+                    else
+                        reader.skipCurrentElement();
+                }
+            }
+            else if (name == QStringLiteral("PageShortcut"))
+            {
+                const QXmlStreamAttributes attributes = reader.attributes();
+                widget.pageShortcuts.append(
+                    qMakePair(attributes.value(QStringLiteral("Page")).toInt(),
+                              attributes.value(QStringLiteral("Name")).toString()));
+                reader.skipCurrentElement();
+            }
+            else if (name == QStringLiteral("Preset"))
+            {
+                /* An XY pad preset: a stored position, or a function the pad
+                   can fire. Positions live in the pad's 0..256 canvas, like
+                   Pan/Tilt above. */
+                VcWidget::PadPreset preset;
+                preset.id = reader.attributes().value(QStringLiteral("ID")).toInt();
+                while (reader.readNextStartElement())
+                {
+                    if (reader.name() == QStringLiteral("Type"))
+                        preset.type = reader.readElementText().trimmed();
+                    else if (reader.name() == QStringLiteral("Name"))
+                        preset.name = reader.readElementText();
+                    else if (reader.name() == QStringLiteral("FuncID"))
+                        preset.functionId = reader.readElementText().toUInt();
+                    else if (reader.name() == QStringLiteral("XPos"))
+                        preset.x = reader.readElementText().toDouble() / 256.0;
+                    else if (reader.name() == QStringLiteral("YPos"))
+                        preset.y = reader.readElementText().toDouble() / 256.0;
+                    else
+                        reader.skipCurrentElement();
+                }
+                widget.padPresets.append(preset);
+            }
+            else if (name == QStringLiteral("SlidersMode"))
+            {
+                widget.sideFaderMode = reader.readElementText().trimmed();
+            }
             else if (name == QStringLiteral("ShowHeader"))
             {
                 /* A frame without a header is a grouping the designer wanted

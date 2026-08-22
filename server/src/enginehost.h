@@ -103,6 +103,15 @@ public:
     bool setGrandMaster(int value, const QString &channelMode, const QString &valueMode,
                         int visible, QString &errorMessage);
 
+    /**
+     * A multipage frame's CURRENT page: runtime state shared by every client
+     * (and turnable by external input), seeded from the file's CurrentPage.
+     * Steps clamp or wrap according to the frame's own PagesLoop.
+     */
+    int framePage(quint32 widgetId) const;
+    bool setFramePage(quint32 widgetId, int page);
+    bool stepFramePage(quint32 widgetId, int delta);
+
     /** Bind (or, with bind = false, unbind) the external control that moves
      *  the Grand Master. Persists into the console's <Properties>. */
     bool setGrandMasterInput(bool bind, quint32 universe, quint32 channel,
@@ -412,6 +421,9 @@ signals:
     /** The live desk (the plan's per-fixture grips) changed what it holds. */
     void liveChanged();
 
+    /** A multipage frame turned its page -- by any client or input. */
+    void framePageChanged(quint32 widgetId, int page);
+
     /** An external control moved. Carried live because learning a binding means
      *  watching for the next thing the operator touches. */
     void inputSeen(quint32 universe, quint32 channel, uchar value);
@@ -459,6 +471,9 @@ private:
 
     /** Adjust-mode sliders: widget id -> (function id, attribute index). */
     QHash<quint32, QPair<quint32, int>> m_adjustSliders;
+
+    /** Runtime page per multipage frame. Absent = the file's CurrentPage. */
+    QHash<quint32, int> m_framePages;
     bool m_running = false;
 
     int m_manufacturers = 0;

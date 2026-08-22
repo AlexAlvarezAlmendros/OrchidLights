@@ -721,6 +721,224 @@ namespace
                 return result;
         }
 
+        /* A frame's pages: the count materializes <Multipage>, zero or one
+           removes it. Loop, the page-turning inputs and the named shortcuts
+           ride alongside. */
+        if (patch.contains(QStringLiteral("pages")))
+        {
+            if (widget.name != QStringLiteral("Frame")
+                && widget.name != QStringLiteral("SoloFrame"))
+                return Result::failure(QStringLiteral("Only frames have pages"));
+            const int pages = patch.value(QStringLiteral("pages")).toInt(-1);
+            if (pages < 0 || pages > 64)
+                return Result::failure(QStringLiteral("pages is 0..64"));
+            if (pages <= 1)
+                removeChildren(widget, QStringLiteral("Multipage"));
+            else
+            {
+                XmlNode &node = widget.childOrCreate(QStringLiteral("Multipage"));
+                node.setAttribute(QStringLiteral("PagesNum"), QString::number(pages));
+                if (node.hasAttribute(QStringLiteral("CurrentPage")) == false)
+                    node.setAttribute(QStringLiteral("CurrentPage"), QStringLiteral("0"));
+            }
+        }
+
+        if (patch.contains(QStringLiteral("pagesLoop")))
+        {
+            XmlNode &node = widget.childOrCreate(QStringLiteral("PagesLoop"));
+            node.text = patch.value(QStringLiteral("pagesLoop")).toBool()
+                ? QStringLiteral("True")
+                : QStringLiteral("False");
+        }
+
+        if (patch.contains(QStringLiteral("pageInputs")))
+        {
+            const QJsonObject asked = patch.value(QStringLiteral("pageInputs")).toObject();
+            const auto place = [&widget](const QString &tag, const QJsonValue &value) {
+                if (value.isNull())
+                {
+                    removeChildren(widget, tag);
+                    return;
+                }
+                if (value.isObject() == false)
+                    return;
+                const QJsonObject input = value.toObject();
+                XmlNode &holder = widget.childOrCreate(tag);
+                /* One <Input> inside the holder. */
+                for (int i = holder.children.count() - 1; i >= 0; i--)
+                {
+                    if (holder.children.at(i).name == QStringLiteral("Input"))
+                        holder.children.removeAt(i);
+                }
+                XmlNode node;
+                node.name = QStringLiteral("Input");
+                node.setAttribute(QStringLiteral("Universe"),
+                                  QString::number(input.value(QStringLiteral("universe")).toInt(0)));
+                node.setAttribute(QStringLiteral("Channel"),
+                                  QString::number(input.value(QStringLiteral("channel")).toInt(0)));
+                holder.children.append(node);
+            };
+            if (asked.contains(QStringLiteral("next")))
+                place(QStringLiteral("Next"), asked.value(QStringLiteral("next")));
+            if (asked.contains(QStringLiteral("prev")))
+                place(QStringLiteral("Previous"), asked.value(QStringLiteral("prev")));
+        }
+
+        if (patch.contains(QStringLiteral("pageShortcuts")))
+        {
+            const QJsonValue value = patch.value(QStringLiteral("pageShortcuts"));
+            if (value.isArray() == false)
+                return Result::failure(
+                    QStringLiteral("\"pageShortcuts\" is a list of {page, name}"));
+            removeChildren(widget, QStringLiteral("PageShortcut"));
+            for (const QJsonValue &entry : value.toArray())
+            {
+                const QJsonObject asked = entry.toObject();
+                XmlNode node;
+                node.name = QStringLiteral("PageShortcut");
+                node.setAttribute(QStringLiteral("Page"),
+                                  QString::number(asked.value(QStringLiteral("page")).toInt(0)));
+                node.setAttribute(QStringLiteral("Name"),
+                                  asked.value(QStringLiteral("name")).toString());
+                widget.children.append(node);
+            }
+        }
+
+        /* The XY pad's heads, replaced whole: which fixtures it steers and
+           the slice of pan/tilt travel each is allowed -- the limits are what
+           keep a pad from swinging a lamp into the audience. */
+        if (patch.contains(QStringLiteral("padHeads")))
+        {
+            if (widget.name != QStringLiteral("XYPad"))
+                return Result::failure(QStringLiteral("Only XY pads have heads"));
+            const QJsonValue value = patch.value(QStringLiteral("padHeads"));
+            if (value.isArray() == false)
+                return Result::failure(QStringLiteral(
+                    "\"padHeads\" is a list of {fixture, head, x?, y?}"));
+
+            removeChildren(widget, QStringLiteral("Fixture"));
+            for (const QJsonValue &entry : value.toArray())
+            {
+                const QJsonObject asked = entry.toObject();
+                const int fixtureId = asked.value(QStringLiteral("fixture")).toInt(-1);
+                if (fixtureId < 0)
+                    return Result::failure(
+                        QStringLiteral("Each head needs a \"fixture\" id"));
+
+                XmlNode node;
+                node.name = QStringLiteral("Fixture");
+                node.setAttribute(QStringLiteral("ID"), QString::number(fixtureId));
+                node.setAttribute(QStringLiteral("Head"),
+                                  QString::number(asked.value(QStringLiteral("head")).toInt(0)));
+
+                const auto axisOf = [&asked](const QString &key, const QString &id) {
+                    XmlNode axis;
+                    axis.name = QStringLiteral("Axis");
+                    axis.setAttribute(QStringLiteral("ID"), id);
+                    const QJsonObject range = asked.value(key).toObject();
+                    axis.setAttribute(
+                        QStringLiteral("LowLimit"),
+                        QString::number(range.value(QStringLiteral("low")).toDouble(0.0)));
+                    axis.setAttribute(
+                        QStringLiteral("HighLimit"),
+                        QString::number(range.value(QStringLiteral("high")).toDouble(1.0)));
+                    axis.setAttribute(QStringLiteral("Reverse"),
+                                      range.value(QStringLiteral("reverse")).toBool()
+                                          ? QStringLiteral("True")
+                                          : QStringLiteral("False"));
+                    return axis;
+                };
+                node.children.append(axisOf(QStringLiteral("x"), QStringLiteral("X")));
+                node.children.append(axisOf(QStringLiteral("y"), QStringLiteral("Y")));
+                widget.children.append(node);
+            }
+        }
+
+        /* The XY pad's presets, replaced whole: a stored position, or a
+           function to fire. Positions arrive normalised and are stored in the
+           pad's own 0..256 canvas. */
+        if (patch.contains(QStringLiteral("padPresets")))
+        {
+            if (widget.name != QStringLiteral("XYPad"))
+                return Result::failure(QStringLiteral("Only XY pads have presets"));
+            const QJsonValue value = patch.value(QStringLiteral("padPresets"));
+            if (value.isArray() == false)
+                return Result::failure(QStringLiteral(
+                    "\"padPresets\" is a list of {type, name, x?, y?, function?}"));
+
+            removeChildren(widget, QStringLiteral("Preset"));
+            int nextId = 0;
+            for (const QJsonValue &entry : value.toArray())
+            {
+                const QJsonObject asked = entry.toObject();
+                const QString type = asked.value(QStringLiteral("type")).toString();
+                static const QStringList types = {
+                    QStringLiteral("Position"), QStringLiteral("EFX"),
+                    QStringLiteral("Scene"), QStringLiteral("FixtureGroup")};
+                if (types.contains(type) == false)
+                    return Result::failure(QStringLiteral(
+                        "A preset's type is Position, EFX, Scene or FixtureGroup"));
+
+                XmlNode node;
+                node.name = QStringLiteral("Preset");
+                node.setAttribute(QStringLiteral("ID"), QString::number(nextId++));
+
+                XmlNode typeNode;
+                typeNode.name = QStringLiteral("Type");
+                typeNode.text = type;
+                node.children.append(typeNode);
+
+                XmlNode nameNode;
+                nameNode.name = QStringLiteral("Name");
+                nameNode.text = asked.value(QStringLiteral("name")).toString();
+                node.children.append(nameNode);
+
+                if (asked.contains(QStringLiteral("function")))
+                {
+                    XmlNode fn;
+                    fn.name = QStringLiteral("FuncID");
+                    fn.text = QString::number(asked.value(QStringLiteral("function")).toInt());
+                    node.children.append(fn);
+                }
+                if (asked.contains(QStringLiteral("x")))
+                {
+                    XmlNode x;
+                    x.name = QStringLiteral("XPos");
+                    x.text = QString::number(
+                        asked.value(QStringLiteral("x")).toDouble() * 256.0);
+                    node.children.append(x);
+                    XmlNode y;
+                    y.name = QStringLiteral("YPos");
+                    y.text = QString::number(
+                        asked.value(QStringLiteral("y")).toDouble() * 256.0);
+                    node.children.append(y);
+                }
+                widget.children.append(node);
+            }
+        }
+
+        /* The cue list's side fader mode. */
+        if (patch.contains(QStringLiteral("sideFaderMode")))
+        {
+            if (widget.name != QStringLiteral("CueList"))
+                return Result::failure(QStringLiteral("Only cue lists have a side fader"));
+            const QString mode = patch.value(QStringLiteral("sideFaderMode")).toString();
+            static const QStringList modes = {QStringLiteral("None"),
+                                              QStringLiteral("Crossfade"),
+                                              QStringLiteral("Steps")};
+            QString matched;
+            for (const QString &candidate : modes)
+            {
+                if (candidate.compare(mode, Qt::CaseInsensitive) == 0)
+                    matched = candidate;
+            }
+            if (matched.isEmpty())
+                return Result::failure(
+                    QStringLiteral("sideFaderMode is None, Crossfade or Steps"));
+            XmlNode &node = widget.childOrCreate(QStringLiteral("SlidersMode"));
+            node.text = matched;
+        }
+
         /* Flash flags: attributes on the <Action> node the reader already
            takes them from. Written even when the action is not Flash --
            harmless there, ready the moment the action flips. */

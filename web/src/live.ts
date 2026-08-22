@@ -26,6 +26,7 @@ export interface LiveHandlers {
   /** An external control moved. Carried live because binding a widget to one
    *  means watching for the next thing the operator touches. */
   onInput?: (universe: number, channel: number, value: number) => void
+  onFramePage?: (id: number, page: number) => void
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
   onChanged?: (what: string[]) => void
@@ -116,6 +117,9 @@ export class Live {
         case 'show':
           this.handlers.onShow?.(message.id, message.elapsed, message.running)
           break
+        case 'framepage':
+          this.handlers.onFramePage?.(message.id, message.page)
+          break
         case 'input':
           this.handlers.onInput?.(message.universe, message.channel, message.value)
           break
@@ -188,6 +192,18 @@ export class Live {
 
   toggle(id: number, running: boolean): void {
     this.send({ type: 'function', id, action: running ? 'stop' : 'start' })
+  }
+
+  /** Turn a multipage frame to a page. The daemon broadcasts the result to
+   *  every client, this one included. */
+  setFramePage(id: number, page: number): void {
+    this.send({ type: 'framepage', id, page })
+  }
+
+  /** The cue list's side fader: Steps maps it onto the cue list, Crossfade
+   *  blends the running cue with the next. */
+  cuelistSideFader(chaser: number, mode: string, value: number): void {
+    this.send({ type: 'cuelist', chaser, action: 'sidefader', mode, value })
   }
 
   /** Hold-to-light through the engine's own flash overlay: it lights

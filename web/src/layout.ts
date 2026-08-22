@@ -83,6 +83,20 @@ export interface VcWidget {
   clockTime?: number
   /** The clock's agenda: functions fired at a time of day, on chosen days. */
   schedules?: { function: number; start: string; stop?: string; weekFlags: number }[]
+  /** Multipage frames: wrap-around and named page shortcuts. */
+  pagesLoop?: boolean
+  pageShortcuts?: { page: number; name: string }[]
+  /** Cue list side fader: "Crossfade" | "Steps" (absent = none). */
+  sideFaderMode?: string
+  /** XY pad presets: a recallable position, or a function to fire. */
+  padPresets?: {
+    id: number
+    type: string
+    name: string
+    function?: number
+    x?: number
+    y?: number
+  }[]
   /** XY pad: how many heads it steers, and where it was left. Zero heads
    *  means a pad that steers nothing, which is a control that does nothing. */
   padHeads?: number

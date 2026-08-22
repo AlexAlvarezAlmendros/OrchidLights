@@ -106,6 +106,8 @@ export function WidgetEditor({
   const isButton = widget.type === 'button'
   const isCueList = widget.type === 'cuelist'
   const isClock = widget.type === 'clock'
+  const isFrame = widget.type === 'frame' || widget.type === 'soloframe'
+  const isPad = widget.type === 'xypad'
   const chasers = functions.filter((f) => f.type === 'Chaser')
 
   return (
@@ -328,6 +330,110 @@ export function WidgetEditor({
       )}
 
       <Appearance widget={widget} busy={busy} onApply={apply} />
+      {isFrame && (
+        <div className="fields">
+          <label className="field">
+            <span>Páginas</span>
+            <input
+              type="number"
+              min={0}
+              max={64}
+              defaultValue={widget.pages ?? 0}
+              disabled={busy}
+              onBlur={(e) => {
+                const pages = Number(e.target.value)
+                if (pages !== (widget.pages ?? 0)) apply({ pages })
+              }}
+            />
+          </label>
+          {(widget.pages ?? 0) > 1 && (
+            <>
+              <label className="field row-field">
+                <input
+                  type="checkbox"
+                  checked={widget.pagesLoop ?? false}
+                  disabled={busy}
+                  onChange={(e) => apply({ pagesLoop: e.target.checked })}
+                />
+                <span>Las páginas dan la vuelta</span>
+              </label>
+              <PageInputLearner busy={busy} learning={learning} onApply={apply} />
+            </>
+          )}
+        </div>
+      )}
+
+      {isFrame &&
+        (widget.pages ?? 0) > 1 &&
+        Array.from({ length: widget.pages ?? 0 }, (_, index) => (
+          // The page number is the identity: a fixed list, in order.
+          // biome-ignore lint/suspicious/noArrayIndexKey: the index is the page
+          <label className="field" key={index}>
+            <span>Nombre de la página {index + 1}</span>
+            <input
+              defaultValue={widget.pageShortcuts?.find((sc) => sc.page === index)?.name ?? ''}
+              placeholder={`${index + 1}`}
+              disabled={busy}
+              onBlur={(e) => {
+                const next = Array.from({ length: widget.pages ?? 0 }, (_, page) => ({
+                  page,
+                  name:
+                    page === index
+                      ? e.target.value.trim()
+                      : (widget.pageShortcuts?.find((sc) => sc.page === page)?.name ?? ''),
+                })).filter((entry) => entry.name !== '')
+                apply({ pageShortcuts: next })
+              }}
+            />
+          </label>
+        ))}
+
+      {isCueList && (
+        <label className="field">
+          <span>Fader lateral</span>
+          <select
+            value={widget.sideFaderMode ?? 'None'}
+            disabled={busy}
+            onChange={(e) => apply({ sideFaderMode: e.target.value })}
+          >
+            <option value="None">Ninguno</option>
+            <option value="Crossfade">Crossfade</option>
+            <option value="Steps">Pasos</option>
+          </select>
+        </label>
+      )}
+
+      {isPad && (
+        <div className="fields">
+          <button
+            type="button"
+            disabled={busy}
+            title="Guarda la posición actual del pad como preset"
+            onClick={() => {
+              const name = `Posición ${(widget.padPresets?.length ?? 0) + 1}`
+              apply({
+                padPresets: [
+                  ...(widget.padPresets ?? []).map((p) => ({
+                    type: p.type,
+                    name: p.name,
+                    ...(p.x !== undefined ? { x: p.x, y: p.y ?? 0 } : {}),
+                    ...(p.function !== undefined ? { function: p.function } : {}),
+                  })),
+                  { type: 'Position', name, x: widget.padX ?? 0.5, y: widget.padY ?? 0.5 },
+                ],
+              })
+            }}
+          >
+            Guardar posición como preset
+          </button>
+          {(widget.padPresets?.length ?? 0) > 0 && (
+            <button type="button" disabled={busy} onClick={() => apply({ padPresets: [] })}>
+              Vaciar presets
+            </button>
+          )}
+        </div>
+      )}
+
       <ExternalInput widget={widget} busy={busy} onApply={apply} learning={learning} />
 
       <button
@@ -852,6 +958,55 @@ function ExternalInput({
 }
 
 /**
+ * The controls that turn a frame's pages, learned by moving them -- the same
+ * gesture as a widget's own binding, one learner per direction.
+ */
+function PageInputLearner({
+  busy,
+  learning,
+  onApply,
+}: {
+  busy: boolean
+  learning: { universe: number; channel: number; value: number } | null
+  onApply: (patch: WidgetPatch) => Promise<void>
+}) {
+  const [listening, setListening] = useState<'next' | 'prev' | null>(null)
+
+  useEffect(() => {
+    if (listening === null || learning === null) return
+    const direction = listening
+    setListening(null)
+    onApply({
+      pageInputs: {
+        [direction]: { universe: learning.universe, channel: learning.channel },
+      },
+    })
+  }, [listening, learning, onApply])
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-pressed={listening === 'next'}
+        disabled={busy}
+        onClick={() => setListening(listening === 'next' ? null : 'next')}
+      >
+        {listening === 'next' ? 'Esperando…' : 'Aprender pasar página'}
+      </button>
+      <button
+        type="button"
+        aria-pressed={listening === 'prev'}
+        disabled={busy}
+        onClick={() => setListening(listening === 'prev' ? null : 'prev')}
+      >
+        {listening === 'prev' ? 'Esperando…' : 'Aprender página atrás'}
+      </button>
+    </>
+  )
+}
+
+/**
+ * The keyboard shortcut, captured rather than typed/**
  * The keyboard shortcut, captured rather than typed: press the key you mean.
  * Stored as QKeySequence text so the .qxw stays legible to QLC+ itself.
  */

@@ -53,6 +53,32 @@ struct VcWidget
     QString caption;
     QRect geometry;
 
+    /** Multipage frames: whether pages wrap around, the external controls
+     *  that turn them, and the named shortcuts. */
+    bool pagesLoop = false;
+    bool hasNextPageInput = false;
+    quint32 nextPageUniverse = 0;
+    quint32 nextPageChannel = 0;
+    bool hasPrevPageInput = false;
+    quint32 prevPageUniverse = 0;
+    quint32 prevPageChannel = 0;
+    QVector<QPair<int, QString>> pageShortcuts;
+
+    /** Cue list: what its side fader does ("None" | "Crossfade" | "Steps"). */
+    QString sideFaderMode;
+
+    /** XY pad presets: a recallable position, or a function to fire. */
+    struct PadPreset
+    {
+        int id = 0;
+        QString type;     //!< "Position" | "EFX" | "Scene" | "FixtureGroup"
+        QString name;
+        quint32 functionId = UINT_MAX;
+        double x = -1;    //!< normalised 0..1, -1 when the preset has none
+        double y = -1;
+    };
+    QVector<PadPreset> padPresets;
+
     /** Which page of a multipage frame this widget belongs to. Written only
      *  when non-zero; ignoring it draws every page superimposed. */
     int page = 0;
