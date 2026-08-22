@@ -18,12 +18,17 @@
 */
 
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QColor>
 #include <QSet>
 
 #include "docwriter.h"
 
 #include "rgbalgorithm.h"
+#include "rgbtext.h"
+#include "rgbimage.h"
+#include "grouphead.h"
+#include "qlcpoint.h"
 #include "efxfixture.h"
 #include "grouphead.h"
 #include "collection.h"
@@ -1861,6 +1866,62 @@ DocWriter::Result DocWriter::setEfx(Doc *doc, quint32 efxId, const QString &algo
     if (geometry.contains(QStringLiteral("relative")))
         efx->setIsRelative(geometry.value(QStringLiteral("relative")).toBool());
 
+    if (geometry.contains(QStringLiteral("propagation")))
+    {
+        const QString wanted = geometry.value(QStringLiteral("propagation")).toString();
+        const EFX::PropagationMode mode = EFX::stringToPropagationMode(wanted);
+        if (EFX::propagationModeToString(mode).compare(wanted, Qt::CaseInsensitive) != 0)
+            return Result::failure(
+                QStringLiteral("propagation must be Parallel, Serial or Asymmetric"));
+        efx->setPropagationMode(mode);
+    }
+
+    /* Per-head adjustments: the start offset around the pattern, the reversed
+       direction, the head's own mode (position, dimmer or RGB). This is what
+       turns eight moving heads into a wave instead of a block. */
+    if (geometry.contains(QStringLiteral("offsets")))
+    {
+        for (const QJsonValue &value : geometry.value(QStringLiteral("offsets")).toArray())
+        {
+            const QJsonObject asked = value.toObject();
+            const quint32 fixtureId = quint32(asked.value(QStringLiteral("fixture")).toInt(-1));
+            const int head = asked.value(QStringLiteral("head")).toInt(0);
+
+            EFXFixture *member = nullptr;
+            for (EFXFixture *candidate : efx->fixtures())
+            {
+                if (candidate->head().fxi == fixtureId && candidate->head().head == head)
+                    member = candidate;
+            }
+            if (member == nullptr)
+                return Result::failure(
+                    QStringLiteral("The EFX has no head %1 of fixture %2").arg(head).arg(fixtureId));
+
+            if (asked.contains(QStringLiteral("offset")))
+            {
+                const int offset = asked.value(QStringLiteral("offset")).toInt(-1);
+                if (offset < 0 || offset > 359)
+                    return Result::failure(QStringLiteral("offset must be 0..359"));
+                member->setStartOffset(offset);
+            }
+            if (asked.contains(QStringLiteral("reverse")))
+            {
+                member->setDirection(asked.value(QStringLiteral("reverse")).toBool()
+                                         ? Function::Backward
+                                         : Function::Forward);
+            }
+            if (asked.contains(QStringLiteral("mode")))
+            {
+                const QString wanted = asked.value(QStringLiteral("mode")).toString();
+                const EFXFixture::Mode mode = EFXFixture::stringToMode(wanted);
+                if (EFXFixture::modeToString(mode).compare(wanted, Qt::CaseInsensitive) != 0)
+                    return Result::failure(QStringLiteral(
+                        "A head's mode must be Position, Dimmer or RGB"));
+                member->setMode(mode);
+            }
+        }
+    }
+
     if (fixtureIds != nullptr)
     {
         for (quint32 id : *fixtureIds)
@@ -2158,6 +2219,292 @@ DocWriter::Result DocWriter::setStartupFunction(Doc *doc, qint64 id)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
 
     doc->setStartupFunction(id >= 0 ? quint32(id) : Function::invalidId());
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setRgbMatrixExtras(Doc *doc, quint32 matrixId,
+                                                const QJsonObject &body)
+{
+    Function *function = doc->function(matrixId);
+    if (function == nullptr || function->type() != Function::RGBMatrixType)
+        return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
+    RGBMatrix *matrix = qobject_cast<RGBMatrix *>(function);
+
+    if (body.contains(QStringLiteral("blendMode")))
+    {
+        /* stringToBlendMode answers Normal for anything it does not know, so
+           the name is checked against the round trip: a typo must refuse, not
+           quietly normalize. */
+        const QString wanted = body.value(QStringLiteral("blendMode")).toString();
+        const Universe::BlendMode mode = Universe::stringToBlendMode(wanted);
+        if (Universe::blendModeToString(mode).compare(wanted, Qt::CaseInsensitive) != 0)
+            return Result::failure(
+                QStringLiteral("blendMode must be Normal, Mask, Additive or Subtractive"));
+        matrix->setBlendMode(mode);
+    }
+
+    if (body.contains(QStringLiteral("controlMode")))
+    {
+        const QString wanted = body.value(QStringLiteral("controlMode")).toString();
+        const RGBMatrix::ControlMode mode = RGBMatrix::stringToControlMode(wanted);
+        if (RGBMatrix::controlModeToString(mode).compare(wanted, Qt::CaseInsensitive) != 0)
+            return Result::failure(QStringLiteral(
+                "controlMode must be RGB, White, Amber, UV, Dimmer or Shutter"));
+        matrix->setControlMode(mode);
+    }
+
+    RGBAlgorithm *algorithm = matrix->algorithm();
+
+    if (body.contains(QStringLiteral("text")))
+    {
+        if (algorithm == nullptr || algorithm->type() != RGBAlgorithm::Text)
+            return Result::failure(
+                QStringLiteral("\"text\" belongs to the Text algorithm; this matrix runs %1")
+                    .arg(algorithm != nullptr ? algorithm->name() : QStringLiteral("nothing")));
+        RGBText *text = static_cast<RGBText *>(algorithm);
+
+        const QJsonObject asked = body.value(QStringLiteral("text")).toObject();
+        if (asked.contains(QStringLiteral("content")))
+            text->setText(asked.value(QStringLiteral("content")).toString());
+        if (asked.contains(QStringLiteral("font")))
+        {
+            QFont font = text->font();
+            font.fromString(asked.value(QStringLiteral("font")).toString());
+            text->setFont(font);
+        }
+        if (asked.contains(QStringLiteral("animation")))
+        {
+            const QString wanted = asked.value(QStringLiteral("animation")).toString();
+            if (RGBText::animationStyles().contains(wanted) == false)
+                return Result::failure(QStringLiteral("Text animation must be one of: %1")
+                                           .arg(RGBText::animationStyles().join(", ")));
+            text->setAnimationStyle(RGBText::stringToAnimationStyle(wanted));
+        }
+    }
+
+    if (body.contains(QStringLiteral("image")))
+    {
+        if (algorithm == nullptr || algorithm->type() != RGBAlgorithm::Image)
+            return Result::failure(
+                QStringLiteral("\"image\" belongs to the Image algorithm; this matrix runs %1")
+                    .arg(algorithm != nullptr ? algorithm->name() : QStringLiteral("nothing")));
+        RGBImage *image = static_cast<RGBImage *>(algorithm);
+
+        const QJsonObject asked = body.value(QStringLiteral("image")).toObject();
+        if (asked.contains(QStringLiteral("file")))
+        {
+            const QString file = asked.value(QStringLiteral("file")).toString();
+            if (QFileInfo::exists(file) == false)
+                return Result::failure(QStringLiteral("No file at %1").arg(file));
+            image->setFilename(file);
+        }
+        if (asked.contains(QStringLiteral("animation")))
+        {
+            const QString wanted = asked.value(QStringLiteral("animation")).toString();
+            if (RGBImage::animationStyles().contains(wanted) == false)
+                return Result::failure(QStringLiteral("Image animation must be one of: %1")
+                                           .arg(RGBImage::animationStyles().join(", ")));
+            image->setAnimationStyle(RGBImage::stringToAnimationStyle(wanted));
+        }
+    }
+
+    if (body.contains(QStringLiteral("properties")))
+    {
+        if (algorithm == nullptr || algorithm->type() != RGBAlgorithm::Script)
+            return Result::failure(QStringLiteral(
+                "\"properties\" belong to script algorithms; this matrix runs %1")
+                    .arg(algorithm != nullptr ? algorithm->name() : QStringLiteral("nothing")));
+
+        const QJsonObject asked = body.value(QStringLiteral("properties")).toObject();
+        for (auto it = asked.constBegin(); it != asked.constEnd(); ++it)
+        {
+            /* Through the MATRIX, not the script instance: RGBMatrix keeps its
+               own property map and reapplies it, so a value set on the bare
+               script would be forgotten on the next load. */
+            matrix->setProperty(it.key(), it.value().toString());
+        }
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::bakeMatrixToSequence(Doc *doc, quint32 matrixId, quint32 &sceneId,
+                                                  quint32 &sequenceId)
+{
+    Function *function = doc->function(matrixId);
+    if (function == nullptr || function->type() != Function::RGBMatrixType)
+        return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
+    RGBMatrix *matrix = qobject_cast<RGBMatrix *>(function);
+
+    FixtureGroup *group = doc->fixtureGroup(matrix->fixtureGroup());
+    if (group == nullptr)
+        return Result::failure(QStringLiteral("The matrix has no fixture group to bake"));
+    if (matrix->algorithm() == nullptr)
+        return Result::failure(QStringLiteral("The matrix has no algorithm to bake"));
+    if (matrix->isRunning())
+        return Result::failure(QStringLiteral("Stop the matrix before baking it"));
+
+    const RGBMatrix::ControlMode mode = matrix->controlMode();
+
+    /* The channel one head contributes under the current control mode; the
+       reference's per-mode ladder, shared by the scene skeleton and the
+       steps. */
+    const auto headChannels = [doc, mode](const GroupHead &head) {
+        QVector<QPair<quint32, quint32>> out; // (fixture, channel)
+        Fixture *fixture = doc->fixture(head.fxi);
+        if (fixture == nullptr)
+            return out;
+
+        if (mode == RGBMatrix::ControlModeRgb)
+        {
+            QVector<quint32> rgb = fixture->rgbChannels(head.head);
+            if (rgb.count() == 0)
+                rgb = fixture->cmyChannels(head.head);
+            for (quint32 channel : rgb)
+                out.append(qMakePair(head.fxi, channel));
+            return out;
+        }
+
+        quint32 channel = QLCChannel::invalid();
+        if (mode == RGBMatrix::ControlModeDimmer)
+        {
+            channel = fixture->masterIntensityChannel();
+            if (channel == QLCChannel::invalid())
+                channel = fixture->channelNumber(QLCChannel::Intensity, QLCChannel::MSB,
+                                                 head.head);
+        }
+        else if (mode == RGBMatrix::ControlModeWhite)
+            channel = fixture->channelNumber(QLCChannel::White, QLCChannel::MSB, head.head);
+        else if (mode == RGBMatrix::ControlModeAmber)
+            channel = fixture->channelNumber(QLCChannel::Amber, QLCChannel::MSB, head.head);
+        else if (mode == RGBMatrix::ControlModeUV)
+            channel = fixture->channelNumber(QLCChannel::UV, QLCChannel::MSB, head.head);
+        else if (mode == RGBMatrix::ControlModeShutter)
+        {
+            const QVector<quint32> shutters = fixture->head(head.head).shutterChannels();
+            if (shutters.count())
+                channel = shutters.first();
+        }
+
+        if (channel != QLCChannel::invalid())
+            out.append(qMakePair(head.fxi, channel));
+        return out;
+    };
+
+    /* The bound scene: every channel the group can move, at zero. Hidden,
+       like the reference makes it -- it exists to give the sequence words. */
+    Scene *scene = new Scene(doc);
+    scene->setName(group->name());
+    scene->setVisible(false);
+    for (const GroupHead &head : group->headList())
+    {
+        for (const auto &pair : headChannels(head))
+            scene->setValue(pair.first, pair.second, 0);
+    }
+    doc->addFunction(scene);
+
+    int totalSteps = matrix->stepsCount();
+    int currentStep = 0;
+    int increment = 1;
+
+    RGBMatrixStep handler;
+    handler.setStepColor(matrix->getColor(0));
+    if (matrix->direction() == Function::Backward)
+    {
+        currentStep = totalSteps - 1;
+        increment = -1;
+        if (matrix->getColor(1).isValid())
+            handler.setStepColor(matrix->getColor(1));
+    }
+    handler.calculateColorDelta(matrix->getColor(0), matrix->getColor(1), matrix->algorithm());
+
+    if (matrix->runOrder() == Function::PingPong)
+        totalSteps = (totalSteps * 2) - 1;
+
+    Sequence *sequence = new Sequence(doc);
+    sequence->setName(QStringLiteral("%1 Sequence").arg(matrix->name()));
+    sequence->setBoundSceneID(scene->id());
+    sequence->setDurationMode(Chaser::PerStep);
+    sequence->setDuration(matrix->duration());
+    if (matrix->fadeInSpeed() != 0)
+    {
+        sequence->setFadeInMode(Chaser::PerStep);
+        sequence->setFadeInSpeed(matrix->fadeInSpeed());
+    }
+    if (matrix->fadeOutSpeed() != 0)
+    {
+        sequence->setFadeOutMode(Chaser::PerStep);
+        sequence->setFadeOutSpeed(matrix->fadeOutSpeed());
+    }
+
+    for (int i = 0; i < totalSteps; i++)
+    {
+        matrix->previewMap(currentStep, &handler);
+
+        ChaserStep step;
+        step.fid = scene->id();
+        step.hold = matrix->duration() - matrix->fadeInSpeed();
+        step.duration = matrix->duration();
+        step.fadeIn = matrix->fadeInSpeed();
+        step.fadeOut = matrix->fadeOutSpeed();
+
+        for (int y = 0; y < handler.m_map.size(); y++)
+        {
+            for (int x = 0; x < handler.m_map[y].size(); x++)
+            {
+                const uint colour = handler.m_map[y][x];
+                const GroupHead head = group->head(QLCPoint(x, y));
+                Fixture *fixture = doc->fixture(head.fxi);
+                if (fixture == nullptr)
+                    continue;
+
+                const QVector<QPair<quint32, quint32>> channels = headChannels(head);
+                if (mode == RGBMatrix::ControlModeRgb && channels.count() == 3)
+                {
+                    /* CMY heads bake the same three slots with the colour's
+                       own CMY reading, exactly like the reference. */
+                    const bool cmy = fixture->rgbChannels(head.head).count() == 0;
+                    const QColor asColour(colour);
+                    step.values.append(SceneValue(head.fxi, channels.at(0).second,
+                                                  cmy ? asColour.cyan() : qRed(colour)));
+                    step.values.append(SceneValue(head.fxi, channels.at(1).second,
+                                                  cmy ? asColour.magenta() : qGreen(colour)));
+                    step.values.append(SceneValue(head.fxi, channels.at(2).second,
+                                                  cmy ? asColour.yellow() : qBlue(colour)));
+                }
+                else if (mode != RGBMatrix::ControlModeRgb && channels.count() == 1)
+                {
+                    step.values.append(SceneValue(head.fxi, channels.first().second,
+                                                  RGBMatrix::rgbToGrey(colour)));
+                }
+            }
+        }
+
+        /* The reference's own warning: heads may sit anywhere in the grid,
+           and a sequence needs its values ordered. */
+        std::sort(step.values.begin(), step.values.end());
+
+        sequence->addStep(step);
+        currentStep += increment;
+        if (currentStep == totalSteps)
+        {
+            if (matrix->runOrder() == Function::PingPong)
+            {
+                currentStep = totalSteps - 2;
+                increment = -1;
+            }
+            else
+                currentStep = 0;
+        }
+        handler.updateStepColor(currentStep, matrix->getColor(0), matrix->stepsCount());
+    }
+
+    doc->addFunction(sequence);
+
+    sceneId = scene->id();
+    sequenceId = sequence->id();
     doc->setModified();
     return Result::success();
 }

@@ -49,13 +49,41 @@ export interface FunctionBody {
   algorithm?: string
   geometry?: { width: number; height: number; xOffset: number; yOffset: number; rotation: number }
   fixtures?: number[]
-  heads?: { fixture: number; head: number; name: string }[]
+  heads?: {
+    fixture: number
+    head: number
+    name: string
+    offset?: number
+    reverse?: boolean
+    mode?: string
+  }[]
 
   /* RGB matrix: the group it runs across and the colours it accepts. */
   fixtureGroup?: number
   groupName?: string
   colors?: string[]
   acceptsColors?: number
+  blendMode?: string
+  controlMode?: string
+  /** Text algorithm settings, present only while the matrix runs Text. */
+  text?: { content: string; font: string; animation: string }
+  /** Image algorithm settings, present only while the matrix runs Image. */
+  image?: { file: string; animation: string }
+  /** Animation styles the current text/image algorithm offers. */
+  animations?: string[]
+  /** A script algorithm's own knobs, values included. */
+  properties?: {
+    name: string
+    label: string
+    type: string
+    value: string
+    values?: string[]
+    min?: number
+    max?: number
+  }[]
+
+  /* EFX extras */
+  propagation?: string
 
   data?: string // Script: the program
   source?: string // Audio and Video: the file or URL
@@ -455,6 +483,16 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values }),
+    }),
+  bakeMatrix: (id: number) =>
+    json<{ scene: number; sequence: number }>(`/api/v1/functions/${id}/bake`, {
+      method: 'POST',
+    }),
+  /** Raw-body upload; the daemon drops it next to the projects. */
+  uploadAsset: async (file: File) =>
+    json<{ path: string; size: number }>(`/api/v1/assets?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      body: file,
     }),
   cloneFunction: (id: number) =>
     json<{ id: number }>(`/api/v1/functions/${id}/clone`, { method: 'POST' }),

@@ -30,6 +30,14 @@
 #include "fixture.h"
 #include "qlcchannel.h"
 #include "rgbalgorithm.h"
+#include "rgbtext.h"
+#include "rgbimage.h"
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+  #include "rgbscriptv4.h"
+#else
+  #include "rgbscript.h"
+#endif
+#include "rgbscriptproperty.h"
 #include "fixturegroup.h"
 #include "channelsgroup.h"
 #include "collection.h"
@@ -314,7 +322,13 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
         geometry["xOffset"] = efx->xOffset();
         geometry["yOffset"] = efx->yOffset();
         geometry["rotation"] = efx->rotation();
+        geometry["startOffset"] = efx->startOffset();
+        geometry["xFrequency"] = efx->xFrequency();
+        geometry["yFrequency"] = efx->yFrequency();
+        geometry["xPhase"] = efx->xPhase();
+        geometry["yPhase"] = efx->yPhase();
         json["geometry"] = geometry;
+        json["propagation"] = EFX::propagationModeToString(efx->propagationMode());
 
         /* Twice over, on purpose: "fixtures" is exactly what PUT takes back,
            and "heads" is the same thing with names on it. An EFX listing
@@ -328,6 +342,9 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
             QJsonObject entry;
             entry["fixture"] = qint64(member->head().fxi);
             entry["head"] = member->head().head;
+            entry["offset"] = member->startOffset();
+            entry["reverse"] = member->direction() == Function::Backward;
+            entry["mode"] = EFXFixture::modeToString(member->mode());
 
             const Fixture *fixture = doc->fixture(member->head().fxi);
             entry["name"] = fixture != nullptr ? fixture->name()
@@ -366,6 +383,65 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
            field and send it straight back. */
         json["colors"] = colors;
         json["acceptsColors"] = accepted;
+        json["blendMode"] = Universe::blendModeToString(matrix->blendMode());
+        json["controlMode"] = RGBMatrix::controlModeToString(matrix->controlMode());
+
+        if (algorithm != nullptr && algorithm->type() == RGBAlgorithm::Text)
+        {
+            const RGBText *text = static_cast<const RGBText *>(algorithm);
+            QJsonObject entry;
+            entry["content"] = text->text();
+            entry["font"] = text->font().toString();
+            entry["animation"] = RGBText::animationStyleToString(text->animationStyle());
+            json["text"] = entry;
+            json["animations"] = QJsonArray::fromStringList(RGBText::animationStyles());
+        }
+        else if (algorithm != nullptr && algorithm->type() == RGBAlgorithm::Image)
+        {
+            const RGBImage *image = static_cast<const RGBImage *>(algorithm);
+            QJsonObject entry;
+            entry["file"] = image->filename();
+            entry["animation"] = RGBImage::animationStyleToString(image->animationStyle());
+            json["image"] = entry;
+            json["animations"] = QJsonArray::fromStringList(RGBImage::animationStyles());
+        }
+        else if (algorithm != nullptr && algorithm->type() == RGBAlgorithm::Script)
+        {
+            /* The script's own knobs, values read through the MATRIX (which
+               owns the applied set), shapes from the property declarations. */
+            RGBScript *script =
+                const_cast<RGBScript *>(static_cast<const RGBScript *>(algorithm));
+            QJsonArray properties;
+            for (const RGBScriptProperty &property : script->properties())
+            {
+                QJsonObject entry;
+                entry["name"] = property.m_name;
+                entry["label"] = property.m_displayName;
+                switch (property.m_type)
+                {
+                case RGBScriptProperty::List:
+                    entry["type"] = QStringLiteral("list");
+                    entry["values"] = QJsonArray::fromStringList(property.m_listValues);
+                    break;
+                case RGBScriptProperty::Range:
+                    entry["type"] = QStringLiteral("range");
+                    entry["min"] = property.m_rangeMinValue;
+                    entry["max"] = property.m_rangeMaxValue;
+                    break;
+                case RGBScriptProperty::Float:
+                    entry["type"] = QStringLiteral("float");
+                    break;
+                default:
+                    entry["type"] = QStringLiteral("string");
+                    break;
+                }
+                /* Non-const in the engine only because it may lazily ask the
+                   script; reading through const_cast is safe here. */
+                entry["value"] = const_cast<RGBMatrix *>(matrix)->property(property.m_name);
+                properties.append(entry);
+            }
+            json["properties"] = properties;
+        }
         return json;
     }
 

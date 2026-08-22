@@ -255,6 +255,22 @@ namespace DocWriter
      * `instant` recomputes the colour ramp straight away rather than at the
      * next cycle, which is what the widget's InstantApply flag asks for.
      */
+    /**
+     * The rest of a matrix's body: blend mode, control channel, the Text and
+     * Image algorithms' own settings, an RGB script's dynamic properties.
+     * Only what the object names is touched.
+     */
+    Result setRgbMatrixExtras(Doc *doc, quint32 matrixId, const QJsonObject &body);
+
+    /**
+     * Bake a matrix into a Scene + Sequence pair, the way QLC+ 5's
+     * "save to sequence" does (qmlui/rgbmatrixeditor.cpp): one sequence step
+     * per algorithm step, values mapped through the group's heads and the
+     * matrix's control mode.
+     */
+    Result bakeMatrixToSequence(Doc *doc, quint32 matrixId, quint32 &sceneId,
+                                quint32 &sequenceId);
+
     Result applyMatrixPreset(Doc *doc, quint32 matrixId, const QString &type,
                              const QString &color, const QString &resource,
                              const QList<QPair<QString, QString>> &properties,

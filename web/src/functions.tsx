@@ -661,14 +661,115 @@ function EfxBody({
         ))}
       </div>
 
+      <label className="field">
+        <span>Propagación</span>
+        <select
+          value={body.propagation ?? 'Parallel'}
+          onChange={(e) => onApply(() => api.setBody(fn.id, { propagation: e.target.value }))}
+        >
+          <option value="Parallel">Paralela (todas a la vez)</option>
+          <option value="Serial">Serie (una tras otra)</option>
+          <option value="Asymmetric">Asimétrica</option>
+        </select>
+      </label>
+
       <div className="field">
         <span>Cabezas ({heads.length})</span>
         {heads.length === 0 && <p className="hint">Este EFX no mueve ninguna cabeza.</p>}
 
+        {heads.length > 1 && (
+          <div className="fields">
+            {/* Mass offsets: the wave in one press. Spread walks the circle
+                in equal strides; random deals it. Either way the daemon gets
+                the RESULT, so the file keeps what the operator saw. */}
+            <button
+              type="button"
+              onClick={() =>
+                onApply(() =>
+                  api.setBody(fn.id, {
+                    offsets: heads.map((head, index) => ({
+                      fixture: head.fixture,
+                      head: head.head,
+                      offset: Math.round((index * 360) / heads.length) % 360,
+                    })),
+                  }),
+                )
+              }
+            >
+              Repartir offsets
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                onApply(() =>
+                  api.setBody(fn.id, {
+                    offsets: heads.map((head) => ({
+                      fixture: head.fixture,
+                      head: head.head,
+                      offset: Math.floor(Math.random() * 360),
+                    })),
+                  }),
+                )
+              }
+            >
+              Offsets aleatorios
+            </button>
+          </div>
+        )}
+
         <ul className="channels">
           {heads.map((head) => (
             <li key={`${head.fixture}-${head.head}`}>
-              <span>{head.name}</span>
+              <span className="grow">{head.name}</span>
+              <input
+                type="number"
+                min={0}
+                max={359}
+                className="step-time num"
+                title="Offset (grados)"
+                aria-label={`Offset de ${head.name}`}
+                defaultValue={head.offset ?? 0}
+                onBlur={(e) => {
+                  const offset = Number(e.target.value)
+                  if (offset !== (head.offset ?? 0))
+                    onApply(() =>
+                      api.setBody(fn.id, {
+                        offsets: [{ fixture: head.fixture, head: head.head, offset }],
+                      }),
+                    )
+                }}
+              />
+              <label className="field row-field">
+                <input
+                  type="checkbox"
+                  checked={head.reverse ?? false}
+                  onChange={(e) =>
+                    onApply(() =>
+                      api.setBody(fn.id, {
+                        offsets: [
+                          { fixture: head.fixture, head: head.head, reverse: e.target.checked },
+                        ],
+                      }),
+                    )
+                  }
+                />
+                <span>inversa</span>
+              </label>
+              <select
+                value={head.mode ?? 'Position'}
+                aria-label={`Modo de ${head.name}`}
+                onChange={(e) =>
+                  onApply(() =>
+                    api.setBody(fn.id, {
+                      offsets: [{ fixture: head.fixture, head: head.head, mode: e.target.value }],
+                    }),
+                  )
+                }
+              >
+                <option value="Position">Posición</option>
+                <option value="Dimmer">Dimmer</option>
+                <option value="RGB">RGB</option>
+              </select>
               <button
                 type="button"
                 aria-label={`Quitar ${head.name}`}
@@ -792,6 +893,147 @@ function MatrixBody({
                 }}
               />
             </label>
+          ))}
+        </div>
+      )}
+
+      <div className="fields">
+        <label className="field">
+          <span>Mezcla</span>
+          <select
+            value={body.blendMode ?? 'Normal'}
+            onChange={(e) => onApply(() => api.setBody(fn.id, { blendMode: e.target.value }))}
+          >
+            <option value="Normal">Normal</option>
+            <option value="Mask">Máscara</option>
+            <option value="Additive">Aditiva</option>
+            <option value="Subtractive">Sustractiva</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Controla</span>
+          <select
+            value={body.controlMode ?? 'RGB'}
+            onChange={(e) => onApply(() => api.setBody(fn.id, { controlMode: e.target.value }))}
+          >
+            <option value="RGB">Color (RGB)</option>
+            <option value="White">Blanco</option>
+            <option value="Amber">Ámbar</option>
+            <option value="UV">UV</option>
+            <option value="Dimmer">Dimmer</option>
+            <option value="Shutter">Shutter</option>
+          </select>
+        </label>
+        <span className="spacer" />
+        <button
+          type="button"
+          title="Congela la matriz en una escena + secuencia con los píxeles pintados"
+          onClick={() => onApply(() => api.bakeMatrix(fn.id))}
+        >
+          Congelar en secuencia
+        </button>
+      </div>
+
+      {body.text !== undefined && (
+        <div className="fields">
+          <label className="field grow-field">
+            <span>Texto</span>
+            <input
+              defaultValue={body.text.content}
+              onBlur={(e) =>
+                onApply(() => api.setBody(fn.id, { text: { content: e.target.value } }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Animación</span>
+            <select
+              value={body.text.animation}
+              onChange={(e) =>
+                onApply(() => api.setBody(fn.id, { text: { animation: e.target.value } }))
+              }
+            >
+              {(body.animations ?? []).map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {body.image !== undefined && (
+        <div className="fields">
+          <label className="field grow-field">
+            <span>Imagen {body.image.file === '' ? '(ninguna)' : `· ${body.image.file}`}</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/bmp,image/webp"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file === undefined) return
+                onApply(async () => {
+                  const uploaded = await api.uploadAsset(file)
+                  await api.setBody(fn.id, { image: { file: uploaded.path } })
+                })
+              }}
+            />
+          </label>
+          <label className="field">
+            <span>Animación</span>
+            <select
+              value={body.image.animation}
+              onChange={(e) =>
+                onApply(() => api.setBody(fn.id, { image: { animation: e.target.value } }))
+              }
+            >
+              {(body.animations ?? []).map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
+      {(body.properties ?? []).length > 0 && (
+        <div className="fields">
+          {(body.properties ?? []).map((property) => (
+            <div className="field" key={property.name}>
+              <span>{property.label || property.name}</span>
+              {property.type === 'list' ? (
+                <select
+                  value={property.value}
+                  aria-label={property.label || property.name}
+                  onChange={(e) =>
+                    onApply(() =>
+                      api.setBody(fn.id, { properties: { [property.name]: e.target.value } }),
+                    )
+                  }
+                >
+                  {(property.values ?? []).map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={property.type === 'range' ? 'number' : 'text'}
+                  aria-label={property.label || property.name}
+                  min={property.min}
+                  max={property.max}
+                  defaultValue={property.value}
+                  onBlur={(e) =>
+                    onApply(() =>
+                      api.setBody(fn.id, { properties: { [property.name]: e.target.value } }),
+                    )
+                  }
+                />
+              )}
+            </div>
           ))}
         </div>
       )}

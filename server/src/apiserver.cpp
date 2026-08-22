@@ -1153,6 +1153,31 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response, StatusCode::Created);
     });
 
+    /* Bake: the matrix frozen into a Scene + Sequence pair, exactly like
+       QLC+ 5's "save to sequence". The matrix itself is untouched. */
+    m_server->route("/api/v1/functions/<arg>/bake", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        quint32 sceneId = Function::invalidId();
+        quint32 sequenceId = Function::invalidId();
+        const DocWriter::Result result =
+            DocWriter::bakeMatrixToSequence(doc, id, sceneId, sequenceId);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["scene"] = qint64(sceneId);
+        response["sequence"] = qint64(sequenceId);
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
     /* Who uses this function. Deleting one that a chaser steps through, a
        collection carries, a show schedules or a button fires is exactly the
        moment this list earns its place. */
@@ -1330,6 +1355,8 @@ void ApiServer::registerRoutes()
 
             result = DocWriter::setRgbMatrix(doc, id, body.value("fixtureGroup").toInt(-1),
                                              body.value("algorithm").toString(), colours);
+            if (result.ok)
+                result = DocWriter::setRgbMatrixExtras(doc, id, body);
             break;
         }
         case Function::ScriptType:
@@ -2527,6 +2554,53 @@ void ApiServer::registerRoutes()
             ? qint64(-1)
             : qint64(doc->startupFunction());
         return QHttpServerResponse(body);
+    });
+
+    /* Media for the matrices: an image or GIF, dropped next to the projects
+       so the show travels with its pictures. The name is a bare file name --
+       no directories, no dot-dot -- and only image types QImage can read. */
+    m_server->route("/api/v1/assets", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QUrlQuery query(request.url());
+        const QString name = QFileInfo(query.queryItemValue(QStringLiteral("name"))).fileName();
+        if (name.isEmpty())
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Give the file a name: POST /assets?name=logo.png"));
+
+        static const QStringList allowed{QStringLiteral("png"), QStringLiteral("jpg"),
+                                         QStringLiteral("jpeg"), QStringLiteral("gif"),
+                                         QStringLiteral("bmp"), QStringLiteral("webp")};
+        if (allowed.contains(QFileInfo(name).suffix().toLower()) == false)
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Only image files: %1").arg(allowed.join(", ")));
+
+        const QByteArray data = request.body();
+        if (data.isEmpty())
+            return jsonError(StatusCode::BadRequest, QStringLiteral("The body is the file"));
+        if (data.size() > 20 * 1024 * 1024)
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("20 MB is the cap for an asset"));
+
+        QDir assets(m_engine->projectsDirectory() + QStringLiteral("/assets"));
+        if (assets.exists() == false && assets.mkpath(QStringLiteral(".")) == false)
+            return jsonError(StatusCode::InternalServerError,
+                             QStringLiteral("Could not create the assets directory"));
+
+        const QString path = assets.filePath(name);
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly) == false)
+            return jsonError(StatusCode::InternalServerError,
+                             QStringLiteral("Could not write %1").arg(path));
+        file.write(data);
+        file.close();
+
+        QJsonObject response;
+        response["path"] = path;
+        response["size"] = qint64(data.size());
+        return QHttpServerResponse(response, StatusCode::Created);
     });
 
     m_server->route("/api/v1/projects", QHttpServerRequest::Method::Get, [this, denied](const QHttpServerRequest &request) {

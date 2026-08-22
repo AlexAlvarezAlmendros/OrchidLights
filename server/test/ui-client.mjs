@@ -2425,10 +2425,140 @@ try {
 
       return 'ok'
     } finally {
+      document.querySelector('article.card header button[aria-label="Cerrar"]')?.click()
+      await wait(300)
+      /* Leave the view as found: a filter left behind empties the list for
+         whoever comes next. */
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      if (searchBox) {
+        const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setInput.call(searchBox, '')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+      }
       await cleanup()
     }
   })()`)
   check('the organizer and the chaser editor act for real', organizer === 'ok', organizer)
+
+  /* The matrix and EFX editors' new controls, checked against the daemon:
+     the blend select, the bake button, the mass-offset spreader. Rig of its
+     own, removed whole. */
+  const matrixUi = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const post = async (path, body) => (await (await fetch('/api/v1' + path, {
+      method: 'POST', headers: json, body: JSON.stringify(body) })).json())
+
+    const before = new Set((await (await fetch('/api/v1/fixtures')).json()).map(f => f.id))
+    await post('/fixtures', { manufacturer: 'Generic', model: 'Generic RGBW', mode: 'RGBW', universe: 1, address: 400 })
+    await post('/fixtures', { manufacturer: 'Generic', model: 'Generic RGBW', mode: 'RGBW', universe: 1, address: 405 })
+    const mine = (await (await fetch('/api/v1/fixtures')).json())
+      .filter(f => !before.has(f.id)).map(f => f.id)
+    const group = (await post('/fixture-groups', { name: 'PanelF11', fixtures: mine })).id
+    const matrix = (await post('/functions', { type: 'RGBMatrix', name: 'LienzoF11' })).id
+    await fetch('/api/v1/functions/' + matrix + '/body', { method: 'PUT', headers: json,
+      body: JSON.stringify({ fixtureGroup: group, algorithm: 'Plain Color', colors: ['#ff0000'] }) })
+    const efx = (await post('/functions', { type: 'EFX', name: 'OndaF11' })).id
+    await fetch('/api/v1/functions/' + efx + '/body', { method: 'PUT', headers: json,
+      body: JSON.stringify({ fixtures: mine }) })
+
+    const cleanup = async () => {
+      for (const id of [matrix, efx]) {
+        await fetch('/api/v1/functions/' + id + '?force=true', { method: 'DELETE' })
+      }
+      await fetch('/api/v1/fixture-groups/' + group, { method: 'DELETE' })
+      for (const id of mine) await fetch('/api/v1/fixtures/' + id, { method: 'DELETE' })
+    }
+
+    try {
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Funciones')?.click()
+      await wait(900)
+
+      /* A leftover filter from any earlier chapter empties the list. */
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      if (searchBox && searchBox.value !== '') {
+        const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setInput.call(searchBox, '')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+        await wait(400)
+      }
+
+      const openEditor = async (name) => {
+        /* Retried: a functions broadcast re-renders the list, and a click on
+           a node React just replaced lands on nothing. */
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const row = [...document.querySelectorAll('.table-row')]
+            .find(r => r.querySelector('button.linkish')?.textContent === name)
+          row?.querySelector('button.linkish')?.click()
+          await wait(800)
+          const card = [...document.querySelectorAll('article.card')]
+            .find(c => c.querySelector('header strong')?.textContent === name)
+          if (card) return card
+        }
+        return undefined
+      }
+
+      const editor = await openEditor('LienzoF11')
+      if (!editor) return 'the matrix editor never opened'
+
+      const blend = [...editor.querySelectorAll('label.field')]
+        .find(l => l.querySelector('span')?.textContent === 'Mezcla')?.querySelector('select')
+      if (!blend) return 'no blend select'
+      const setSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setSelect.call(blend, 'Mask')
+      blend.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(700)
+      let shape = await (await fetch('/api/v1/functions/' + matrix + '/body')).json()
+      if (shape.blendMode !== 'Mask') return 'the blend never landed: ' + shape.blendMode
+
+      const beforeBake = (await (await fetch('/api/v1/functions')).json()).length
+      ;[...editor.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Congelar en secuencia')?.click()
+      await wait(1000)
+      const afterBake = (await (await fetch('/api/v1/functions')).json())
+      if (afterBake.length !== beforeBake + 2) {
+        return 'the bake made ' + (afterBake.length - beforeBake) + ' functions, wanted 2'
+      }
+      /* Sequence before scene: deleting the bound scene first cascades and
+         the second delete answers 404 into the console-error net. */
+      for (const made of afterBake.slice(-2).reverse()) {
+        await fetch('/api/v1/functions/' + made.id + '?force=true', { method: 'DELETE' })
+      }
+
+      const efxEditor = await openEditor('OndaF11')
+      if (!efxEditor) {
+        return 'the EFX editor never opened: ' + JSON.stringify({
+          rows: [...document.querySelectorAll('.table-row')]
+            .map(r => r.querySelector('button.linkish')?.textContent).slice(0, 12),
+          cards: [...document.querySelectorAll('article.card')]
+            .map(c => c.querySelector('header strong')?.textContent),
+          search: [...document.querySelectorAll('input')]
+            .find(i => i.placeholder === 'Nombre de función')?.value ?? '(no box)',
+          apiCount: (await (await fetch('/api/v1/functions')).json()).length,
+          hint: document.querySelector('.setup .hint')?.textContent?.slice(0, 60) ?? null,
+        })
+      }
+      ;[...efxEditor.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Repartir offsets')?.click()
+      await wait(800)
+      shape = await (await fetch('/api/v1/functions/' + efx + '/body')).json()
+      const offsets = (shape.heads ?? []).map(h => h.offset)
+      if (offsets.join(',') !== '0,180') return 'the spread never landed: ' + offsets.join(',')
+
+      return 'ok'
+    } finally {
+      /* Close the editor first: one left open refetches the body of the
+         function the cleanup just deleted, and the 404 lands in the
+         console-error net. */
+      document.querySelector('article.card header button[aria-label="Cerrar"]')?.click()
+      await wait(300)
+      await cleanup()
+    }
+  })()`)
+  check('the matrix and EFX editors act for real', matrixUi === 'ok', matrixUi)
 
   /* The desktop shell's close question, answered by the page.
    *
