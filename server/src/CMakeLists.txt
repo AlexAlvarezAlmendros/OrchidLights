@@ -10,6 +10,7 @@ add_executable(${module_name}
     apiserver.cpp apiserver.h
     consolelayout.cpp consolelayout.h
     docwriter.cpp docwriter.h
+    projectimport.cpp projectimport.h
     enginehost.cpp enginehost.h
     fixturelibrary.cpp fixturelibrary.h
     installpaths.cpp installpaths.h

@@ -210,6 +210,15 @@ export interface PlanHeadItem {
   invertTilt?: boolean
 }
 
+export interface PlanLinkedItem {
+  linked: number
+  head: number
+  name: string
+  x: number
+  y: number
+  rotation: number
+}
+
 export interface PlanFixture {
   id: number
   name: string
@@ -231,6 +240,8 @@ export interface PlanFixture {
   heads?: number
   /** Heads beyond the fixture's own that carry their own plan item. */
   headItems?: PlanHeadItem[]
+  /** The same lamp drawn again: plan-only copies over the same patch. */
+  linkedItems?: PlanLinkedItem[]
   /** Offsets from the fixture's address, so the interface can read them against
    *  the DMX frames it already receives. */
   roles: {
@@ -751,7 +762,8 @@ export const api = {
   setPlanPosition: (
     id: number,
     position: {
-      head?: number
+      head?: number | undefined
+      linked?: number | undefined
       x?: number
       y?: number
       rotation?: number
@@ -881,6 +893,83 @@ export const api = {
   /** Same definition, same mode, first hole in the universe that fits. */
   cloneFixture: (id: number, body: { quantity?: number; gap?: number } = {}) =>
     json<{ created: number[] }>(`/api/v1/fixtures/${id}/clone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /** One fixture per row, a group wired snake or zigzag: the panel wizard. */
+  addRgbPanel: (body: {
+    name: string
+    universe: number
+    address: number
+    rows: number
+    columns: number
+    components?: string
+    direction?: string
+    startCorner?: string
+    displacement?: string
+  }) =>
+    json<{ group: number; created: number[] }>('/api/v1/fixtures/rgbpanel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /** Swap the model, carry the show across: scenes, EFX, groups and the
+   *  console's sliders follow, channels matched semantically. */
+  remapFixture: (
+    id: number,
+    body: {
+      manufacturer: string
+      model: string
+      mode: string
+      name?: string
+      universe?: number
+      address?: number
+    },
+  ) =>
+    json<{ id: number; channelsCarried: number; slidersTouched: number; fixture: FixtureState }>(
+      `/api/v1/fixtures/${id}/remap`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    ),
+  addLinkedFixture: (id: number, body: { head?: number; name?: string; x?: number; y?: number }) =>
+    json<{ id: number; linked: number }>(`/api/v1/plan/fixtures/${id}/linked`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  removeLinkedFixture: (id: number, linked: number, head = 0) =>
+    json<unknown>(`/api/v1/plan/fixtures/${id}/linked/${linked}?head=${head}`, {
+      method: 'DELETE',
+    }),
+  /** What another .qxw offers, so somebody can choose. Token: a disk path. */
+  importPreview: (path: string) =>
+    json<{
+      fixtures: { id: number; name: string; universe: number; address: number; channels: number }[]
+      functions: { id: number; name: string; type: string }[]
+      groups: number
+      palettes: number
+    }>('/api/v1/project/import/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    }),
+  importProject: (body: {
+    path: string
+    fixtures?: 'all' | number[]
+    functions?: 'all' | number[]
+  }) =>
+    json<{
+      fixturesCreated: number
+      fixturesReused: number
+      groupsCreated: number
+      palettesCreated: number
+      functionsCreated: number
+      skipped?: string[]
+    }>('/api/v1/project/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

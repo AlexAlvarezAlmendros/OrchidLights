@@ -13,8 +13,8 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const url = process.argv[2]
@@ -3230,6 +3230,188 @@ try {
   })()`)
   check('the patch works at rig scale: duplicate, universe view, DIP, summary, grid',
     patchScale === 'ok', patchScale)
+
+  /* F15b through the screen: the panel wizard builds from the form, the
+     remap swaps a model from the row, the import dialog reads another file,
+     and a linked lamp is born and removed on the plan. */
+  const apiToken = readFileSync(join(homedir(), '.orchidlights/api-token'), 'utf8').trim()
+  /* Any workspace on disk serves as the donor -- the preview only READS it,
+     and saving one from here would move the live project's own path. */
+  const donorPath = join(process.cwd(), 'server/test/data/vc-references.qxw')
+  const rigTools = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const bornFixtures = []
+    let group = null
+
+    const cleanup = async () => {
+      localStorage.removeItem('orchid.token')
+      if (group !== null) await fetch('/api/v1/fixture-groups/' + group, { method: 'DELETE' })
+      for (const id of bornFixtures) await fetch('/api/v1/fixtures/' + id, { method: 'DELETE' })
+      await wait(300)
+    }
+
+    try {
+      /* Room, as before: skip honestly when the universe is packed. */
+      const before = await (await fetch('/api/v1/fixtures')).json()
+      const taken = new Set()
+      for (const f of before) {
+        if (f.universe !== 1) continue
+        for (let c = f.address - 1; c < f.address - 1 + f.channels; c++) taken.add(c)
+      }
+      const hole = (width) => {
+        for (let c = 0; c <= 512 - width; c++) {
+          let free = true
+          for (let i = 0; i < width; i++) if (taken.has(c + i)) { free = false; break }
+          if (free) {
+            for (let i = 0; i < width; i++) taken.add(c + i)
+            return c
+          }
+        }
+        return -1
+      }
+      const probeAt = hole(4)
+      const panelAt = hole(12)
+      if (probeAt < 0 || panelAt < 0) return 'ok'
+
+      const made = await (await fetch('/api/v1/fixtures', { method: 'POST', headers: json,
+        body: JSON.stringify({ manufacturer: 'Generic', model: 'Generic RGBW', mode: 'RGBW',
+          name: 'RigF15b', universe: 1, address: probeAt + 1 }) })).json()
+      if (!made.created) return 'the probe fixture was refused: ' + JSON.stringify(made)
+      bornFixtures.push(...made.created)
+
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Patch')?.click()
+      await wait(900)
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Fixtures'))?.click()
+      await wait(600)
+
+      /* The panel wizard, from the form. */
+      const wizard = [...document.querySelectorAll('summary')]
+        .find(s => s.textContent.trim() === 'Asistente de panel RGB')
+      if (!wizard) return 'there is no panel wizard'
+      wizard.click()
+      await wait(400)
+      const card = wizard.parentElement
+      const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      const fill = (label, value) => {
+        const box = [...card.querySelectorAll('label')]
+          .find(l => l.querySelector('span')?.textContent === label)
+          ?.querySelector('input')
+        if (!box) return false
+        setI.call(box, value)
+        box.dispatchEvent(new Event('input', { bubbles: true }))
+        return true
+      }
+      if (!fill('Nombre', 'PanelUI')) return 'the wizard has no name field'
+      if (!fill('Dirección', String(panelAt + 1))) return 'the wizard has no address field'
+      if (!fill('Filas', '2') || !fill('Columnas', '2')) return 'the wizard has no size fields'
+      ;[...card.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Crear panel')?.click()
+      await wait(1500)
+
+      const groups = await (await fetch('/api/v1/fixture-groups')).json()
+      const wall = groups.find(g => g.name === 'PanelUI')
+      if (!wall) return 'the wizard built no group'
+      group = wall.id
+      if (wall.size.width !== 2 || wall.size.height !== 2) {
+        return 'the wizard grid is ' + JSON.stringify(wall.size)
+      }
+      const rows = (await (await fetch('/api/v1/fixtures')).json())
+        .filter(f => f.name.startsWith('PanelUI'))
+      if (rows.length !== 2) return 'the wizard built ' + rows.length + ' rows'
+      bornFixtures.push(...rows.map(f => f.id))
+
+      /* The remap, from the row. */
+      document.querySelector('button[aria-label="Sustituir RigF15b"]')?.click()
+      await wait(900)
+      const remapForm = document.querySelector('.remap-form')
+      if (!remapForm) return 'the remap form never opened'
+      const pick = async (label, option) => {
+        const box = [...remapForm.querySelectorAll('label')]
+          .find(l => l.querySelector('span')?.textContent === label)
+          ?.querySelector('select')
+        if (!box) return 'no ' + label + ' select'
+        for (let tries = 0; tries < 40; tries++) {
+          if ([...box.options].some(o => o.value === option)) break
+          await wait(200)
+        }
+        if (![...box.options].some(o => o.value === option)) {
+          return label + ' never offered ' + option
+        }
+        const setS = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        setS.call(box, option)
+        box.dispatchEvent(new Event('change', { bubbles: true }))
+        return ''
+      }
+      let bad = await pick('Fabricante', 'Generic')
+      if (bad === '') bad = await pick('Modelo', 'Generic RGB')
+      if (bad === '') bad = await pick('Modo', 'BGR')
+      if (bad !== '') return bad
+      ;[...remapForm.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Sustituir')?.click()
+      await wait(1500)
+      const swapped = (await (await fetch('/api/v1/fixtures')).json())
+        .find(f => f.name === 'RigF15b')
+      if (swapped?.model !== 'Generic RGB') {
+        return 'the remap left the model as ' + (swapped?.model ?? 'nothing')
+      }
+
+      /* The import dialog reads the donor and offers its pieces. */
+      localStorage.setItem('orchid.token', ${JSON.stringify(apiToken)})
+      window.prompt = () => ${JSON.stringify(donorPath)}
+      document.querySelector('.projectmenu-trigger')?.click()
+      await wait(500)
+      ;[...document.querySelectorAll('[role=menuitem]')]
+        .find(b => b.textContent.trim() === 'Importar de otro proyecto…')?.click()
+      await wait(1500)
+      const dialog = document.querySelector('dialog[aria-label="Importar de otro proyecto"]')
+      if (!dialog) return 'the import dialog never appeared'
+      const legends = [...dialog.querySelectorAll('legend')].map(l => l.textContent)
+      if (!legends.some(l => l.startsWith('Fixtures'))) return 'the dialog lists no fixtures'
+      const checkboxes = dialog.querySelectorAll('input[type=checkbox]')
+      if (checkboxes.length === 0) return 'the dialog offers nothing to choose'
+      ;[...dialog.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Cancelar')?.click()
+      await wait(400)
+      if (document.querySelector('dialog[aria-label="Importar de otro proyecto"]')) {
+        return 'Cancelar did not close the import dialog'
+      }
+
+      /* A linked lamp on the plan: born from properties, removed by the same
+         double-click that removes a lamp. */
+      await fetch('/api/v1/plan/fixtures/' + made.created[0], { method: 'PUT', headers: json,
+        body: JSON.stringify({ x: 2500, y: 2500 }) })
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Planta')?.click()
+      await wait(1200)
+      const lamp = document.querySelector('.lamp[data-fixture="' + made.created[0] + '"]')
+      if (!lamp) return 'the probe lamp is not on the plan'
+      lamp.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      lamp.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+      await wait(700)
+      const props = [...document.querySelectorAll('.lamp-props summary')].at(0)
+      if (!props) return 'the selection offers no properties'
+      props.click()
+      await wait(400)
+      ;[...document.querySelectorAll('.lamp-props button')]
+        .find(b => b.textContent.trim() === 'Añadir enlazada')?.click()
+      await wait(1200)
+      const ghost = document.querySelector('.linked-lamp')
+      if (!ghost) return 'the linked lamp never appeared'
+      ghost.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+      await wait(1200)
+      if (document.querySelector('.linked-lamp')) return 'the linked lamp would not go away'
+      await fetch('/api/v1/plan/fixtures/' + made.created[0], { method: 'DELETE' })
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the rig tools act: wizard, remap, import dialog, linked lamp',
+    rigTools === 'ok', rigTools)
 
   /* The desktop shell's close question, answered by the page.
    *

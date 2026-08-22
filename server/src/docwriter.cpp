@@ -30,6 +30,7 @@
 #include "rgbimage.h"
 #include "grouphead.h"
 #include "qlcpoint.h"
+#include "fixtureremapper.h"
 #include "efxfixture.h"
 #include "grouphead.h"
 #include "collection.h"
@@ -560,6 +561,262 @@ DocWriter::Result DocWriter::cloneFixtures(Doc *doc, quint32 sourceId, int quant
     return Result::success();
 }
 
+DocWriter::Result DocWriter::addRgbPanel(Doc *doc, const PanelSpec &spec, quint32 &groupId,
+                                         QList<quint32> &ids)
+{
+    ids.clear();
+
+    if (spec.name.trimmed().isEmpty())
+        return Result::failure(QStringLiteral("A panel needs a name"));
+    if (spec.rows < 1 || spec.columns < 1 || spec.rows > 64 || spec.columns > 64)
+        return Result::failure(QStringLiteral("Rows and columns must be between 1 and 64"));
+    if (spec.address < 1 || spec.address > 512)
+        return Result::failure(QStringLiteral("Address must be between 1 and 512"));
+
+    QString error;
+    int uniIndex = engineIndex(doc, spec.universe, error);
+    if (uniIndex < 0)
+        return Result::failure(error);
+
+    const QStringList corners{QStringLiteral("topleft"), QStringLiteral("topright"),
+                              QStringLiteral("bottomleft"), QStringLiteral("bottomright")};
+    if (corners.contains(spec.startCorner) == false)
+        return Result::failure(QStringLiteral("startCorner is topleft, topright, bottomleft or bottomright"));
+    if (spec.displacement != QStringLiteral("snake") && spec.displacement != QStringLiteral("zigzag"))
+        return Result::failure(QStringLiteral("displacement is snake or zigzag"));
+    if (spec.direction != QStringLiteral("horizontal") && spec.direction != QStringLiteral("vertical"))
+        return Result::failure(QStringLiteral("direction is horizontal or vertical"));
+
+    const bool sixteenBit = spec.sixteenBit;
+    const QMap<QString, Fixture::Components> componentNames{
+        {QStringLiteral("RGB"), Fixture::RGB},   {QStringLiteral("BGR"), Fixture::BGR},
+        {QStringLiteral("BRG"), Fixture::BRG},   {QStringLiteral("GBR"), Fixture::GBR},
+        {QStringLiteral("GRB"), Fixture::GRB},   {QStringLiteral("RBG"), Fixture::RBG},
+        {QStringLiteral("RGBW"), Fixture::RGBW},
+    };
+    if (componentNames.contains(spec.components) == false)
+    {
+        return Result::failure(QStringLiteral("components is one of %1")
+                                   .arg(componentNames.keys().join(QStringLiteral(", "))));
+    }
+    const Fixture::Components components = componentNames.value(spec.components);
+
+    /* The reference's walk, verbatim (qmlui/fixturemanager.cpp:1563): vertical
+       panels transpose the grid, the start corner decides where row zero and
+       cell zero sit, snake rows double back. */
+    int rows = spec.rows;
+    int columns = spec.columns;
+    const bool transpose = spec.direction == QStringLiteral("vertical");
+    if (transpose)
+        qSwap(rows, columns);
+
+    const bool fromRight = transpose
+        ? (spec.startCorner == QStringLiteral("bottomright")
+           || spec.startCorner == QStringLiteral("bottomleft"))
+        : (spec.startCorner == QStringLiteral("topright")
+           || spec.startCorner == QStringLiteral("bottomright"));
+    const bool fromBottom = transpose
+        ? (spec.startCorner == QStringLiteral("topright")
+           || spec.startCorner == QStringLiteral("bottomright"))
+        : (spec.startCorner == QStringLiteral("bottomleft")
+           || spec.startCorner == QStringLiteral("bottomright"));
+
+    int currRow = fromBottom ? rows - 1 : 0;
+    const int rowInc = fromBottom ? -1 : 1;
+    const int xPosStart = fromRight ? columns - 1 : 0;
+    const int xPosEnd = fromRight ? 0 : columns - 1;
+    const int xPosInc = fromRight ? -1 : 1;
+
+    FixtureGroup *group = new FixtureGroup(doc);
+    group->setName(spec.name.trimmed());
+    group->setSize(QSize(spec.columns, spec.rows));
+    if (doc->addFixtureGroup(group) == false)
+    {
+        delete group;
+        return Result::failure(QStringLiteral("The engine refused the panel's group"));
+    }
+    groupId = group->id();
+
+    QLCFixtureDef *rowDef = nullptr;
+    QLCFixtureMode *rowMode = nullptr;
+    int address = spec.address;
+
+    for (int i = 0; i < rows; i++)
+    {
+        Fixture *fixture = new Fixture(doc);
+        fixture->setName(QStringLiteral("%1 - Fila %2").arg(spec.name.trimmed()).arg(i + 1));
+        if (rowDef == nullptr)
+            rowDef = fixture->genericRGBPanelDef(columns, components, sixteenBit);
+        if (rowMode == nullptr)
+        {
+            rowMode = fixture->genericRGBPanelMode(rowDef, components, sixteenBit,
+                                                   spec.physicalWidth,
+                                                   spec.physicalHeight / qreal(spec.rows));
+        }
+        fixture->setFixtureDefinition(rowDef, rowMode);
+
+        /* A row that will not fit spills into the next universe, adding one if
+           the project runs out -- the reference does exactly this, and a 30x30
+           panel genuinely needs it. */
+        if (address - 1 + int(fixture->channels()) > 512)
+        {
+            uniIndex++;
+            if (doc->inputOutputMap()->getUniverseID(uniIndex)
+                == doc->inputOutputMap()->invalidUniverse())
+            {
+                doc->inputOutputMap()->addUniverse();
+                doc->inputOutputMap()->startUniverses();
+            }
+            address = 1;
+        }
+
+        fixture->setUniverse(doc->inputOutputMap()->getUniverseID(uniIndex));
+        fixture->setAddress(quint32(address - 1));
+        address += int(fixture->channels());
+
+        if (doc->addFixture(fixture) == false)
+        {
+            delete fixture;
+            return Result::failure(
+                QStringLiteral("Row %1 would not patch (address %2 of universe %3 is taken)")
+                    .arg(i + 1).arg(address).arg(uniIndex + 1));
+        }
+        ids.append(fixture->id());
+
+        const bool doubledBack = spec.displacement == QStringLiteral("snake") && (i % 2) == 1;
+        int xPos = doubledBack ? xPosEnd : xPosStart;
+        const int step = doubledBack ? -xPosInc : xPosInc;
+        for (int h = 0; h < fixture->heads(); h++)
+        {
+            if (transpose)
+                group->assignHead(QLCPoint(currRow, xPos), GroupHead(fixture->id(), h));
+            else
+                group->assignHead(QLCPoint(xPos, currRow), GroupHead(fixture->id(), h));
+            xPos += step;
+        }
+
+        currRow += rowInc;
+    }
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::remapFixture(Doc *doc, quint32 sourceId, const RemapSpec &spec,
+                                          QList<SceneValue> &fromChannels,
+                                          QList<SceneValue> &toChannels)
+{
+    fromChannels.clear();
+    toChannels.clear();
+
+    Fixture *source = doc->fixture(sourceId);
+    if (source == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(sourceId));
+
+    QLCFixtureDef *definition =
+        doc->fixtureDefCache()->fixtureDef(spec.manufacturer, spec.model);
+    if (definition == nullptr)
+    {
+        return Result::failure(QStringLiteral("No fixture definition for \"%1 %2\"")
+                                   .arg(spec.manufacturer, spec.model));
+    }
+    QLCFixtureMode *mode = definition->mode(spec.mode);
+    if (mode == nullptr)
+    {
+        QStringList available;
+        for (const QLCFixtureMode *candidate : definition->modes())
+            available << candidate->name();
+        return Result::failure(QStringLiteral("\"%1 %2\" has no mode \"%3\". Available: %4")
+                                   .arg(spec.manufacturer, spec.model, spec.mode,
+                                        available.join(QStringLiteral(", "))));
+    }
+
+    QString error;
+    const int universe = spec.universe > 0 ? engineIndex(doc, spec.universe, error)
+                                           : int(source->universe());
+    if (universe < 0)
+        return Result::failure(error);
+    const int address = spec.address > 0 ? spec.address - 1 : int(source->address());
+    const int channels = mode->channels().count();
+
+    if (address < 0 || address + channels > 512)
+    {
+        return Result::failure(QStringLiteral("\"%1\" needs %2 channels and would end at %3")
+                                   .arg(spec.model).arg(channels).arg(address + channels));
+    }
+
+    /* Overlap against everyone but the fixture being replaced. */
+    const QSet<int> taken = occupiedChannels(doc, universe, sourceId);
+    for (int c = address; c < address + channels; c++)
+    {
+        if (taken.contains(c))
+        {
+            return Result::failure(
+                QStringLiteral("Channel %1 of universe %2 is already used by \"%3\"")
+                    .arg(c + 1).arg(universe + 1)
+                    .arg(occupantAt(doc, universe, c, sourceId)));
+        }
+    }
+
+    /* One target per existing fixture, every one KEEPING ITS ID.
+     *
+     * remapSceneValues drops any value it has no mapping for, so the untouched
+     * fixtures need identity maps or a remap of one lamp would silently strip
+     * every other lamp out of every scene. */
+    FixtureRemapper remapper;
+    QList<Fixture *> targets;
+    bool connected = true;
+
+    for (Fixture *original : doc->fixtures())
+    {
+        Fixture *target = new Fixture(doc);
+        target->setID(original->id());
+
+        if (original->id() == sourceId)
+        {
+            target->setName(spec.name.isEmpty() ? original->name() : spec.name);
+            target->setUniverse(quint32(universe));
+            target->setAddress(quint32(address));
+            target->setFixtureDefinition(definition, mode);
+        }
+        else
+        {
+            target->setName(original->name());
+            target->setUniverse(original->universe());
+            target->setAddress(original->address());
+            if (original->fixtureDef() == nullptr || original->fixtureMode() == nullptr)
+                target->setChannels(original->channels());
+            else
+                target->setFixtureDefinition(original->fixtureDef(), original->fixtureMode());
+        }
+
+        if (remapper.autoConnectFixtures(original, target).isEmpty() && original->id() == sourceId)
+            connected = false;
+
+        targets.append(target);
+    }
+
+    if (connected == false)
+    {
+        qDeleteAll(targets);
+        return Result::failure(
+            QStringLiteral("No channel of \"%1 %2\" matches anything \"%3\" controls; a remap "
+                           "that carries nothing across is a delete wearing a different name")
+                .arg(spec.manufacturer, spec.model, source->name()));
+    }
+
+    remapper.applyRemap(doc, targets);
+
+    fromChannels = remapper.sourceList();
+    toChannels = remapper.targetList();
+
+    /* replaceFixtures copied them into the document; these were the blueprint. */
+    qDeleteAll(targets);
+
+    doc->setModified();
+    return Result::success();
+}
+
 DocWriter::Result DocWriter::removeFixture(Doc *doc, quint32 fixtureId)
 {
     const Fixture *fixture = doc->fixture(fixtureId);
@@ -973,7 +1230,7 @@ DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
  * The plan
  *****************************************************************************/
 
-DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head,
+DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head, int linked,
                                          const PlanItemPatch &patch)
 {
     const Fixture *fixture = doc->fixture(fixtureId);
@@ -988,9 +1245,12 @@ DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head,
                                                               : QStringLiteral("heads"))
                                    .arg(head));
     }
+    if (linked < 0)
+        return Result::failure(QStringLiteral("A linked index cannot be negative"));
 
     MonitorProperties *monitor = doc->monitorProperties();
     const quint16 h = quint16(head);
+    const quint16 l = quint16(linked);
 
     QColor colour;
     if (patch.gel != nullptr && patch.gel->isEmpty() == false)
@@ -1005,28 +1265,28 @@ DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head,
 
     /* Whatever it had, so a request that moves a lamp does not also throw away
        the gel somebody set on it. */
-    const QVector3D was = monitor->fixturePosition(fixtureId, h, 0);
-    const QVector3D turned = monitor->fixtureRotation(fixtureId, h, 0);
+    const QVector3D was = monitor->fixturePosition(fixtureId, h, l);
+    const QVector3D turned = monitor->fixtureRotation(fixtureId, h, l);
 
     const QVector3D position(patch.x != nullptr ? float(*patch.x) : was.x(),
                              patch.y != nullptr ? float(*patch.y) : was.y(),
                              was.z());
 
-    monitor->setFixturePosition(fixtureId, h, 0, position);
+    monitor->setFixturePosition(fixtureId, h, l, position);
 
     if (patch.rotation != nullptr)
-        monitor->setFixtureRotation(fixtureId, h, 0,
+        monitor->setFixtureRotation(fixtureId, h, l,
                                     QVector3D(turned.x(), float(*patch.rotation), turned.z()));
 
     if (patch.gel != nullptr)
-        monitor->setFixtureGelColor(fixtureId, h, 0, colour);
+        monitor->setFixtureGelColor(fixtureId, h, l, colour);
 
     if (patch.zoom != nullptr)
-        monitor->setFixtureFixedZoom(fixtureId, h, 0, *patch.zoom);
+        monitor->setFixtureFixedZoom(fixtureId, h, l, *patch.zoom);
 
     /* The four flags QLC+ hangs off a plan item, read-modify-write so setting
        one never clears another. */
-    quint32 flags = monitor->fixtureFlags(fixtureId, h, 0);
+    quint32 flags = monitor->fixtureFlags(fixtureId, h, l);
     const auto apply = [&flags](const bool *value, quint32 bit) {
         if (value == nullptr)
             return;
@@ -1039,8 +1299,75 @@ DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head,
     apply(patch.locked, MonitorProperties::LockedFlag);
     apply(patch.invertPan, MonitorProperties::InvertedPanFlag);
     apply(patch.invertTilt, MonitorProperties::InvertedTiltFlag);
-    monitor->setFixtureFlags(fixtureId, h, 0, flags);
+    monitor->setFixtureFlags(fixtureId, h, l, flags);
 
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::addLinkedFixture(Doc *doc, quint32 fixtureId, int head,
+                                              const QString &name, double x, double y,
+                                              int &linkedIndex)
+{
+    const Fixture *fixture = doc->fixture(fixtureId);
+    if (fixture == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
+    if (head < 0 || head >= fixture->heads())
+        return Result::failure(QStringLiteral("\"%1\" has no head %2").arg(fixture->name()).arg(head));
+
+    MonitorProperties *monitor = doc->monitorProperties();
+
+    /* The original must stand somewhere first: a link to a lamp that is not
+       on the plan would be a copy of nowhere. */
+    if (monitor->containsFixture(fixtureId) == false)
+        return Result::failure(QStringLiteral("Place \"%1\" on the plan first").arg(fixture->name()));
+
+    int next = 1;
+    for (quint32 subID : monitor->fixtureIDList(fixtureId))
+    {
+        if (monitor->fixtureHeadIndex(subID) != quint16(head))
+            continue;
+        next = qMax(next, int(monitor->fixtureLinkedIndex(subID)) + 1);
+    }
+
+    const QString label = name.trimmed().isEmpty()
+        ? QStringLiteral("%1 (enlazada %2)").arg(fixture->name()).arg(next)
+        : name.trimmed();
+
+    monitor->setFixtureName(fixtureId, quint16(head), quint16(next), label);
+    monitor->setFixturePosition(fixtureId, quint16(head), quint16(next),
+                                QVector3D(float(x), float(y), 0));
+
+    linkedIndex = next;
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::removeLinkedFixture(Doc *doc, quint32 fixtureId, int head, int linked)
+{
+    if (doc->fixture(fixtureId) == nullptr)
+        return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
+    if (linked < 1)
+    {
+        return Result::failure(QStringLiteral(
+            "Linked index 0 is the fixture itself; taking it off the plan is DELETE without \"linked\""));
+    }
+
+    MonitorProperties *monitor = doc->monitorProperties();
+    bool found = false;
+    for (quint32 subID : monitor->fixtureIDList(fixtureId))
+    {
+        if (monitor->fixtureHeadIndex(subID) == quint16(head)
+            && monitor->fixtureLinkedIndex(subID) == quint16(linked))
+        {
+            found = true;
+            break;
+        }
+    }
+    if (found == false)
+        return Result::failure(QStringLiteral("No linked item %1 on head %2").arg(linked).arg(head));
+
+    monitor->removeFixture(fixtureId, quint16(head), quint16(linked));
     doc->setModified();
     return Result::success();
 }

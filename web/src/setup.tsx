@@ -392,6 +392,7 @@ function Fixtures({
   return (
     <div className="stack">
       <AddFixture universes={universes} onRun={onRun} />
+      <PanelWizard universes={universes} onRun={onRun} />
 
       {fixtures.length === 0 && <p className="hint">Este proyecto no tiene fixtures.</p>}
 
@@ -406,6 +407,278 @@ function Fixtures({
       )}
       <AddressTool />
       {fixtures.length > 0 && <RigSummary fixtures={fixtures} />}
+    </div>
+  )
+}
+
+/**
+ * The RGB panel wizard: one fixture per row, a group wired the way the LEDs
+ * are. The snake is the part worth a machine: wiring that doubles back on
+ * every other row is how real panels ship, and laying that out by hand in
+ * the group grid is sixty error-prone clicks.
+ */
+function PanelWizard({
+  universes,
+  onRun,
+}: {
+  universes: UniverseState[]
+  onRun: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [universe, setUniverse] = useState(1)
+  const [address, setAddress] = useState(1)
+  const [rows, setRows] = useState(4)
+  const [columns, setColumns] = useState(4)
+  const [components, setComponents] = useState('RGB')
+  const [direction, setDirection] = useState('horizontal')
+  const [startCorner, setStartCorner] = useState('topleft')
+  const [displacement, setDisplacement] = useState('snake')
+
+  const channelsPerCell = components === 'RGBW' ? 4 : 3
+
+  return (
+    <details className="card">
+      <summary>Asistente de panel RGB</summary>
+
+      <div className="fields">
+        <label className="field grow-field">
+          <span>Nombre</span>
+          <input value={name} placeholder="Muro LED" onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Universo</span>
+          <select value={universe} onChange={(e) => setUniverse(Number(e.target.value))}>
+            {universes.map((u) => (
+              <option key={u.id} value={u.id}>
+                U{u.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Dirección</span>
+          <input
+            type="number"
+            min={1}
+            max={512}
+            value={address}
+            onChange={(e) => setAddress(Number(e.target.value))}
+          />
+        </label>
+      </div>
+
+      <div className="fields">
+        <label className="field">
+          <span>Filas</span>
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={rows}
+            onChange={(e) => setRows(Number(e.target.value))}
+          />
+        </label>
+        <label className="field">
+          <span>Columnas</span>
+          <input
+            type="number"
+            min={1}
+            max={64}
+            value={columns}
+            onChange={(e) => setColumns(Number(e.target.value))}
+          />
+        </label>
+        <label className="field">
+          <span>Componentes</span>
+          <select value={components} onChange={(e) => setComponents(e.target.value)}>
+            {['RGB', 'BGR', 'BRG', 'GBR', 'GRB', 'RBG', 'RGBW'].map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Sentido</span>
+          <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+            <option value="horizontal">Horizontal</option>
+            <option value="vertical">Vertical</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Esquina inicial</span>
+          <select value={startCorner} onChange={(e) => setStartCorner(e.target.value)}>
+            <option value="topleft">Arriba izquierda</option>
+            <option value="topright">Arriba derecha</option>
+            <option value="bottomleft">Abajo izquierda</option>
+            <option value="bottomright">Abajo derecha</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Cableado</span>
+          <select value={displacement} onChange={(e) => setDisplacement(e.target.value)}>
+            <option value="snake">Serpiente (vuelve en cada fila)</option>
+            <option value="zigzag">Zigzag (todas iguales)</option>
+          </select>
+        </label>
+      </div>
+
+      <p className="hint">
+        {rows} × {columns} celdas · {rows * columns * channelsPerCell} canales · una fixture por{' '}
+        {direction === 'horizontal' ? 'fila' : 'columna'}; si una fila no cabe, salta al siguiente
+        universo (creándolo si hace falta).
+      </p>
+
+      <button
+        type="button"
+        disabled={name.trim() === ''}
+        onClick={() =>
+          onRun(() =>
+            api.addRgbPanel({
+              name: name.trim(),
+              universe,
+              address,
+              rows,
+              columns,
+              components,
+              direction,
+              startCorner,
+              displacement,
+            }),
+          ).then(() => setName(''))
+        }
+      >
+        Crear panel
+      </button>
+    </details>
+  )
+}
+
+/**
+ * Swap the model under a patched lamp, carrying the show across.
+ *
+ * Scenes, sequences, EFX, groups, the plan and the console's sliders all
+ * follow; channels are matched semantically (red stays red even when the new
+ * lamp keeps it on another channel). The engine's own remapper does the work
+ * -- this form only chooses the replacement.
+ */
+function RemapForm({
+  fixture,
+  onRun,
+  onDone,
+}: {
+  fixture: FixtureState
+  onRun: (action: () => Promise<unknown>) => Promise<void>
+  onDone: () => void
+}) {
+  const [manufacturers, setManufacturers] = useState<string[]>([])
+  const [manufacturer, setManufacturer] = useState('')
+  const [models, setModels] = useState<string[]>([])
+  const [model, setModel] = useState('')
+  const [modes, setModes] = useState<{ name: string; channels: number }[]>([])
+  const [mode, setMode] = useState('')
+  const [address, setAddress] = useState(fixture.address)
+
+  useEffect(() => {
+    api
+      .manufacturers('')
+      .then((r) => setManufacturers(r.manufacturers))
+      .catch(() => setManufacturers([]))
+  }, [])
+
+  useEffect(() => {
+    setModels([])
+    setModel('')
+    if (!manufacturer) return
+    let live = true
+    api
+      .models(manufacturer)
+      .then((r) => live && setModels(r.models))
+      .catch(() => live && setModels([]))
+    return () => {
+      live = false
+    }
+  }, [manufacturer])
+
+  useEffect(() => {
+    setModes([])
+    setMode('')
+    if (!manufacturer || !model) return
+    let live = true
+    api
+      .modes(manufacturer, model)
+      .then((r) => {
+        if (!live) return
+        setModes(r.modes)
+        setMode(r.modes[0]?.name ?? '')
+      })
+      .catch(() => live && setModes([]))
+    return () => {
+      live = false
+    }
+  }, [manufacturer, model])
+
+  return (
+    <div className="remap-form">
+      <p className="hint">
+        Sustituir «{fixture.name}» por otro modelo: escenas, EFX, grupos y sliders siguen al nuevo,
+        con los canales emparejados por lo que hacen.
+      </p>
+      <div className="fields">
+        <label className="field">
+          <span>Fabricante</span>
+          <select value={manufacturer} onChange={(e) => setManufacturer(e.target.value)}>
+            <option value="">(elige)</option>
+            {manufacturers.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Modelo</span>
+          <select value={model} onChange={(e) => setModel(e.target.value)} disabled={!manufacturer}>
+            <option value="">(elige)</option>
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Modo</span>
+          <select value={mode} onChange={(e) => setMode(e.target.value)} disabled={!model}>
+            {modes.map((m) => (
+              <option key={m.name} value={m.name}>
+                {m.name} · {m.channels} canales
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Dirección</span>
+          <input
+            type="number"
+            min={1}
+            max={512}
+            value={address}
+            onChange={(e) => setAddress(Number(e.target.value))}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={!manufacturer || !model || !mode}
+          onClick={() =>
+            onRun(() => api.remapFixture(fixture.id, { manufacturer, model, mode, address })).then(
+              onDone,
+            )
+          }
+        >
+          Sustituir
+        </button>
+      </div>
     </div>
   )
 }
@@ -648,6 +921,7 @@ function FixtureRow({
   const [name, setName] = useState(fixture.name)
   const [address, setAddress] = useState(String(fixture.address))
   const [curves, setCurves] = useState(false)
+  const [remapping, setRemapping] = useState(false)
 
   useEffect(() => {
     setName(fixture.name)
@@ -716,6 +990,16 @@ function FixtureRow({
           ⧉
         </button>
 
+        <button
+          type="button"
+          aria-pressed={remapping}
+          aria-label={`Sustituir ${fixture.name}`}
+          title="Sustituir por otro modelo llevándose el show"
+          onClick={() => setRemapping((open) => !open)}
+        >
+          ⇄
+        </button>
+
         {/* A lamp behaving oddly is explained by a modifier more often than by
           anything else in the patch, so the count is on the row: without it
           the only way to notice one is to open every fixture in turn. */}
@@ -740,6 +1024,9 @@ function FixtureRow({
       </div>
 
       {curves && <Modifiers fixture={fixture} onRun={onRun} />}
+      {remapping && (
+        <RemapForm fixture={fixture} onRun={onRun} onDone={() => setRemapping(false)} />
+      )}
     </>
   )
 }

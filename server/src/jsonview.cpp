@@ -856,6 +856,32 @@ QJsonObject JsonView::plan(const Doc *doc)
             }
             if (headItems.isEmpty() == false)
                 entry["headItems"] = headItems;
+
+            /* Linked items: the same lamp drawn again. Only on the plan and
+               in the file; the DMX is untouched. */
+            QJsonArray linkedItems;
+            for (quint32 subID : monitor->fixtureIDList(fixture->id()))
+            {
+                const quint16 headIndex = monitor->fixtureHeadIndex(subID);
+                const quint16 linkedIndex = monitor->fixtureLinkedIndex(subID);
+                if (linkedIndex == 0)
+                    continue;
+
+                QJsonObject item;
+                item["linked"] = linkedIndex;
+                item["head"] = headIndex;
+                item["name"] = monitor->fixtureName(fixture->id(), headIndex, linkedIndex);
+
+                const QVector3D linkedPos =
+                    monitor->fixturePosition(fixture->id(), headIndex, linkedIndex);
+                item["x"] = linkedPos.x();
+                item["y"] = linkedPos.y();
+                item["rotation"] =
+                    monitor->fixtureRotation(fixture->id(), headIndex, linkedIndex).y();
+                linkedItems.append(item);
+            }
+            if (linkedItems.isEmpty() == false)
+                entry["linkedItems"] = linkedItems;
         }
 
         entry["heads"] = fixture->heads();

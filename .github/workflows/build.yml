@@ -233,6 +233,9 @@ jobs:
       - name: Fixture smoke test (batches, clone, heads, group grid)
         run: ./server/test/fixture-smoke.sh orchidlightsd
 
+      - name: Rig tools smoke test (panel wizard, remap, linked, import)
+        run: ./server/test/rigtools-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

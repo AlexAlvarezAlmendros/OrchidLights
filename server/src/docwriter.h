@@ -122,6 +122,62 @@ namespace DocWriter
     Result cloneFixtures(Doc *doc, quint32 sourceId, int quantity, int gap,
                          QList<quint32> &ids);
 
+    struct PanelSpec
+    {
+        QString name;
+        int universe = 1;    //!< 1-based
+        int address = 1;     //!< 1-based
+        int rows = 1;
+        int columns = 1;
+        QString components = QStringLiteral("RGB");        //!< RGB|BGR|BRG|GBR|GRB|RBG|RGBW
+        bool sixteenBit = false;
+        QString direction = QStringLiteral("horizontal");  //!< or vertical
+        QString startCorner = QStringLiteral("topleft");   //!< topleft|topright|bottomleft|bottomright
+        QString displacement = QStringLiteral("snake");    //!< snake|zigzag
+        int physicalWidth = 0;      //!< of the whole panel, millimetres
+        double physicalHeight = 0;  //!< of the whole panel, millimetres
+    };
+
+    /**
+     * The RGB panel wizard, ported from qmlui/fixturemanager.cpp:1524.
+     *
+     * One fixture per row wearing a generated definition (one head per cell),
+     * addresses laid consecutively -- spilling into the next universe when a
+     * row will not fit, adding one if the project runs out -- and a group of
+     * columns x rows whose heads walk the wiring: zigzag rows all run the same
+     * way, snake rows double back, the start corner and direction transpose
+     * the walk exactly as the reference does.
+     */
+    Result addRgbPanel(Doc *doc, const PanelSpec &spec, quint32 &groupId, QList<quint32> &ids);
+
+    struct RemapSpec
+    {
+        QString manufacturer;
+        QString model;
+        QString mode;
+        QString name;        //!< empty keeps the old name
+        int universe = -1;   //!< 1-based; -1 keeps the old universe
+        int address = -1;    //!< 1-based; -1 keeps the old address
+    };
+
+    /**
+     * Swap one patched fixture for another model, carrying the show across.
+     *
+     * The engine's FixtureRemapper does the heavy lifting: scenes, sequences,
+     * EFX, groups, channel groups and the plan all follow, with channels
+     * matched semantically (dimmer to dimmer, red to red) when the definitions
+     * differ. Every fixture keeps its id -- the remap builds an identity map
+     * for the untouched ones, because remapSceneValues silently DROPS any
+     * value it has no mapping for.
+     *
+     * The channel maps come back to the caller because the Virtual Console is
+     * not the engine's to fix (the reference says the same): sliders holding
+     * (fixture, channel) pairs are rewritten by the API layer through the same
+     * patch path an editor uses.
+     */
+    Result remapFixture(Doc *doc, quint32 sourceId, const RemapSpec &spec,
+                        QList<SceneValue> &fromChannels, QList<SceneValue> &toChannels);
+
     Result removeFixture(Doc *doc, quint32 fixtureId);
 
     /** Move or rename a fixture. A universe or address of -1 leaves it alone. */
@@ -175,7 +231,19 @@ namespace DocWriter
      * inverted-tilt flags. Head 0 is the fixture itself; a multi-head bar
      * stores an item per head, and the file says which with a Head attribute.
      */
-    Result setPlanItem(Doc *doc, quint32 fixtureId, int head, const PlanItemPatch &patch);
+    Result setPlanItem(Doc *doc, quint32 fixtureId, int head, int linked,
+                       const PlanItemPatch &patch);
+
+    /**
+     * Draw the same lamp twice: a linked fixture is a second plan item over
+     * the same patch -- QLC+ uses it for one dimmer channel feeding two
+     * physical lamps. It exists only on the plan (and in the file, with a
+     * LinkedIndex attribute); the DMX is untouched.
+     */
+    Result addLinkedFixture(Doc *doc, quint32 fixtureId, int head, const QString &name,
+                            double x, double y, int &linkedIndex);
+
+    Result removeLinkedFixture(Doc *doc, quint32 fixtureId, int head, int linked);
 
     /** Take a fixture off the plan without unpatching it. */
     Result clearPlanPosition(Doc *doc, quint32 fixtureId);
