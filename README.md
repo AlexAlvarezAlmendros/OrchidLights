@@ -1,8 +1,8 @@
 <h1 align="center">OrchidLights</h1>
 
 <p align="center">
-  <strong>Control de iluminación DMX desde el navegador.</strong><br/>
-  Motor C++ headless, interfaz web responsive. Fork de QLC+.
+  <strong>Control de iluminación DMX desde el navegador — y desde el escritorio.</strong><br/>
+  Motor C++ headless, interfaz web responsive, carcasa nativa Tauri. Fork de QLC+.
 </p>
 
 ---
@@ -20,20 +20,18 @@ No es un mando a distancia de una aplicación de escritorio. **Es la aplicación
 
 ## Estado
 
-**En desarrollo temprano.** Hoy existe el daemon: carga proyectos de QLC+ sin
-interfaz y reporta su contenido. Todavía no controla luces ni sirve nada por
-HTTP — eso llega en F1. Consulta el [roadmap](docs/planning/ROADMAP.md) para el
-plan por fases.
+**Paridad funcional 1:1 con QLC+ 5 completada** (fases F1–F22 del plan de
+escritorio, cada una fusionada con su smoke test en CI). El daemon controla
+luces de verdad, la web es una consola completa y la carcasa de escritorio
+existe. Lo que queda fuera está dicho en los PRs que lo recortan.
 
-| Fase | Contenido | Estado |
+| Bloque | Contenido | Estado |
 |---|---|---|
-| F0 | Fundación del fork: rebranding, poda del build, empaquetado, CI | ✅ |
-| F1 | Daemon headless + API REST/WebSocket | ⬜ |
-| F2 | Interfaz web + Virtual Console en directo | 🔨 en curso |
-| F3 | Patch y gestión de fixtures | ⬜ |
-| F4 | Editores de escenas, chasers, EFX y matrices | ⬜ |
-| F5 | Show Manager y previsualización 2D | ⬜ |
-| F6 | 3D, PWA, multiusuario | ⬜ |
+| A | Apagado limpio, auth, carcasa Tauri, ciclo de proyecto, deb + AppImage | ✅ |
+| B | Grand Master, STOP ALL, Simple Desk con keypad, monitor DMX, dump a escena, entrada externa con feedback | ✅ |
+| C | Editores 1:1 (chaser/EFX/matrix/script/audio/show), palettes con fanning, Virtual Console completa (multipágina, crossfade, XY pad), fixtures a escala de rig (remap, panel RGB, import), 2D avanzada | ✅ |
+| D | Undo global por instantáneas, kiosk + máscara de acceso, i18n es/en, ajustes | ✅ |
+| E | Vídeo con superficies (`/#/surface`) y escenario 3D con picking | ✅ |
 
 ## La interfaz
 
@@ -58,13 +56,33 @@ colores del show, que se eligieron para focos y no para una pantalla que se mira
 a oscuras.
 
 Todo control mide **44 px como mínimo**, porque esto se usa sin mirar. Los
-faders, XY pads y cue lists todavía no tienen control propio: salen en gris
-punteado y etiquetados, porque ocultarlos haría parecer la consola completa
-cuando no lo está.
+once tipos de widget de QLC+ se dibujan y actúan: botones con flash y
+prioridades, sliders de cuatro modos, XY pads con presets y límites por
+cabeza, cue lists con fader lateral de crossfade, marcos multipágina que se
+pasan desde un ala MIDI, relojes con agenda semanal que suena aunque no haya
+navegador abierto. Deshacer global (`Ctrl+Z`) sobre cualquier edición, kiosk
+con máscara de acceso para el móvil que se presta, y el cromo en español o
+inglés.
 
 ```bash
 cd web && pnpm install && pnpm build   # el daemon la sirve si existe
 cd web && pnpm dev                     # desarrollo, con proxy al daemon
+```
+
+## La aplicación de escritorio
+
+La carcasa Tauri lanza el daemon como sidecar y le pone delante la misma web
+que ve un móvil de la red: **la ventana es un cliente más**, no una interfaz
+aparte. Lo que aporta es lo que un navegador no puede: diálogos nativos de
+abrir/guardar, asociación de `.qxw`, bandeja con pánico y blackout que hablan
+directo con el daemon, ventanas por contexto (la mesa en un monitor, la
+planta en otro, una superficie de vídeo a pantalla completa en el proyector) y
+los flags `--kiosk` / `--operate`, que cierran la máscara de acceso **en el
+daemon** para que los móviles de la misma mesa obedezcan la misma jaula.
+
+```bash
+cd desktop/src-tauri && cargo tauri dev    # desarrollo
+# CI empaqueta deb + AppImage en cada push a main
 ```
 
 ## Arquitectura
@@ -74,7 +92,8 @@ engine/     motor de tiempo real heredado de QLC+ (intacto)
 plugins/    salidas DMX heredadas de QLC+ (intacto)
 resources/  librería de fixtures heredada de QLC+ (intacto)
 server/     NUEVO — daemon headless: QHttpServer (REST) + QWebSocketServer
-web/        NUEVO — SPA React 19 + Vite + TypeScript
+web/        NUEVO — SPA React 19 + Vite + TypeScript (three.js para la 3D)
+desktop/    NUEVO — carcasa Tauri: sidecar del daemon, diálogos nativos, kiosk
 ui/ qmlui/  interfaces de escritorio heredadas, congeladas y a eliminar
 ```
 
