@@ -3357,3 +3357,28 @@ button.linkish.left {
   color: var(--text-dim);
   font-size: 0.85rem;
 }
+
+/* ---- 2D depth: marquee, aim needle, arrange ------------------------------ */
+
+.plan-marquee {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.lamp-aim {
+  position: absolute;
+  left: 50%;
+  bottom: 50%;
+  width: 2px;
+  transform-origin: bottom center;
+  background: linear-gradient(to top, var(--text), transparent);
+  pointer-events: none;
+}
+
+.arrange {
+  display: flex;
+  gap: 0.35rem;
+}
