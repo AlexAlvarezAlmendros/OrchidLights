@@ -271,6 +271,22 @@ namespace DocWriter
     Result bakeMatrixToSequence(Doc *doc, quint32 matrixId, quint32 &sceneId,
                                 quint32 &sequenceId);
 
+    /**
+     * Palettes: one value (or pair, or triple) with a name, referenced from
+     * scenes so retinting the palette retints every look that carries it.
+     * The JSON shapes mirror the XML: Color "#rrggbb", PanTilt [pan, tilt],
+     * Position3D [x, y, z], Shutter [index, value], the rest one number.
+     */
+    Result addPalette(Doc *doc, const QString &type, const QString &name,
+                      const QJsonObject &body, quint32 &newId);
+    Result updatePalette(Doc *doc, quint32 id, const QJsonObject &body);
+    Result removePalette(Doc *doc, quint32 id);
+
+    /** The palettes a scene carries, plus the fixtures they resolve against.
+     *  Both lists are replaced whole. */
+    Result setScenePalettes(Doc *doc, quint32 sceneId, const QList<quint32> &paletteIds,
+                            const QList<quint32> *fixtureIds);
+
     Result applyMatrixPreset(Doc *doc, quint32 matrixId, const QString &type,
                              const QString &color, const QString &resource,
                              const QList<QPair<QString, QString>> &properties,

@@ -2666,6 +2666,111 @@ try {
   check('the gel writes exact RGB and the checker points at the line',
     toolsUi === 'ok' || toolsUi === 'none', toolsUi)
 
+  /* Palettes through the screen: created in the manager, attached to a
+     scene, retinted from the editor -- every step checked against the API,
+     because the indirection (retint the palette, never the scene) is the
+     whole feature. */
+  const paletteUi = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const post = async (path, body) => (await (await fetch('/api/v1' + path, {
+      method: 'POST', headers: json, body: JSON.stringify(body) })).json())
+
+    const scene = (await post('/functions', { type: 'Scene', name: 'LookF13' })).id
+    let paletteId = null
+
+    const cleanup = async () => {
+      document.querySelector('article.card header button[aria-label="Cerrar"]')?.click()
+      await wait(300)
+      if (paletteId !== null) {
+        await fetch('/api/v1/functions/' + scene + '/body', { method: 'PUT', headers: json,
+          body: JSON.stringify({ palettes: [] }) })
+        await fetch('/api/v1/palettes/' + paletteId, { method: 'DELETE' })
+      }
+      await fetch('/api/v1/functions/' + scene + '?force=true', { method: 'DELETE' })
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      if (searchBox && searchBox.value !== '') {
+        const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setInput.call(searchBox, '')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+    }
+
+    try {
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Funciones')?.click()
+      await wait(900)
+
+      const manager = document.querySelector('details.palettes')
+      if (!manager) return 'no palette manager'
+      manager.open = true
+      await wait(300)
+
+      /* Create through the manager's own form. */
+      const nameBox = [...manager.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Corporativo')
+      if (!nameBox) return 'no name box'
+      const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setInput.call(nameBox, 'PaletaF13')
+      nameBox.dispatchEvent(new Event('input', { bubbles: true }))
+      await wait(200)
+      ;[...manager.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Crear')?.click()
+      await wait(900)
+
+      const made = (await (await fetch('/api/v1/palettes')).json()).palettes
+        .find(p => p.name === 'PaletaF13')
+      if (!made) return 'the manager created nothing'
+      paletteId = made.id
+
+      /* Attach it to the scene through the editor. */
+      const row = [...document.querySelectorAll('.table-row')]
+        .find(r => r.querySelector('button.linkish')?.textContent === 'LookF13')
+      row?.querySelector('button.linkish')?.click()
+      await wait(900)
+      const editor = [...document.querySelectorAll('article.card')]
+        .find(c => c.querySelector('header strong')?.textContent === 'LookF13')
+      if (!editor) return 'the scene editor never opened'
+
+      const attach = [...editor.querySelectorAll('select')]
+        .find(sel => sel.getAttribute('aria-label') === 'Añadir palette')
+      if (!attach) return 'no attach select'
+      const setSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setSelect.call(attach, String(paletteId))
+      attach.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(900)
+
+      const body = await (await fetch('/api/v1/functions/' + scene + '/body')).json()
+      if (!(body.palettes ?? []).some(p => p.id === paletteId)) {
+        return 'the scene never took the palette: ' + JSON.stringify(body.palettes)
+      }
+
+      /* Retint from the manager: the VALUE changes, the scene does not. */
+      ;[...manager.querySelectorAll('button.linkish')]
+        .find(b => b.textContent.trim() === 'PaletaF13')?.click()
+      await wait(500)
+      const colour = [...manager.querySelectorAll('input[type=color]')][0]
+      if (!colour) return 'no colour input in the palette editor'
+      setInput.call(colour, '#00ff00')
+      colour.dispatchEvent(new Event('input', { bubbles: true }))
+      colour.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      await wait(900)
+
+      const retinted = (await (await fetch('/api/v1/palettes')).json()).palettes
+        .find(p => p.id === paletteId)
+      if (retinted?.values?.[0] !== '#00ff00') {
+        return 'the retint never landed: ' + JSON.stringify(retinted?.values)
+      }
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('palettes are created, attached and retinted through the screen',
+    paletteUi === 'ok', paletteUi)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

@@ -2946,3 +2946,49 @@ button.linkish.left {
 .hint[data-warn="true"] {
   color: #ff8f66;
 }
+
+/* Palettes: manager rows, swatches, apply targets. */
+.palettes {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+}
+
+.palettes summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.palette-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.palette-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.palette-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+
+.palette-editor {
+  padding: 0.4rem 0 0.2rem 0.6rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.palette-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.9rem;
+  margin: 0;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}

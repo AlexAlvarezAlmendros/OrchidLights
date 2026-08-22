@@ -2508,3 +2508,205 @@ DocWriter::Result DocWriter::bakeMatrixToSequence(Doc *doc, quint32 matrixId, qu
     doc->setModified();
     return Result::success();
 }
+
+namespace
+{
+    /* The one place JSON becomes palette values, mirroring loadXML's
+       conversions so the API and the file agree on every shape. */
+    DocWriter::Result applyPaletteBody(QLCPalette *palette, const QJsonObject &body)
+    {
+        using Result = DocWriter::Result;
+
+        if (body.contains(QStringLiteral("name")))
+            palette->setName(body.value(QStringLiteral("name")).toString());
+
+        if (body.contains(QStringLiteral("values")))
+        {
+            const QJsonArray values = body.value(QStringLiteral("values")).toArray();
+            switch (palette->type())
+            {
+            case QLCPalette::Color:
+            {
+                const QColor colour(values.at(0).toString());
+                if (colour.isValid() == false)
+                    return Result::failure(
+                        QStringLiteral("A colour palette's value is \"#rrggbb\""));
+                palette->setValue(values.at(0).toString());
+                break;
+            }
+            case QLCPalette::PanTilt:
+            case QLCPalette::Shutter:
+                if (values.count() != 2)
+                    return Result::failure(
+                        QStringLiteral("This palette type takes two numbers"));
+                palette->setValue(values.at(0).toInt(), values.at(1).toInt());
+                break;
+            case QLCPalette::Position3D:
+                if (values.count() != 3)
+                    return Result::failure(QStringLiteral("Position3D takes three numbers"));
+                palette->setValue(values.at(0).toDouble(), values.at(1).toDouble(),
+                                  values.at(2).toDouble());
+                break;
+            case QLCPalette::Undefined:
+                return Result::failure(QStringLiteral("The palette has no type"));
+            default:
+                if (values.isEmpty())
+                    return Result::failure(QStringLiteral("This palette type takes a number"));
+                palette->setValue(values.at(0).toInt());
+                break;
+            }
+        }
+
+        if (body.contains(QStringLiteral("fanning")))
+        {
+            const QJsonObject fanning = body.value(QStringLiteral("fanning")).toObject();
+            if (fanning.contains(QStringLiteral("type")))
+            {
+                const QString wanted = fanning.value(QStringLiteral("type")).toString();
+                const QLCPalette::FanningType type = QLCPalette::stringToFanningType(wanted);
+                if (QLCPalette::fanningTypeToString(type)
+                        .compare(wanted, Qt::CaseInsensitive) != 0)
+                    return Result::failure(QStringLiteral(
+                        "Fanning type must be Flat, Linear, Sine, Square or Saw"));
+                palette->setFanningType(type);
+            }
+            if (fanning.contains(QStringLiteral("layout")))
+            {
+                const QString wanted = fanning.value(QStringLiteral("layout")).toString();
+                const QLCPalette::FanningLayout layout =
+                    QLCPalette::stringToFanningLayout(wanted);
+                if (QLCPalette::fanningLayoutToString(layout)
+                        .compare(wanted, Qt::CaseInsensitive) != 0)
+                    return Result::failure(QStringLiteral("Unknown fanning layout \"%1\"")
+                                               .arg(wanted));
+                palette->setFanningLayout(layout);
+            }
+            if (fanning.contains(QStringLiteral("amount")))
+            {
+                const int amount = fanning.value(QStringLiteral("amount")).toInt(-1);
+                if (amount < 0 || amount > 100)
+                    return Result::failure(QStringLiteral("Fanning amount is 0..100"));
+                palette->setFanningAmount(amount);
+            }
+            if (fanning.contains(QStringLiteral("value")))
+            {
+                if (palette->type() == QLCPalette::Color)
+                    palette->setFanningValue(
+                        fanning.value(QStringLiteral("value")).toString());
+                else
+                    palette->setFanningValue(fanning.value(QStringLiteral("value")).toInt());
+            }
+        }
+
+        return Result::success();
+    }
+}
+
+DocWriter::Result DocWriter::addPalette(Doc *doc, const QString &type, const QString &name,
+                                        const QJsonObject &body, quint32 &newId)
+{
+    const QLCPalette::PaletteType wanted = QLCPalette::stringToType(type);
+    if (wanted == QLCPalette::Undefined
+        || QLCPalette::typeToString(wanted).compare(type, Qt::CaseInsensitive) != 0)
+    {
+        return Result::failure(QStringLiteral(
+            "Palette type must be Dimmer, Color, Pan, Tilt, PanTilt, Position3D, "
+            "Shutter, Gobo or Zoom"));
+    }
+
+    QLCPalette *palette = new QLCPalette(wanted);
+    palette->setName(name.isEmpty() ? QLCPalette::typeToString(wanted) : name);
+
+    const Result applied = applyPaletteBody(palette, body);
+    if (applied.ok == false)
+    {
+        delete palette;
+        return applied;
+    }
+
+    if (doc->addPalette(palette) == false)
+    {
+        delete palette;
+        return Result::failure(QStringLiteral("The engine refused the palette"));
+    }
+
+    newId = palette->id();
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::updatePalette(Doc *doc, quint32 id, const QJsonObject &body)
+{
+    QLCPalette *palette = doc->palette(id);
+    if (palette == nullptr)
+        return Result::failure(QStringLiteral("No palette with id %1").arg(id));
+
+    const Result applied = applyPaletteBody(palette, body);
+    if (applied.ok == false)
+        return applied;
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::removePalette(Doc *doc, quint32 id)
+{
+    if (doc->palette(id) == nullptr)
+        return Result::failure(QStringLiteral("No palette with id %1").arg(id));
+
+    /* Named where it is still used: a palette quietly removed from under a
+       scene leaves the scene resolving nothing. */
+    QStringList holders;
+    for (const Function *function : doc->functions())
+    {
+        if (function->type() != Function::SceneType)
+            continue;
+        const Scene *scene = qobject_cast<const Scene *>(function);
+        if (scene->palettes().contains(id))
+            holders << scene->name();
+    }
+    if (holders.isEmpty() == false)
+        return Result::failure(QStringLiteral("Still used by: %1").arg(holders.join(", ")));
+
+    doc->deletePalette(id);
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setScenePalettes(Doc *doc, quint32 sceneId,
+                                              const QList<quint32> &paletteIds,
+                                              const QList<quint32> *fixtureIds)
+{
+    Function *function = doc->function(sceneId);
+    if (function == nullptr || function->type() != Function::SceneType)
+        return Result::failure(QStringLiteral("No scene with id %1").arg(sceneId));
+    Scene *scene = qobject_cast<Scene *>(function);
+
+    for (quint32 id : paletteIds)
+    {
+        if (doc->palette(id) == nullptr)
+            return Result::failure(QStringLiteral("No palette with id %1").arg(id));
+    }
+    if (fixtureIds != nullptr)
+    {
+        for (quint32 id : *fixtureIds)
+        {
+            if (doc->fixture(id) == nullptr)
+                return Result::failure(QStringLiteral("No fixture with id %1").arg(id));
+        }
+    }
+
+    for (quint32 existing : scene->palettes())
+        scene->removePalette(existing);
+    for (quint32 id : paletteIds)
+        scene->addPalette(id);
+
+    if (fixtureIds != nullptr)
+    {
+        for (quint32 id : *fixtureIds)
+            scene->addFixture(id);
+    }
+
+    doc->setModified();
+    return Result::success();
+}
