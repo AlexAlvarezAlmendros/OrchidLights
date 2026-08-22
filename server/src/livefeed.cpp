@@ -71,6 +71,9 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(doc->inputOutputMap(), &InputOutputMap::universeWritten,
             this, &LiveFeed::onUniverseWritten, Qt::QueuedConnection);
 
+    /* The beat, straight from the engine's own generator: a metronome drawn
+       from a local timer would drift against the chasers it claims to count. */
+    connect(doc->masterTimer(), &MasterTimer::beat, this, &LiveFeed::onBeat);
     connect(doc->masterTimer(), &MasterTimer::functionListChanged,
             this, &LiveFeed::onFunctionListChanged, Qt::QueuedConnection);
 
@@ -817,6 +820,22 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
     error["type"] = "error";
     error["error"] = QStringLiteral("Unknown message type: ") + type;
     sendJson(socket, error);
+}
+
+void LiveFeed::onBeat()
+{
+    QJsonObject message;
+    message["type"] = "beat";
+    message["bpm"] = m_engine->doc()->masterTimer()->bpmNumber();
+
+    const QString payload =
+        QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+
+    for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+    {
+        if (it.value().authenticated)
+            it.key()->sendTextMessage(payload);
+    }
 }
 
 void LiveFeed::onDisconnected()

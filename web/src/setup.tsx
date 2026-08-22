@@ -167,7 +167,286 @@ function Universes({
       <button type="button" onClick={() => onRun(() => api.addUniverse())}>
         + Añadir universo
       </button>
+
+      {io !== null && <ProfileWorkshop io={io} onRun={onRun} />}
     </div>
+  )
+}
+
+/**
+ * The plugin's own knobs on a patch: ArtNet's target IP, OSC's ports, MIDI's
+ * channel. Written key by key onto the running plugin and persisted with the
+ * patch, so what is shown is what is configured.
+ */
+function PatchKnobs({
+  universe,
+  target,
+  index,
+  label,
+  parameters,
+  onRun,
+}: {
+  universe: number
+  target: 'input' | 'output'
+  index: number
+  label: string
+  parameters: Record<string, unknown> | undefined
+  onRun: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [key, setKey] = useState('')
+  const [value, setValue] = useState('')
+
+  const entries = Object.entries(parameters ?? {})
+
+  const write = (name: string, raw: string) => {
+    /* Numbers travel as numbers: an OSC port sent as "7700" configures a
+       different thing than 7700 in some plugins. */
+    const parsed = raw.trim() !== '' && !Number.isNaN(Number(raw)) ? Number(raw) : raw
+    onRun(() => api.setPatchParameters(universe, { target, index, parameters: { [name]: parsed } }))
+  }
+
+  if (entries.length === 0 && key === '' && value === '') {
+    /* Folded to a single affordance until somebody needs it. */
+  }
+
+  return (
+    <details className="patch-knobs">
+      <summary>Ajustes del plugin ({label})</summary>
+
+      {entries.map(([name, current]) => (
+        <label key={name} className="field">
+          <span>{name}</span>
+          <input
+            defaultValue={String(current)}
+            onBlur={(e) => String(current) !== e.target.value && write(name, e.target.value)}
+          />
+        </label>
+      ))}
+
+      <div className="fields">
+        <label className="field">
+          <span>Parámetro</span>
+          <input value={key} placeholder="outputIP" onChange={(e) => setKey(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Valor</span>
+          <input value={value} onChange={(e) => setValue(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          disabled={key.trim() === ''}
+          onClick={() => {
+            write(key.trim(), value)
+            setKey('')
+            setValue('')
+          }}
+        >
+          Aplicar
+        </button>
+      </div>
+    </details>
+  )
+}
+
+/**
+ * The input profile workshop: what each control on a wing IS, written to
+ * .qxi files QLC+ itself would load. «Aprender» listens to the live feed and
+ * fills in the next control the operator moves -- the whole reason profile
+ * editors exist.
+ */
+function ProfileWorkshop({
+  io,
+  onRun,
+}: {
+  io: IoOptions
+  onRun: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  const [chosenProfile, setChosenProfile] = useState('')
+  const [detail, setDetail] = useState<{
+    editable: boolean
+    channels: { channel: number; name: string; type: string }[]
+  } | null>(null)
+  const [manufacturer, setManufacturer] = useState('')
+  const [model, setModel] = useState('')
+  const [channel, setChannel] = useState('')
+  const [channelName, setChannelName] = useState('')
+  const [channelType, setChannelType] = useState('Button')
+  const [learning, setLearning] = useState(false)
+
+  const reload = useCallback((name: string) => {
+    if (name === '') {
+      setDetail(null)
+      return
+    }
+    api
+      .inputProfile(name)
+      .then((r) => setDetail({ editable: r.editable, channels: r.channels }))
+      .catch(() => setDetail(null))
+  }, [])
+
+  useEffect(() => reload(chosenProfile), [chosenProfile, reload])
+
+  /* Learning: the next control the operator touches names the channel. The
+     live feed already broadcasts every input event for exactly this reason. */
+  useEffect(() => {
+    if (!learning) return
+    const heard = (event: Event) => {
+      const detailEvent = event as CustomEvent<{ channel: number }>
+      setChannel(String(detailEvent.detail.channel))
+      setLearning(false)
+    }
+    window.addEventListener('orchid-input', heard)
+    return () => window.removeEventListener('orchid-input', heard)
+  }, [learning])
+
+  return (
+    <details className="card">
+      <summary>Perfiles de entrada</summary>
+
+      <div className="fields">
+        <label className="field">
+          <span>Perfil</span>
+          <select value={chosenProfile} onChange={(e) => setChosenProfile(e.target.value)}>
+            <option value="">(elige uno)</option>
+            {io.inputProfiles.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Nuevo: fabricante</span>
+          <input value={manufacturer} onChange={(e) => setManufacturer(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Modelo</span>
+          <input value={model} onChange={(e) => setModel(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          disabled={manufacturer.trim() === '' || model.trim() === ''}
+          onClick={() =>
+            onRun(() =>
+              api
+                .createInputProfile({
+                  manufacturer: manufacturer.trim(),
+                  model: model.trim(),
+                })
+                .then((made) => {
+                  setManufacturer('')
+                  setModel('')
+                  setChosenProfile(made.name)
+                }),
+            )
+          }
+        >
+          Crear
+        </button>
+      </div>
+
+      {detail !== null && (
+        <>
+          {!detail.editable && (
+            <p className="hint">
+              Este perfil viene con la instalación: se puede consultar, no tocar. Crea uno nuevo
+              para tu ala.
+            </p>
+          )}
+
+          {detail.channels.length === 0 && <p className="hint">Sin canales todavía.</p>}
+          <ul className="channels">
+            {detail.channels.map((c) => (
+              <li key={c.channel}>
+                <span>
+                  {c.channel}: {c.name} <span className="chip">{c.type}</span>
+                </span>
+                {detail.editable && (
+                  <button
+                    type="button"
+                    aria-label={`Quitar el canal ${c.channel}`}
+                    onClick={() =>
+                      onRun(() => api.removeProfileChannel(chosenProfile, c.channel)).then(() =>
+                        reload(chosenProfile),
+                      )
+                    }
+                  >
+                    ✕
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {detail.editable && (
+            <div className="fields">
+              <label className="field">
+                <span>Canal</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={channel}
+                  onChange={(e) => setChannel(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                aria-pressed={learning}
+                title="Mueve un control del ala y su canal se escribe solo"
+                onClick={() => setLearning((current) => !current)}
+              >
+                {learning ? 'Escuchando…' : 'Aprender'}
+              </button>
+              <label className="field">
+                <span>Nombre</span>
+                <input
+                  value={channelName}
+                  placeholder="Fader 1"
+                  onChange={(e) => setChannelName(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Tipo</span>
+                <select value={channelType} onChange={(e) => setChannelType(e.target.value)}>
+                  {[
+                    'Button',
+                    'Slider',
+                    'Knob',
+                    'Encoder',
+                    'Next Page',
+                    'Previous Page',
+                    'Page Set',
+                  ].map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={channel === '' || channelName.trim() === ''}
+                onClick={() =>
+                  onRun(() =>
+                    api.setProfileChannel(chosenProfile, Number(channel), {
+                      name: channelName.trim(),
+                      type: channelType,
+                    }),
+                  ).then(() => {
+                    setChannel('')
+                    setChannelName('')
+                    reload(chosenProfile)
+                  })
+                }
+              >
+                Guardar canal
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </details>
   )
 }
 
@@ -187,10 +466,14 @@ function UniverseCard({
 
   useEffect(() => setName(universe.name), [universe.name])
 
-  const output = universe.outputs[0]
   // "plugin\u0000line" as the select's value: a line name is only unique inside
   // its plugin, and two plugins offering "Output 1" is the normal case.
-  const outputValue = output ? `${output.plugin}\u0000${output.output}` : ''
+  const lineValue = (patch?: { plugin: string; output: string }) =>
+    patch ? `${patch.plugin}\u0000${patch.output}` : ''
+
+  /* One select per existing patch, plus an empty one to add the next line: a
+     universe can feed ArtNet for the rig and a recorder at the same time. */
+  const outputSlots = [...universe.outputs.map(lineValue), '']
 
   return (
     <article className="card" data-warn={!universe.patched}>
@@ -219,25 +502,43 @@ function UniverseCard({
         </button>
       </header>
 
-      <label className="field">
-        <span>Salida</span>
-        <select
-          value={outputValue}
-          onChange={(e) => {
-            const [plugin = '', line = ''] = e.target.value.split('\u0000')
-            onRun(() => api.patchUniverse(universe.id, { output: { plugin, line } }))
-          }}
-        >
-          <option value="">(ninguna — este universo no llega a nada)</option>
-          {(io?.outputPlugins ?? []).map((plugin) =>
-            plugin.lines.map((line) => (
-              <option key={`${plugin.name}/${line}`} value={`${plugin.name}\u0000${line}`}>
-                {plugin.name} · {line}
-              </option>
-            )),
-          )}
-        </select>
-      </label>
+      {outputSlots.map((value, index) => (
+        // The slot is the identity: patch index N of this universe.
+        // biome-ignore lint/suspicious/noArrayIndexKey: the index is the patch slot
+        <label className="field" key={index}>
+          <span>{index === 0 ? 'Salida' : `Salida ${index + 1}`}</span>
+          <select
+            value={value}
+            onChange={(e) => {
+              const [plugin = '', line = ''] = e.target.value.split('\u0000')
+              onRun(() => api.patchUniverse(universe.id, { output: { plugin, line, index } }))
+            }}
+          >
+            <option value="">
+              {index === 0 ? '(ninguna — este universo no llega a nada)' : '(añadir otra línea…)'}
+            </option>
+            {(io?.outputPlugins ?? []).map((plugin) =>
+              plugin.lines.map((line) => (
+                <option key={`${plugin.name}/${line}`} value={`${plugin.name}\u0000${line}`}>
+                  {plugin.name} · {line}
+                </option>
+              )),
+            )}
+          </select>
+        </label>
+      ))}
+
+      {universe.outputs.map((patch, index) => (
+        <PatchKnobs
+          key={`${patch.plugin}/${patch.output}`}
+          universe={universe.id}
+          target="output"
+          index={index}
+          label={`${patch.plugin} · ${patch.output}`}
+          parameters={patch.parameters}
+          onRun={onRun}
+        />
+      ))}
 
       <label className="field">
         <span>Entrada</span>
@@ -258,6 +559,17 @@ function UniverseCard({
           )}
         </select>
       </label>
+
+      {universe.input && (
+        <PatchKnobs
+          universe={universe.id}
+          target="input"
+          index={0}
+          label={`${universe.input.plugin} · ${universe.input.line}`}
+          parameters={universe.input.parameters}
+          onRun={onRun}
+        />
+      )}
 
       {universe.input && (io?.inputProfiles.length ?? 0) > 0 && (
         <label className="field">

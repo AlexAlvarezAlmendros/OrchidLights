@@ -65,6 +65,7 @@ public:
     int clientCount() const { return m_clients.count(); }
 
 private slots:
+    void onBeat();
     void onNewConnection();
     void onTextMessage(const QString &message);
     void onDisconnected();

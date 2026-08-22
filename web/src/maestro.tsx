@@ -220,3 +220,84 @@ export function StopAll({
     </div>
   )
 }
+
+/**
+ * The global metronome, in the show bar: BPM, a beat LED that blinks on the
+ * ENGINE's beat (not a local timer -- that drifts against the chasers it
+ * claims to count), and tap tempo. Chasers whose tempo is Beats advance on
+ * this.
+ */
+export function BpmDock({ beatTick }: { beatTick: number }) {
+  const [state, setState] = useState<{ source: string; bpm: number } | null>(null)
+  const [lit, setLit] = useState(false)
+  const taps = useRef<number[]>([])
+
+  useEffect(() => {
+    api
+      .beat()
+      .then(setState)
+      .catch(() => setState(null))
+  }, [])
+
+  /* The LED: on for a flash after every engine beat. */
+  useEffect(() => {
+    if (beatTick === 0) return
+    setLit(true)
+    const off = setTimeout(() => setLit(false), 120)
+    return () => clearTimeout(off)
+  }, [beatTick])
+
+  if (state === null) return null
+
+  const running = state.source === 'internal'
+
+  const write = (body: { source?: string; bpm?: number }) =>
+    api
+      .setBeat(body)
+      .then(setState)
+      .catch(() => undefined)
+
+  const tap = () => {
+    const now = performance.now()
+    /* A pause longer than two seconds starts a new measurement: nobody taps
+       a tempo that slow, they stopped tapping. */
+    if (taps.current.length > 0 && now - (taps.current.at(-1) ?? 0) > 2000) {
+      taps.current = []
+    }
+    taps.current.push(now)
+    if (taps.current.length < 3) return
+    taps.current = taps.current.slice(-5)
+    const gaps = taps.current.slice(1).map((t, i) => t - (taps.current[i] ?? 0))
+    const average = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length
+    const bpm = Math.max(1, Math.min(500, Math.round(60_000 / average)))
+    write({ source: 'internal', bpm })
+  }
+
+  return (
+    <div
+      className="bpm-dock"
+      title="Metrónomo del motor: los chasers en tempo Beats avanzan con él"
+    >
+      <button
+        type="button"
+        aria-pressed={running}
+        title={running ? 'Parar el metrónomo' : 'Arrancar el metrónomo'}
+        onClick={() => write({ source: running ? 'none' : 'internal' })}
+      >
+        <span className="bpm-led" data-on={lit && running} aria-hidden="true" />
+        BPM
+      </button>
+      <input
+        type="number"
+        min={1}
+        max={500}
+        value={state.bpm}
+        aria-label="Pulsos por minuto"
+        onChange={(e) => write({ bpm: Number(e.target.value) })}
+      />
+      <button type="button" title="Marca el tempo a golpes" onClick={tap}>
+        TAP
+      </button>
+    </div>
+  )
+}

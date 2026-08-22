@@ -24,7 +24,7 @@ import {
   pagesOf,
 } from './layout'
 import { type Connection, Live } from './live'
-import { GrandMasterDock, StopAll } from './maestro'
+import { BpmDock, GrandMasterDock, StopAll } from './maestro'
 import { MatrixWidget } from './matrix'
 import { Mesa } from './mesa'
 import { Nav } from './nav'
@@ -104,6 +104,7 @@ export function App() {
      while one plays; a local timer would drift and would keep counting after
      the show had stopped. */
   const [shows, setShows] = useState<Record<number, { elapsed: number; paused: boolean }>>({})
+  const [beatTick, setBeatTick] = useState(0)
   /* The latest frame of each universe, kept only while the plan is open.
      Sixty frames a second through React state would re-render the whole app;
      the plan is the one screen that needs them, so nothing else subscribes. */
@@ -251,10 +252,18 @@ export function App() {
       onConnection: setConnection,
       onSlider: (id, value) => setLevels((current) => ({ ...current, [id]: value })),
       onChannelGroup: (id, value) => setGroupLevels((current) => ({ ...current, [id]: value })),
-      onInput: (universe, channel, value) => setLastInput({ universe, channel, value }),
+      onInput: (universe, channel, value) => {
+        setLastInput({ universe, channel, value })
+        /* Re-broadcast for whoever is LEARNING a control -- the profile
+           workshop listens for the next thing the operator touches. */
+        window.dispatchEvent(
+          new CustomEvent('orchid-input', { detail: { universe, channel, value } }),
+        )
+      },
       onFramePage: (id, page) => setSharedPages((current) => ({ ...current, [id]: page })),
       onUniverse: (universe, channels) =>
         setFrames((current) => ({ ...current, [universe]: channels })),
+      onBeat: () => setBeatTick((tick) => tick + 1),
       onShow: (id, elapsed, running, paused) =>
         setShows((current) => {
           if (running) return { ...current, [id]: { elapsed, paused } }
@@ -964,6 +973,7 @@ export function App() {
               Guardar
             </button>
           )}
+          <BpmDock beatTick={beatTick} />
           <StopAll running={running.size} onError={setToast} />
           <button
             type="button"

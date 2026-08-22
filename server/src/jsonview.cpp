@@ -200,6 +200,18 @@ QJsonObject JsonView::universe(const Universe *universe, int index)
         QJsonObject out;
         out["plugin"] = patch->pluginName();
         out["output"] = patch->outputName();
+
+        /* The plugin's own knobs (ArtNet's target IP, OSC's ports), read
+           back from the plugin so what is shown is what is running. */
+        const QMap<QString, QVariant> parameters =
+            const_cast<OutputPatch *>(patch)->getPluginParameters();
+        if (parameters.isEmpty() == false)
+        {
+            QJsonObject knobs;
+            for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it)
+                knobs[it.key()] = QJsonValue::fromVariant(it.value());
+            out["parameters"] = knobs;
+        }
         outputs.append(out);
     }
     json["outputs"] = outputs;
@@ -215,6 +227,16 @@ QJsonObject JsonView::universe(const Universe *universe, int index)
         in["plugin"] = input->pluginName();
         in["line"] = input->inputName();
         in["profile"] = input->profileName();
+
+        const QMap<QString, QVariant> parameters =
+            const_cast<InputPatch *>(input)->getPluginParameters();
+        if (parameters.isEmpty() == false)
+        {
+            QJsonObject knobs;
+            for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it)
+                knobs[it.key()] = QJsonValue::fromVariant(it.value());
+            in["parameters"] = knobs;
+        }
         json["input"] = in;
     }
 

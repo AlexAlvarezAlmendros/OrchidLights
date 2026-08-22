@@ -315,8 +315,13 @@ export interface FixtureState {
 export interface UniverseState {
   id: number
   name: string
-  outputs: { plugin: string; output: string }[]
-  input?: { plugin: string; line: string; profile: string }
+  outputs: { plugin: string; output: string; parameters?: Record<string, unknown> }[]
+  input?: {
+    plugin: string
+    line: string
+    profile: string
+    parameters?: Record<string, unknown>
+  }
   /** Where this universe's feedback goes out (motorized faders, LEDs). */
   feedback?: { plugin: string; line: string }
   passthrough: boolean
@@ -608,6 +613,49 @@ export const api = {
         body: JSON.stringify({ action, at, amount }),
       },
     ),
+  /** The engine's metronome: internal source and its tempo. */
+  beat: () => json<{ source: string; bpm: number }>('/api/v1/beat'),
+  setBeat: (body: { source?: string; bpm?: number }) =>
+    json<{ source: string; bpm: number }>('/api/v1/beat', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /** Plugin knobs on a patch (ArtNet's IP, OSC's ports…), persisted with it. */
+  setPatchParameters: (
+    universe: number,
+    body: { target: 'input' | 'output'; index?: number; parameters: Record<string, unknown> },
+  ) =>
+    json<unknown>(`/api/v1/universes/${universe}/parameters`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  inputProfile: (name: string) =>
+    json<{
+      name: string
+      manufacturer: string
+      model: string
+      type: string
+      editable: boolean
+      channels: { channel: number; name: string; type: string }[]
+    }>(`/api/v1/inputprofiles/${encodeURIComponent(name)}`),
+  createInputProfile: (body: { manufacturer: string; model: string; type?: string }) =>
+    json<{ name: string }>('/api/v1/inputprofiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  setProfileChannel: (profile: string, channel: number, body: { name: string; type: string }) =>
+    json<unknown>(`/api/v1/inputprofiles/${encodeURIComponent(profile)}/channels/${channel}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  removeProfileChannel: (profile: string, channel: number) =>
+    json<unknown>(`/api/v1/inputprofiles/${encodeURIComponent(profile)}/channels/${channel}`, {
+      method: 'DELETE',
+    }),
   /** Peak per bucket, 0-100, over the whole audio file. */
   waveform: (id: number, points = 200) =>
     json<{ points: number[]; duration: number }>(
@@ -863,7 +911,7 @@ export const api = {
     patch: {
       name?: string
       passthrough?: boolean
-      output?: { plugin: string; line: string }
+      output?: { plugin: string; line: string; index?: number }
       input?: { plugin: string; line: string; profile?: string }
       feedback?: { plugin: string; line: string }
     },
