@@ -2560,6 +2560,112 @@ try {
   })()`)
   check('the matrix and EFX editors act for real', matrixUi === 'ok', matrixUi)
 
+  /* The channel tools and the script checker, through the screen: a gel
+     picked from the book writes its EXACT RGB into the scene, and the
+     checker points at the line the engine refuses. */
+  const toolsUi = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const post = async (path, body) => (await (await fetch('/api/v1' + path, {
+      method: 'POST', headers: json, body: JSON.stringify(body) })).json())
+
+    const gels = await (await fetch('/api/v1/colorfilters')).json()
+    if (!gels.filters.some(f => f.name === 'Named RGB')) return 'none'
+
+    const before = new Set((await (await fetch('/api/v1/fixtures')).json()).map(f => f.id))
+    await post('/fixtures', { manufacturer: 'Generic', model: 'Generic RGBW', mode: 'RGBW', universe: 1, address: 300 })
+    const bar = (await (await fetch('/api/v1/fixtures')).json()).find(f => !before.has(f.id))
+    const scene = (await post('/functions', { type: 'Scene', name: 'GelF12' })).id
+    const script = (await post('/functions', { type: 'Script', name: 'GuionF12' })).id
+    await fetch('/api/v1/functions/' + script + '/body', { method: 'PUT', headers: json,
+      body: JSON.stringify({ data: 'wait:1000\\nesto no es un comando' }) })
+
+    const cleanup = async () => {
+      document.querySelector('article.card header button[aria-label="Cerrar"]')?.click()
+      await wait(300)
+      for (const id of [scene, script]) {
+        await fetch('/api/v1/functions/' + id + '?force=true', { method: 'DELETE' })
+      }
+      await fetch('/api/v1/fixtures/' + bar.id, { method: 'DELETE' })
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      if (searchBox && searchBox.value !== '') {
+        const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setInput.call(searchBox, '')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+    }
+
+    try {
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Funciones')?.click()
+      await wait(900)
+
+      const openEditor = async (name) => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const row = [...document.querySelectorAll('.table-row')]
+            .find(r => r.querySelector('button.linkish')?.textContent === name)
+          row?.querySelector('button.linkish')?.click()
+          await wait(800)
+          const card = [...document.querySelectorAll('article.card')]
+            .find(c => c.querySelector('header strong')?.textContent === name)
+          if (card) return card
+        }
+        return undefined
+      }
+
+      const editor = await openEditor('GelF12')
+      if (!editor) return 'the scene editor never opened'
+
+      const tools = editor.querySelector('details.channel-tools')
+      if (!tools) return 'no channel tools'
+      tools.open = true
+      await wait(300)
+
+      /* Point the tools at OUR bar, then pick Snow from the book. */
+      const fixtureSelect = [...tools.querySelectorAll('label.field')]
+        .find(l => l.querySelector('span')?.textContent === 'Fixture')?.querySelector('select')
+      const setSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setSelect.call(fixtureSelect, String(bar.id))
+      fixtureSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(700)
+
+      const gelSelect = [...tools.querySelectorAll('label.field')]
+        .find(l => l.querySelector('span')?.textContent?.startsWith('Gelatinas'))
+        ?.querySelector('select')
+      if (!gelSelect) return 'no gel book on an RGB fixture'
+      const snow = [...gelSelect.options].find(o => o.textContent.startsWith('Snow'))
+      if (!snow) return 'Snow is not in the book'
+      setSelect.call(gelSelect, snow.value)
+      gelSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(900)
+
+      const bodyNow = await (await fetch('/api/v1/functions/' + scene + '/body')).json()
+      const values = {}
+      for (const v of bodyNow.values ?? []) values[v.channel] = v.value
+      /* Snow is #FFFAFA: R 255, G 250, B 250 -- EXACTLY. */
+      if (values[0] !== 255 || values[1] !== 250 || values[2] !== 250) {
+        return 'the gel did not write its exact RGB: ' + JSON.stringify(bodyNow.values)
+      }
+
+      /* The script checker, on a script with a known bad line. */
+      const scriptEditor = await openEditor('GuionF12')
+      if (!scriptEditor) return 'the script editor never opened'
+      ;[...scriptEditor.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Comprobar sintaxis')?.click()
+      await wait(800)
+      const verdict = [...scriptEditor.querySelectorAll('.hint')]
+        .map(h => h.textContent).join(' ')
+      if (!verdict.includes('2')) return 'the checker never pointed at line 2: ' + verdict
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the gel writes exact RGB and the checker points at the line',
+    toolsUi === 'ok' || toolsUi === 'none', toolsUi)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

@@ -484,6 +484,23 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values }),
     }),
+  /** The engine's own tokenizer, on whatever text: WHICH lines it refuses. */
+  scriptCheck: (data: string) =>
+    json<{ errors: number[] }>('/api/v1/script/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    }),
+  /** Peak per bucket, 0-100, over the whole audio file. */
+  waveform: (id: number, points = 200) =>
+    json<{ points: number[]; duration: number }>(
+      `/api/v1/functions/${id}/waveform?points=${points}`,
+    ),
+  /** The gel books: named colour collections shipped with the daemon. */
+  colorFilters: () =>
+    json<{ filters: { name: string; colors: { name: string; rgb: string }[] }[] }>(
+      '/api/v1/colorfilters',
+    ),
   bakeMatrix: (id: number) =>
     json<{ scene: number; sequence: number }>(`/api/v1/functions/${id}/bake`, {
       method: 'POST',
