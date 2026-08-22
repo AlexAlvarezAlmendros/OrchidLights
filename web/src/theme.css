@@ -3318,3 +3318,42 @@ button.linkish.left {
   background: var(--text);
   border-radius: 1px;
 }
+
+/* ---- BPM dock ------------------------------------------------------------ */
+
+.bpm-dock {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.bpm-dock input {
+  width: 4rem;
+}
+
+.bpm-led {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--border);
+  margin-right: 0.3rem;
+  transition: background 60ms;
+}
+
+.bpm-led[data-on="true"] {
+  background: var(--live);
+  box-shadow: 0 0 6px var(--live);
+}
+
+/* ---- Patch knobs --------------------------------------------------------- */
+
+.patch-knobs {
+  margin: 0.25rem 0;
+}
+
+.patch-knobs summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}

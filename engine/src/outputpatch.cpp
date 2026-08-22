@@ -165,7 +165,16 @@ void OutputPatch::setPluginParameter(QString prop, QVariant value)
 QMap<QString, QVariant> OutputPatch::getPluginParameters()
 {
     if (m_plugin != NULL)
-        return m_plugin->getParameters(m_universe, m_pluginLine, QLCIOPlugin::Output);
+    {
+        QMap<QString, QVariant> fromPlugin =
+            m_plugin->getParameters(m_universe, m_pluginLine, QLCIOPlugin::Output);
+        /* The base-class cache tracks ONE line per universe, so on a universe
+           driving two lines the second patch's knobs vanish from it. What this
+           patch was told is still the truth about what was configured. */
+        if (fromPlugin.isEmpty() == false)
+            return fromPlugin;
+        return m_parametersCache;
+    }
 
     return QMap<QString, QVariant>();
 }

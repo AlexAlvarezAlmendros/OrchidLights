@@ -194,7 +194,7 @@ DocWriter::Result DocWriter::setPassthrough(Doc *doc, int index, bool enabled)
 }
 
 DocWriter::Result DocWriter::setOutputPatch(Doc *doc, int index, const QString &pluginName,
-                                            const QString &outputName)
+                                            const QString &outputName, int patchIndex)
 {
     QString error;
     const int engine = engineIndex(doc, index, error);
@@ -203,12 +203,40 @@ DocWriter::Result DocWriter::setOutputPatch(Doc *doc, int index, const QString &
 
     InputOutputMap *map = doc->inputOutputMap();
 
+    /* A universe can drive several lines at once -- the desk feeding ArtNet
+       for the rig and a loopback for a recorder is the reference's own
+       example. Index -1 keeps the old meaning: the first patch, or all of
+       them when clearing. */
+    const int count = map->outputPatchesCount(quint32(engine));
+    if (patchIndex > count || patchIndex > 15)
+    {
+        return Result::failure(QStringLiteral(
+            "Universe %1 has %2 output %3; the next index is %4")
+                                   .arg(index).arg(count)
+                                   .arg(count == 1 ? QStringLiteral("patch")
+                                                   : QStringLiteral("patches"))
+                                   .arg(count));
+    }
+
     if (pluginName.isEmpty())
     {
+        if (patchIndex >= 0)
+        {
+            if (patchIndex >= count)
+            {
+                return Result::failure(QStringLiteral("Universe %1 has no output patch %2")
+                                           .arg(index).arg(patchIndex));
+            }
+            map->setOutputPatch(quint32(engine), QString(), QString(), QString(), 0, false,
+                                patchIndex);
+            doc->setModified();
+            return Result::success();
+        }
+
         /* Clearing means clearing all of them. A universe can carry several
            output patches, and clearing only the first left the rest live --
            "unpatched" in the interface while still driving lamps. */
-        for (int i = map->outputPatchesCount(quint32(engine)) - 1; i >= 0; i--)
+        for (int i = count - 1; i >= 0; i--)
             map->setOutputPatch(quint32(engine), QString(), QString(), QString(), 0, false, i);
 
         doc->setModified();
@@ -229,8 +257,51 @@ DocWriter::Result DocWriter::setOutputPatch(Doc *doc, int index, const QString &
                                    .arg(pluginName, outputName, lines.join(QStringLiteral(" | "))));
     }
 
-    if (map->setOutputPatch(quint32(engine), pluginName, QString(), lines.at(int(line)), line) == false)
+    if (map->setOutputPatch(quint32(engine), pluginName, QString(), lines.at(int(line)), line,
+                            false, qMax(0, patchIndex)) == false)
         return Result::failure(QStringLiteral("The engine refused the output patch"));
+
+    doc->setModified();
+    return Result::success();
+}
+
+DocWriter::Result DocWriter::setPatchParameters(Doc *doc, int index, const QString &target,
+                                                int patchIndex,
+                                                const QMap<QString, QVariant> &parameters)
+{
+    QString error;
+    const int engine = engineIndex(doc, index, error);
+    if (engine < 0)
+        return Result::failure(error);
+
+    InputOutputMap *map = doc->inputOutputMap();
+
+    if (target == QStringLiteral("output"))
+    {
+        OutputPatch *patch = map->outputPatch(quint32(engine), qMax(0, patchIndex));
+        if (patch == nullptr || patch->isPatched() == false)
+        {
+            return Result::failure(QStringLiteral(
+                "Universe %1 has no output patch %2 to configure").arg(index).arg(qMax(0, patchIndex)));
+        }
+        for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it)
+            patch->setPluginParameter(it.key(), it.value());
+    }
+    else if (target == QStringLiteral("input"))
+    {
+        InputPatch *patch = map->inputPatch(quint32(engine));
+        if (patch == nullptr || patch->isPatched() == false)
+        {
+            return Result::failure(
+                QStringLiteral("Universe %1 has no input patch to configure").arg(index));
+        }
+        for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it)
+            patch->setPluginParameter(it.key(), it.value());
+    }
+    else
+    {
+        return Result::failure(QStringLiteral("\"target\" is input or output"));
+    }
 
     doc->setModified();
     return Result::success();

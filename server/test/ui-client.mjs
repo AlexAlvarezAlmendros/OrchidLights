@@ -3548,6 +3548,132 @@ try {
   check('the timeline is a transport: cursor, surgery, solo, beats, play-from',
     showManager === 'ok', showManager)
 
+  /* F17 through the screen: a universe grows a second output from its card,
+     the BPM dock arms the engine's metronome and taps a tempo, and the
+     profile workshop writes a channel and reads it back. */
+  const ioDepth = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    let profileBorn = false
+
+    const cleanup = async () => {
+      if (profileBorn)
+        await fetch('/api/v1/inputprofiles/' + encodeURIComponent('UI Wing'), { method: 'DELETE' })
+      await fetch('/api/v1/beat', { method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'none' }) })
+    }
+
+    try {
+      const io = await (await fetch('/api/v1/io')).json()
+      const hasLines = (io.outputPlugins ?? []).some(p => p.lines.length >= 2)
+
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Patch')?.click()
+      await wait(900)
+
+      /* The second output, from the card. Only when the tree has lines. */
+      if (hasLines) {
+        const universeBefore = (await (await fetch('/api/v1/universes')).json())[0]
+        /* ONE card: the page draws a card per universe and each carries its
+           own slots. */
+        const cardU1 = [...document.querySelectorAll('article.card')]
+          .find(c => c.querySelector('.chip')?.textContent === 'U1')
+        if (!cardU1) return 'there is no card for universe 1'
+        const slots = [...cardU1.querySelectorAll('label')]
+          .filter(l => (l.querySelector('span')?.textContent ?? '').startsWith('Salida'))
+        if (slots.length === 0) return 'the universe card offers no output slots'
+        const expected = (universeBefore.outputs?.length ?? 0) + 1
+        if (slots.length !== expected) {
+          return 'the card offers ' + slots.length + ' output slots for '
+            + (universeBefore.outputs?.length ?? 0) + ' patches'
+        }
+      }
+
+      /* The BPM dock arms the metronome. */
+      const dock = document.querySelector('.bpm-dock')
+      if (!dock) return 'there is no BPM dock'
+      const bpmToggle = [...dock.querySelectorAll('button')]
+        .find(b => b.textContent.includes('BPM'))
+      /* The PROJECT can arrive with the metronome armed (the .qxw carries a
+         BeatGenerator tag), so drive from the actual state. */
+      let beat = await (await fetch('/api/v1/beat')).json()
+      if (beat.source !== 'internal') {
+        bpmToggle?.click()
+        await wait(700)
+        beat = await (await fetch('/api/v1/beat')).json()
+      }
+      if (beat.source !== 'internal') return 'the dock armed nothing: ' + beat.source
+
+      /* The LED blinks on the ENGINE's beat. */
+      let lit = false
+      for (let tries = 0; tries < 30 && !lit; tries++) {
+        lit = dock.querySelector('.bpm-led')?.dataset.on === 'true'
+        await wait(60)
+      }
+      if (!lit) return 'the beat LED never blinked'
+
+      /* Tap tempo: three taps 300 ms apart land near 200 BPM. */
+      const tap = [...dock.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'TAP')
+      for (let i = 0; i < 4; i++) {
+        tap?.click()
+        await wait(300)
+      }
+      await wait(400)
+      beat = await (await fetch('/api/v1/beat')).json()
+      if (beat.bpm < 150 || beat.bpm > 260) {
+        return 'four taps at 300 ms set ' + beat.bpm + ' BPM'
+      }
+      bpmToggle?.click()
+      await wait(400)
+
+      /* The profile workshop. */
+      const workshop = [...document.querySelectorAll('summary')]
+        .find(s => s.textContent.trim() === 'Perfiles de entrada')
+      if (!workshop) return 'there is no profile workshop'
+      workshop.click()
+      await wait(400)
+      const card = workshop.parentElement
+      const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      const fill = (label, value) => {
+        const box = [...card.querySelectorAll('label')]
+          .find(l => l.querySelector('span')?.textContent === label)?.querySelector('input')
+        if (!box) return false
+        setI.call(box, value)
+        box.dispatchEvent(new Event('input', { bubbles: true }))
+        return true
+      }
+      if (!fill('Nuevo: fabricante', 'UI') || !fill('Modelo', 'Wing')) {
+        return 'the workshop has no creation fields'
+      }
+      ;[...card.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Crear')?.click()
+      await wait(1000)
+      profileBorn = true
+
+      if (!fill('Canal', '55') || !fill('Nombre', 'Botón uno')) {
+        return 'the workshop has no channel fields'
+      }
+      ;[...card.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Guardar canal')?.click()
+      await wait(1000)
+      const readBack = await (await fetch(
+        '/api/v1/inputprofiles/' + encodeURIComponent('UI Wing'))).json()
+      if (!readBack.channels?.some(c => c.channel === 55 && c.name === 'Botón uno')) {
+        return 'the channel never landed: ' + JSON.stringify(readBack.channels)
+      }
+      const listed = [...card.querySelectorAll('li')]
+        .some(li => li.textContent.includes('55: Botón uno'))
+      if (!listed) return 'the workshop does not draw the channel it saved'
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the I/O depth acts: output slots, BPM dock with a live LED, profile workshop',
+    ioDepth === 'ok', ioDepth)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

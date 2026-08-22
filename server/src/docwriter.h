@@ -72,7 +72,7 @@ namespace DocWriter
      * lamp at all, and until now it could only be read.
      */
     Result setOutputPatch(Doc *doc, int index, const QString &pluginName,
-                          const QString &outputName);
+                          const QString &outputName, int patchIndex = -1);
 
     /** The feedback line of a universe: where the router's LED echoes go.
      *  An empty plugin name clears it. */
@@ -81,6 +81,14 @@ namespace DocWriter
 
     Result setInputPatch(Doc *doc, int index, const QString &pluginName,
                          const QString &inputName, const QString &profileName);
+
+    /**
+     * Plugin knobs on a patch: ArtNet's target IP, OSC's ports, MIDI's
+     * channel. Written onto the patch so the plugin reconfigures NOW and the
+     * .qxw carries them in its PluginParameters tag.
+     */
+    Result setPatchParameters(Doc *doc, int index, const QString &target, int patchIndex,
+                              const QMap<QString, QVariant> &parameters);
 
     /* ---- Fixtures ------------------------------------------------------ */
 

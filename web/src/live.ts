@@ -26,6 +26,7 @@ export interface LiveHandlers {
   /** An external control moved. Carried live because binding a widget to one
    *  means watching for the next thing the operator touches. */
   onInput?: (universe: number, channel: number, value: number) => void
+  onBeat?: (bpm: number) => void
   onFramePage?: (id: number, page: number) => void
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
@@ -127,6 +128,9 @@ export class Live {
           break
         case 'input':
           this.handlers.onInput?.(message.universe, message.channel, message.value)
+          break
+        case 'beat':
+          this.handlers.onBeat?.(message.bpm)
           break
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)

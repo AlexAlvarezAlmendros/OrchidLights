@@ -72,6 +72,8 @@
 #include "functionparent.h"
 #include "inputoutputmap.h"
 #include "mastertimer.h"
+#include "qlcinputprofile.h"
+#include "qlcinputchannel.h"
 #include "keypadparser.h"
 #include "simpledesksource.h"
 #include "function.h"
@@ -2914,6 +2916,40 @@ void ApiServer::registerRoutes()
         return writeResult(added, body);
     });
 
+    m_server->route("/api/v1/universes/<arg>/parameters", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const int index = rawIndex.toInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        if (body.value("parameters").isObject() == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Send {\"target\": \"input\"|\"output\", "
+                                            "\"index\": n, \"parameters\": {key: value}}"));
+        }
+
+        QMap<QString, QVariant> parameters;
+        const QJsonObject raw = body.value("parameters").toObject();
+        for (auto it = raw.constBegin(); it != raw.constEnd(); ++it)
+            parameters.insert(it.key(), it.value().toVariant());
+
+        const DocWriter::Result result = DocWriter::setPatchParameters(
+            doc, index, body.value("target").toString(QStringLiteral("output")),
+            body.value("index").toInt(0), parameters);
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["universe"] = index;
+        return QHttpServerResponse(response);
+    });
+
     m_server->route("/api/v1/universes/<arg>", QHttpServerRequest::Method::Delete,
                     [doc, denied, writeResult](const QString &rawIndex, const QHttpServerRequest &request) {
         if (denied(request))
@@ -2962,7 +2998,8 @@ void ApiServer::registerRoutes()
             const QJsonObject output = patch.value("output").toObject();
             const DocWriter::Result result =
                 DocWriter::setOutputPatch(doc, index, output.value("plugin").toString(),
-                                          output.value("line").toString());
+                                          output.value("line").toString(),
+                                          output.value("index").toInt(-1));
             if (result.ok == false)
                 return jsonError(StatusCode::BadRequest, result.error);
         }
@@ -3444,6 +3481,274 @@ void ApiServer::registerRoutes()
         if (unresolved.isEmpty() == false)
             body["unresolved"] = unresolved;
         return QHttpServerResponse(body);
+    });
+
+    /* Input profiles: what each control on a MIDI wing IS. The editor's whole
+       job is writing .qxi files QLC+ itself would load; learning a control is
+       the web reading /input/last and filling the channel in. Only profiles in
+       the user directory can be edited -- the system ones ship with the
+       installation and are every project's shared vocabulary. */
+    m_server->route("/api/v1/inputprofiles/<arg>", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QString &name, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QLCInputProfile *profile = doc->inputOutputMap()->profile(name);
+        if (profile == nullptr)
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No input profile named \"%1\"").arg(name));
+
+        QJsonObject body;
+        body["name"] = profile->name();
+        body["manufacturer"] = profile->manufacturer();
+        body["model"] = profile->model();
+        body["type"] = QLCInputProfile::typeToString(profile->type());
+        body["editable"] = profile->path().startsWith(
+            InputOutputMap::userProfileDirectory().absolutePath());
+
+        QJsonArray channels;
+        const QMap<quint32, QLCInputChannel *> map = profile->channels();
+        for (auto it = map.constBegin(); it != map.constEnd(); ++it)
+        {
+            QJsonObject channel;
+            channel["channel"] = qint64(it.key());
+            channel["name"] = it.value()->name();
+            channel["type"] = QLCInputChannel::typeToString(it.value()->type());
+            channels.append(channel);
+        }
+        body["channels"] = channels;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/inputprofiles", QHttpServerRequest::Method::Post,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const QString manufacturer = body.value("manufacturer").toString().trimmed();
+        const QString model = body.value("model").toString().trimmed();
+        if (manufacturer.isEmpty() || model.isEmpty())
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("A profile needs a manufacturer and a model"));
+        }
+
+        const QString name = QStringLiteral("%1 %2").arg(manufacturer, model);
+        if (doc->inputOutputMap()->profile(name) != nullptr)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("There is already a profile named \"%1\"").arg(name));
+        }
+
+        QLCInputProfile *profile = new QLCInputProfile();
+        profile->setManufacturer(manufacturer);
+        profile->setModel(model);
+        const QString typeName = body.value("type").toString(QStringLiteral("MIDI"));
+        profile->setType(QLCInputProfile::stringToType(typeName));
+
+        QDir directory = InputOutputMap::userProfileDirectory();
+        const QString fileName = QStringLiteral("%1-%2.qxi")
+            .arg(manufacturer, model).replace(QChar(' '), QChar('-'));
+        const QString path = directory.absoluteFilePath(fileName);
+        if (profile->saveXML(path) == false)
+        {
+            delete profile;
+            return jsonError(StatusCode::InternalServerError,
+                             QStringLiteral("Could not write %1").arg(path));
+        }
+
+        if (doc->inputOutputMap()->addProfile(profile) == false)
+        {
+            delete profile;
+            return jsonError(StatusCode::InternalServerError,
+                             QStringLiteral("The engine refused the profile"));
+        }
+
+        QJsonObject response;
+        response["name"] = name;
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/inputprofiles/<arg>/channels/<arg>", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QString &name, const QString &rawChannel,
+                                  const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 number = rawChannel.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Channel must be a number"));
+
+        QLCInputProfile *profile = doc->inputOutputMap()->profile(name);
+        if (profile == nullptr)
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No input profile named \"%1\"").arg(name));
+        if (profile->path().startsWith(
+                InputOutputMap::userProfileDirectory().absolutePath()) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"%1\" ships with the installation; copy it into "
+                                            "a new profile to change it").arg(name));
+        }
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const QString typeName = body.value("type").toString(QStringLiteral("Button"));
+        const QLCInputChannel::Type type = QLCInputChannel::stringToType(typeName);
+        if (QLCInputChannel::typeToString(type) != typeName)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"%1\" is not a channel type").arg(typeName));
+        }
+
+        QLCInputChannel *channel = new QLCInputChannel();
+        channel->setName(body.value("name").toString());
+        channel->setType(type);
+
+        profile->removeChannel(number);
+        if (profile->insertChannel(number, channel) == false)
+        {
+            delete channel;
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("The profile refused channel %1").arg(number));
+        }
+
+        if (profile->saveXML(profile->path()) == false)
+        {
+            return jsonError(StatusCode::InternalServerError,
+                             QStringLiteral("Could not write %1").arg(profile->path()));
+        }
+
+        QJsonObject response;
+        response["channel"] = qint64(number);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/inputprofiles/<arg>/channels/<arg>",
+                    QHttpServerRequest::Method::Delete,
+                    [doc, denied](const QString &name, const QString &rawChannel,
+                                  const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 number = rawChannel.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Channel must be a number"));
+
+        QLCInputProfile *profile = doc->inputOutputMap()->profile(name);
+        if (profile == nullptr)
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No input profile named \"%1\"").arg(name));
+        if (profile->path().startsWith(
+                InputOutputMap::userProfileDirectory().absolutePath()) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"%1\" ships with the installation").arg(name));
+        }
+
+        if (profile->removeChannel(number) == false)
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("The profile has no channel %1").arg(number));
+
+        if (profile->saveXML(profile->path()) == false)
+        {
+            return jsonError(StatusCode::InternalServerError,
+                             QStringLiteral("Could not write %1").arg(profile->path()));
+        }
+
+        QJsonObject response;
+        response["removed"] = qint64(number);
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/inputprofiles/<arg>", QHttpServerRequest::Method::Delete,
+                    [doc, denied](const QString &name, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QLCInputProfile *profile = doc->inputOutputMap()->profile(name);
+        if (profile == nullptr)
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No input profile named \"%1\"").arg(name));
+        if (profile->path().startsWith(
+                InputOutputMap::userProfileDirectory().absolutePath()) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"%1\" ships with the installation").arg(name));
+        }
+
+        const QString path = profile->path();
+        if (doc->inputOutputMap()->removeProfile(name) == false)
+            return jsonError(StatusCode::InternalServerError,
+                             QStringLiteral("The engine refused to drop the profile"));
+        QFile::remove(path);
+
+        QJsonObject response;
+        response["removed"] = name;
+        return QHttpServerResponse(response);
+    });
+
+    /* The global beat: QLC+'s BPM toolbar. Internal means the engine's own
+       metronome; chasers whose tempo is Beats advance on it. */
+    m_server->route("/api/v1/beat", QHttpServerRequest::Method::Get,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        /* Through InputOutputMap rather than straight at the timer: the
+           generator type is what the .qxw persists, and a project can arrive
+           with the metronome already armed. */
+        QJsonObject body;
+        body["source"] = doc->inputOutputMap()->beatGeneratorType() == InputOutputMap::Internal
+            ? QStringLiteral("internal") : QStringLiteral("none");
+        body["bpm"] = doc->masterTimer()->bpmNumber();
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/beat", QHttpServerRequest::Method::Put,
+                    [doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        InputOutputMap *map = doc->inputOutputMap();
+
+        if (body.contains("source"))
+        {
+            const QString source = body.value("source").toString();
+            if (source == QStringLiteral("internal"))
+                map->setBeatGeneratorType(InputOutputMap::Internal);
+            else if (source == QStringLiteral("none"))
+                map->setBeatGeneratorType(InputOutputMap::Disabled);
+            else
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("\"source\" is internal or none (external "
+                                                "sources arrive with MIDI clock support)"));
+            }
+            doc->setModified();
+        }
+
+        if (body.contains("bpm"))
+        {
+            const int bpm = body.value("bpm").toInt(-1);
+            if (bpm < 1 || bpm > 500)
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("BPM must be between 1 and 500"));
+            /* Straight at the timer as well as through the map: the map
+               swallows a BPM while the generator is off, and asking for a
+               tempo should never be silently ignored. */
+            doc->masterTimer()->requestBpmNumber(bpm);
+            map->setBpmNumber(bpm);
+        }
+
+        QJsonObject response;
+        response["source"] = map->beatGeneratorType() == InputOutputMap::Internal
+            ? QStringLiteral("internal") : QStringLiteral("none");
+        response["bpm"] = doc->masterTimer()->bpmNumber();
+        return QHttpServerResponse(response);
     });
 
     m_server->route("/api/v1/project/import/preview", QHttpServerRequest::Method::Post,
