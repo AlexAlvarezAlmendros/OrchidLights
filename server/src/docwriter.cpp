@@ -2781,6 +2781,58 @@ DocWriter::Result DocWriter::setVideoSource(Doc *doc, quint32 videoId, const QSt
     return Result::success();
 }
 
+DocWriter::Result DocWriter::setVideoExtras(Doc *doc, quint32 videoId, const QJsonObject &body)
+{
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setVideoExtras"), videoId);
+    Function *function = doc->function(videoId);
+    if (function == nullptr || function->type() != Function::VideoType)
+        return Result::failure(QStringLiteral("No video function with id %1").arg(videoId));
+    Video *video = qobject_cast<Video *>(function);
+
+    if (body.contains(QStringLiteral("screen")))
+    {
+        const int screen = body.value(QStringLiteral("screen")).toInt(-1);
+        if (screen < 0 || screen > 15)
+            return Result::failure(QStringLiteral("\"screen\" is a monitor index, 0 to 15"));
+        video->setScreen(screen);
+    }
+
+    if (body.contains(QStringLiteral("fullscreen")))
+        video->setFullscreen(body.value(QStringLiteral("fullscreen")).toBool());
+
+    if (body.contains(QStringLiteral("layer")))
+        video->setZIndex(body.value(QStringLiteral("layer")).toInt(1));
+
+    if (body.contains(QStringLiteral("geometry")))
+    {
+        const QJsonValue value = body.value(QStringLiteral("geometry"));
+        if (value.isNull())
+        {
+            video->setCustomGeometry(QRect());
+        }
+        else
+        {
+            const QJsonObject rect = value.toObject();
+            video->setCustomGeometry(QRect(rect.value(QStringLiteral("x")).toInt(),
+                                           rect.value(QStringLiteral("y")).toInt(),
+                                           rect.value(QStringLiteral("width")).toInt(),
+                                           rect.value(QStringLiteral("height")).toInt()));
+        }
+    }
+
+    if (body.contains(QStringLiteral("rotation")))
+    {
+        const QJsonObject rot = body.value(QStringLiteral("rotation")).toObject();
+        video->setRotation(QVector3D(float(rot.value(QStringLiteral("x")).toDouble()),
+                                     float(rot.value(QStringLiteral("y")).toDouble()),
+                                     float(rot.value(QStringLiteral("z")).toDouble())));
+    }
+
+    UNDO_COMMIT();
+    doc->setModified();
+    return Result::success();
+}
+
 
 DocWriter::Result DocWriter::setEfx(Doc *doc, quint32 efxId, const QString &algorithm,
                                     const QJsonObject &geometry, const QList<quint32> *fixtureIds)

@@ -245,6 +245,9 @@ jobs:
       - name: Access smoke test (the kiosk mask, bar by bar)
         run: ./server/test/access-smoke.sh orchidlightsd
 
+      - name: Video smoke test (media without a token, the feed directs)
+        run: ./server/test/video-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

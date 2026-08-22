@@ -41,6 +41,8 @@
 #include "levelsource.h"
 
 #include "functionparent.h"
+#include "video.h"
+#include <QDateTime>
 #include "inputoutputmap.h"
 #include "mastertimer.h"
 #include "chaseraction.h"
@@ -983,6 +985,7 @@ void LiveFeed::flush()
         m_functionsDirty = false;
         m_chaserSteps.clear();
         m_runningShows.clear();
+        m_playingVideos.clear();
         m_changed.clear();
         m_projectDirty = false;
         return;
@@ -1042,6 +1045,96 @@ void LiveFeed::flush()
             m_runningShows.insert(function->id());
         else
             m_runningShows.remove(function->id());
+    }
+
+    /* Video, for the surfaces: started carries EVERYTHING a screen needs to
+       begin playing (source name, screen, layer, geometry, rotation), sync
+       every five seconds carries the show's own clock so a surface corrects
+       its drift, stopped takes it down. A surface that connects mid-film
+       catches up on the next sync -- it carries the same payload started
+       does, on purpose. */
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    for (Function *function : m_engine->doc()->functions())
+    {
+        if (function->type() != Function::VideoType)
+            continue;
+
+        const quint32 id = function->id();
+        const bool running = function->isRunning();
+        const bool known = m_playingVideos.contains(id);
+        if (running == false && known == false)
+            continue;
+
+        const Video *video = qobject_cast<const Video *>(function);
+        const bool paused = function->isPaused();
+
+        QString action;
+        if (running && known == false)
+            action = QStringLiteral("started");
+        else if (running == false)
+            action = QStringLiteral("stopped");
+        else if (paused != m_playingVideos.value(id).paused)
+            action = paused ? QStringLiteral("paused") : QStringLiteral("resumed");
+        else if (nowMs - m_playingVideos.value(id).lastSync >= 5000)
+            action = QStringLiteral("sync");
+        else
+            continue;
+
+        QJsonObject message;
+        message["type"] = "video";
+        message["id"] = qint64(id);
+        message["action"] = action;
+        if (action != QStringLiteral("stopped"))
+        {
+            message["elapsed"] = qint64(function->elapsed());
+            message["serverTime"] = nowMs;
+            message["paused"] = paused;
+            message["screen"] = video->screen();
+            message["fullscreen"] = video->fullscreen();
+            message["layer"] = video->zIndex();
+            const QRect geometry = video->customGeometry();
+            if (geometry.isNull() == false)
+            {
+                QJsonObject rect;
+                rect["x"] = geometry.x();
+                rect["y"] = geometry.y();
+                rect["width"] = geometry.width();
+                rect["height"] = geometry.height();
+                message["geometry"] = rect;
+            }
+            const QVector3D rotation = video->rotation();
+            if (rotation != QVector3D(0, 0, 0))
+            {
+                QJsonObject rot;
+                rot["x"] = rotation.x();
+                rot["y"] = rotation.y();
+                rot["z"] = rotation.z();
+                message["rotation"] = rot;
+            }
+        }
+
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
+        }
+
+        if (running)
+        {
+            VideoState state;
+            state.paused = paused;
+            state.lastSync = (action == QStringLiteral("sync")
+                              || action == QStringLiteral("started"))
+                ? nowMs
+                : m_playingVideos.value(id).lastSync;
+            m_playingVideos.insert(id, state);
+        }
+        else
+        {
+            m_playingVideos.remove(id);
+        }
     }
 
     /* The spectrum, at the flush rate rather than the capture's. The capture

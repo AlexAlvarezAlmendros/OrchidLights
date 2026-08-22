@@ -41,6 +41,9 @@ const chrome = spawn(
   [
     '--headless=new',
     '--disable-gpu',
+    /* The surface chapter plays real media inside an iframe; without this the
+       autoplay policy silently blocks it and the film never advances. */
+    '--autoplay-policy=no-user-gesture-required',
     '--no-sandbox',
     '--no-first-run',
     `--user-data-dir=${profile}`,
@@ -3967,6 +3970,118 @@ try {
   })()`)
   check('the kiosk and the mask act: settings, thinned rail, 403, stripped chrome',
     kioskAccess === 'ok', kioskAccess)
+
+  /* F21 through the screen: a surface iframe plays what the engine starts,
+     its clock advances, a seek lands, and stopping takes it down. */
+  const surfacePlays = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    let film = null
+    let frame = null
+
+    const cleanup = async () => {
+      if (film !== null) {
+        await fetch('/api/v1/functions/' + film + '/stop', { method: 'POST' })
+          .catch(() => undefined)
+        await fetch('/api/v1/functions/' + film + '?force=true', { method: 'DELETE' })
+      }
+      frame?.remove()
+      await wait(300)
+    }
+
+    try {
+      /* A wav is a film to a <video> element, and the daemon can already
+         serve one it generated -- but here the test needs ITS OWN media on
+         disk, which the page cannot write. The waveform smoke's trick works
+         in reverse: ask the daemon for something it can play... simplest is
+         an asset: upload a wav the page synthesises. */
+      const rate = 8000
+      const seconds = 30
+      const samples = rate * seconds
+      const buffer = new ArrayBuffer(44 + samples * 2)
+      const view = new DataView(buffer)
+      const writeString = (at, s) => { for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i)) }
+      writeString(0, 'RIFF'); view.setUint32(4, 36 + samples * 2, true)
+      writeString(8, 'WAVE'); writeString(12, 'fmt ')
+      view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true)
+      view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true)
+      view.setUint16(32, 2, true); view.setUint16(34, 16, true)
+      writeString(36, 'data'); view.setUint32(40, samples * 2, true)
+      for (let i = 0; i < samples; i++) view.setInt16(44 + i * 2, Math.sin(i * 0.2) * 8000, true)
+      const uploaded = await fetch('/api/v1/assets?name=peli-ui.wav', {
+        method: 'POST', body: buffer })
+      if (!uploaded.ok) return 'the media would not upload: ' + uploaded.status
+      const asset = await uploaded.json()
+
+      const made = await (await fetch('/api/v1/functions', { method: 'POST', headers: json,
+        body: JSON.stringify({ type: 'Video', name: 'PeliUI' }) })).json()
+      film = made.id
+      await fetch('/api/v1/functions/' + film + '/body', { method: 'PUT', headers: json,
+        body: JSON.stringify({ source: asset.path, screen: 0, layer: 2 }) })
+
+      /* The surface, as a page of its own inside this one. */
+      frame = document.createElement('iframe')
+      frame.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:180px;z-index:9999'
+      frame.src = '/#/surface'
+      document.body.appendChild(frame)
+      await wait(2500)
+
+      await fetch('/api/v1/functions/' + film + '/start', { method: 'POST' })
+      let element = null
+      for (let tries = 0; tries < 40 && !element; tries++) {
+        element = frame.contentDocument?.querySelector('video') ?? null
+        await wait(200)
+      }
+      if (!element) return 'the surface never drew the film'
+
+      const early = element.currentTime
+      await wait(1500)
+      if (element.currentTime <= early) {
+        return 'the film does not advance: ' + early + ' -> ' + element.currentTime
+      }
+
+      /* A seek: restart the engine at second 15; the next sync drags the
+         surface there. */
+      await fetch('/api/v1/functions/' + film + '/stop', { method: 'POST' })
+      await wait(600)
+      /* Through the feed with 'at': the transport of F16, reused. */
+      const socketSeek = await (async () => {
+        return new Promise((resolve) => {
+          const ws = new WebSocket('ws://' + location.host + '/ws')
+          ws.onopen = () => {
+            ws.send(JSON.stringify({ type: 'function', id: film, action: 'start', at: 15000 }))
+            setTimeout(() => { ws.close(); resolve(true) }, 400)
+          }
+          ws.onerror = () => resolve(false)
+        })
+      })()
+      if (!socketSeek) return 'the seek socket failed'
+      let caught = false
+      for (let tries = 0; tries < 45 && !caught; tries++) {
+        const now = frame.contentDocument?.querySelector('video')?.currentTime ?? 0
+        caught = now > 13
+        await wait(200)
+      }
+      if (!caught) {
+        return 'the seek never landed: '
+          + (frame.contentDocument?.querySelector('video')?.currentTime ?? 'no video')
+      }
+
+      await fetch('/api/v1/functions/' + film + '/stop', { method: 'POST' })
+      let gone = false
+      for (let tries = 0; tries < 20 && !gone; tries++) {
+        gone = frame.contentDocument?.querySelector('video') === null
+        await wait(200)
+      }
+      if (!gone) return 'stopping left the film on the surface'
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('a surface plays what the engine starts, advances, seeks and stops',
+    surfacePlays === 'ok', surfacePlays)
 
   /* The desktop shell's close question, answered by the page.
    *

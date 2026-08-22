@@ -135,6 +135,13 @@ private:
      *  rather than never. */
     QSet<quint32> m_runningShows;
 
+    struct VideoState
+    {
+        bool paused = false;
+        qint64 lastSync = 0;
+    };
+    QHash<quint32, VideoState> m_playingVideos;
+
     QTimer m_flushTimer;
 };
 

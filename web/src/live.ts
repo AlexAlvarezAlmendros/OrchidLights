@@ -11,6 +11,20 @@ import type { FunctionState } from './api'
 
 export type Connection = 'connecting' | 'open' | 'auth' | 'closed'
 
+export interface VideoEvent {
+  type: 'video'
+  id: number
+  action: 'started' | 'stopped' | 'paused' | 'resumed' | 'sync'
+  elapsed?: number
+  serverTime?: number
+  paused?: boolean
+  screen?: number
+  fullscreen?: boolean
+  layer?: number
+  geometry?: { x: number; y: number; width: number; height: number }
+  rotation?: { x: number; y: number; z: number }
+}
+
 export interface LiveHandlers {
   onFunctions: (functions: FunctionState[]) => void
   onConnection: (state: Connection) => void
@@ -28,6 +42,7 @@ export interface LiveHandlers {
   onInput?: (universe: number, channel: number, value: number) => void
   onBeat?: (bpm: number) => void
   onAccess?: () => void
+  onVideo?: (event: VideoEvent) => void
   onFramePage?: (id: number, page: number) => void
   /** The project changed under us. `what` names what, or ["project"] when the
    *  change is one nothing reports in detail. */
@@ -135,6 +150,9 @@ export class Live {
           break
         case 'access':
           this.handlers.onAccess?.()
+          break
+        case 'video':
+          this.handlers.onVideo?.(message as VideoEvent)
           break
         case 'xypad':
           this.handlers.onPad?.(message.id, message.x, message.y)
