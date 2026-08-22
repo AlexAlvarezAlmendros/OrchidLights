@@ -41,6 +41,7 @@
 #include "audioplugincache.h"
 #include "audiorenderer.h"
 #include "docwriter.h"
+#include "projectimport.h"
 #include "grouphead.h"
 #include "qlcpoint.h"
 #include "chaser.h"
@@ -848,6 +849,195 @@ void ApiServer::registerRoutes()
         QJsonObject response;
         response["created"] = created;
         return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/fixtures/rgbpanel", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        DocWriter::PanelSpec spec;
+        spec.name = body.value("name").toString();
+        spec.universe = body.value("universe").toInt(1);
+        spec.address = body.value("address").toInt(1);
+        spec.rows = body.value("rows").toInt(1);
+        spec.columns = body.value("columns").toInt(1);
+        if (body.contains("components"))
+            spec.components = body.value("components").toString();
+        spec.sixteenBit = body.value("sixteenBit").toBool(false);
+        if (body.contains("direction"))
+            spec.direction = body.value("direction").toString();
+        if (body.contains("startCorner"))
+            spec.startCorner = body.value("startCorner").toString();
+        if (body.contains("displacement"))
+            spec.displacement = body.value("displacement").toString();
+        spec.physicalWidth = body.value("physicalWidth").toInt(0);
+        spec.physicalHeight = body.value("physicalHeight").toDouble(0);
+
+        quint32 groupId = 0;
+        QList<quint32> ids;
+        const DocWriter::Result result = m_engine->withFixturesLocked(
+            [&] { return DocWriter::addRgbPanel(doc, spec, groupId, ids); });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonArray created;
+        for (quint32 id : ids)
+            created.append(qint64(id));
+
+        QJsonObject response;
+        response["group"] = qint64(groupId);
+        response["created"] = created;
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/fixtures/<arg>/remap", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        DocWriter::RemapSpec spec;
+        spec.manufacturer = body.value("manufacturer").toString();
+        spec.model = body.value("model").toString();
+        spec.mode = body.value("mode").toString();
+        spec.name = body.value("name").toString();
+        spec.universe = body.value("universe").toInt(-1);
+        spec.address = body.value("address").toInt(-1);
+
+        QList<SceneValue> from, to;
+        const DocWriter::Result result = m_engine->withFixturesLocked(
+            [&] { return DocWriter::remapFixture(doc, id, spec, from, to); });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        /* The engine fixed the document; the console is ours to fix. Sliders
+           hold (fixture, channel) pairs, and a channel that meant "dimmer" on
+           the old lamp must keep meaning dimmer on the new one -- rewritten
+           through the same patch path an editor uses, so validation is the
+           same too. */
+        int slidersTouched = 0;
+        VcWidget root;
+        if (VirtualConsole::parse(m_engine->preservedSections(), root))
+        {
+            QList<const VcWidget *> stack{&root};
+            while (stack.isEmpty() == false)
+            {
+                const VcWidget *widget = stack.takeLast();
+                for (const VcWidget &child : widget->children)
+                    stack.append(&child);
+
+                if (widget->levelChannels.isEmpty() || widget->hasId == false)
+                    continue;
+
+                bool touched = false;
+                QJsonArray channels;
+                for (const auto &channel : widget->levelChannels)
+                {
+                    if (channel.first != id)
+                    {
+                        QJsonObject entry;
+                        entry["fixture"] = qint64(channel.first);
+                        entry["channel"] = qint64(channel.second);
+                        channels.append(entry);
+                        continue;
+                    }
+
+                    touched = true;
+                    for (int i = 0; i < from.count(); i++)
+                    {
+                        if (from.at(i).fxi == id && from.at(i).channel == channel.second)
+                        {
+                            QJsonObject entry;
+                            entry["fixture"] = qint64(to.at(i).fxi);
+                            entry["channel"] = qint64(to.at(i).channel);
+                            channels.append(entry);
+                            break;
+                        }
+                    }
+                    /* A channel with no counterpart on the new lamp drops out,
+                       exactly as the engine drops it from scenes. */
+                }
+
+                if (touched)
+                {
+                    QJsonObject patch;
+                    patch["levelChannels"] = channels;
+                    if (m_engine->editWidget(QString::number(widget->id), patch).ok)
+                        slidersTouched++;
+                }
+            }
+        }
+
+        const Fixture *fixture = doc->fixture(id);
+        QJsonObject response;
+        response["id"] = qint64(id);
+        response["channelsCarried"] = from.count();
+        response["slidersTouched"] = slidersTouched;
+        response["fixture"] = fixture ? JsonView::fixture(fixture) : QJsonObject();
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/plan/fixtures/<arg>/linked", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QString &rawId, const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Fixture id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        int linkedIndex = 0;
+        const DocWriter::Result result = m_engine->withFixturesLocked([&] {
+            return DocWriter::addLinkedFixture(doc, id, body.value("head").toInt(0),
+                                               body.value("name").toString(),
+                                               body.value("x").toDouble(0),
+                                               body.value("y").toDouble(0), linkedIndex);
+        });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        response["linked"] = linkedIndex;
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/plan/fixtures/<arg>/linked/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, doc, denied](const QString &rawId, const QString &rawLinked,
+                                        const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        bool linkedOk = false;
+        const int linked = rawLinked.toInt(&linkedOk);
+        if (ok == false || linkedOk == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Ids must be numbers"));
+
+        const QUrlQuery query(request.url());
+        const int head = query.queryItemValue(QStringLiteral("head")).toInt();
+
+        const DocWriter::Result result = m_engine->withFixturesLocked(
+            [&] { return DocWriter::removeLinkedFixture(doc, id, head, linked); });
+        if (result.ok == false)
+            return jsonError(StatusCode::NotFound, result.error);
+
+        QJsonObject response;
+        response["removed"] = linked;
+        return QHttpServerResponse(response);
     });
 
     m_server->route("/api/v1/fixtures/<arg>", QHttpServerRequest::Method::Delete,
@@ -1944,6 +2134,7 @@ void ApiServer::registerRoutes()
         const bool hasRotation = number("rotation", rotation);
         const QString gel = body.value("gel").toString();
         const int head = body.value("head").toInt(0);
+        const int linked = body.value("linked").toInt(0);
         const int zoom = body.value("zoom").toInt(-1);
 
         /* The flags must be booleans when present: a "hidden" of "yes" that
@@ -2011,7 +2202,7 @@ void ApiServer::registerRoutes()
 
         DocWriter::Result result = DocWriter::Result::success();
         m_engine->withFixturesLocked([&]() {
-            result = DocWriter::setPlanItem(doc, id, head, patch);
+            result = DocWriter::setPlanItem(doc, id, head, linked, patch);
             return true;
         });
 
@@ -3174,6 +3365,86 @@ void ApiServer::registerRoutes()
         if (unresolved.isEmpty() == false)
             body["unresolved"] = unresolved;
         return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/project/import/preview", QHttpServerRequest::Method::Post,
+                    [this, doc](const QHttpServerRequest &request) {
+        /* A disk path from the network: the strict token, like save-as. */
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const QString path = asked.value(QStringLiteral("path")).toString();
+        if (path.isEmpty() || QFileInfo(path).isAbsolute() == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Give an absolute path"));
+
+        QJsonObject out;
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&] {
+            result = ProjectImport::preview(doc, path, out);
+            return true;
+        });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        return QHttpServerResponse(out);
+    });
+
+    m_server->route("/api/v1/project/import", QHttpServerRequest::Method::Post,
+                    [this, doc](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject asked = QJsonDocument::fromJson(request.body()).object();
+        const QString path = asked.value(QStringLiteral("path")).toString();
+        if (path.isEmpty() || QFileInfo(path).isAbsolute() == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Give an absolute path"));
+
+        /* "all", or a list of ids. Absent means none of that kind. */
+        ProjectImport::Selection selection;
+        const auto pick = [&asked](const char *key, bool &all, QList<quint32> &ids) -> bool {
+            const QJsonValue value = asked.value(QLatin1String(key));
+            if (value.isUndefined())
+                return true;
+            if (value.isString() && value.toString() == QStringLiteral("all"))
+            {
+                all = true;
+                return true;
+            }
+            if (value.isArray() == false)
+                return false;
+            for (const QJsonValue &entry : value.toArray())
+            {
+                if (entry.isDouble() == false || entry.toInt(-1) < 0)
+                    return false;
+                ids.append(quint32(entry.toInt()));
+            }
+            return true;
+        };
+        if (pick("fixtures", selection.allFixtures, selection.fixtures) == false
+            || pick("functions", selection.allFunctions, selection.functions) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"fixtures\" and \"functions\" are \"all\" or "
+                                            "arrays of ids from the preview"));
+        }
+        if (selection.allFixtures == false && selection.fixtures.isEmpty()
+            && selection.allFunctions == false && selection.functions.isEmpty())
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("Nothing chosen: name fixtures, functions or both"));
+        }
+
+        QJsonObject report;
+        DocWriter::Result result = DocWriter::Result::success();
+        m_engine->withFixturesLocked([&] {
+            result = ProjectImport::apply(doc, path, selection, report);
+            return true;
+        });
+        if (result.ok == false)
+            return jsonError(StatusCode::BadRequest, result.error);
+
+        return QHttpServerResponse(report);
     });
 
     m_server->route("/api/v1/project/save-as", QHttpServerRequest::Method::Post,

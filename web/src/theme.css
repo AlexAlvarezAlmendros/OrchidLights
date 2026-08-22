@@ -3239,3 +3239,42 @@ button.linkish.left {
   color: var(--text-dim);
   font-size: 0.85rem;
 }
+
+/* ---- Linked lamps and rig tools ------------------------------------------ */
+
+.linked-lamp {
+  border-style: dashed;
+}
+
+.remap-form {
+  grid-column: 1 / -1;
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.import-dialog {
+  max-width: 34rem;
+}
+
+.import-lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.import-lists fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+@media (max-width: 40rem) {
+  .import-lists {
+    grid-template-columns: 1fr;
+  }
+}

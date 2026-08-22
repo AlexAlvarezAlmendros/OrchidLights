@@ -64,7 +64,13 @@ export function Plan({
      It used to be only the id: the lamp stayed where it was until the finger
      came up and then jumped. Placing a rig that way is guesswork -- you find
      out where you put something after you have put it. */
-  const [drag, setDrag] = useState<{ id: number; x: number; y: number } | null>(null)
+  const [drag, setDrag] = useState<{
+    id: number
+    linked?: number | undefined
+    head?: number | undefined
+    x: number
+    y: number
+  } | null>(null)
   /* The background image, fetched rather than pointed at: an <img src> cannot
      carry the Authorization header, so on a token-guarded daemon it would 401
      into a silently missing backdrop. A blob URL keeps the pixels and the
@@ -79,7 +85,13 @@ export function Plan({
      which chooses the lamp instead of moving it -- the same rule as the
      console, for the same reason: one gesture that does two things needs to
      know which one before it commits to either. */
-  const pending = useRef<{ id: number; x: number; y: number } | null>(null)
+  const pending = useRef<{
+    id: number
+    linked?: number | undefined
+    head?: number | undefined
+    x: number
+    y: number
+  } | null>(null)
 
   const reload = useCallback(() => {
     api
@@ -185,10 +197,10 @@ export function Plan({
     api.setLive(values).catch(fail)
   }
 
-  const place = (id: number, x: number, y: number) => {
+  const place = (id: number, x: number, y: number, linked?: number, head?: number) => {
     onError(null)
     api
-      .setPlanPosition(id, { x, y })
+      .setPlanPosition(id, { x, y, linked, head })
       .then(reload)
       .catch((e) => {
         onError(e instanceof Error ? e.message : String(e))
@@ -240,21 +252,27 @@ export function Plan({
               const far = Math.abs(e.clientX - held.x) > 8 || Math.abs(e.clientY - held.y) > 8
               if (!far) return
               const at = toStage(e)
-              setDrag({ id: held.id, x: at?.x ?? 0, y: at?.y ?? 0 })
+              setDrag({
+                id: held.id,
+                linked: held.linked,
+                head: held.head,
+                x: at?.x ?? 0,
+                y: at?.y ?? 0,
+              })
               return
             }
 
             if (drag === null) return
             e.preventDefault()
             const at = toStage(e)
-            if (at !== null) setDrag({ id: drag.id, ...at })
+            if (at !== null) setDrag({ id: drag.id, linked: drag.linked, head: drag.head, ...at })
           }}
           onPointerUp={() => {
             const held = pending.current
             pending.current = null
 
             if (drag !== null) {
-              place(drag.id, drag.x, drag.y)
+              place(drag.id, drag.x, drag.y, drag.linked, drag.head)
               setDrag(null)
               return
             }
@@ -276,11 +294,63 @@ export function Plan({
              somebody meant to put at the edge. */
             pending.current = null
             if (drag === null) return
-            place(drag.id, drag.x, drag.y)
+            place(drag.id, drag.x, drag.y, drag.linked, drag.head)
             setDrag(null)
           }}
         >
           {backgroundUrl !== null && <img className="plan-background" src={backgroundUrl} alt="" />}
+
+          {/* Linked lamps: the same patch drawn again, dashed to say so.
+              Dragged and removed like the original; the daemon knows which
+              copy by its linked index. */}
+          {placed.flatMap((fixture) =>
+            (fixture.linkedItems ?? []).map((item) => {
+              const dragging =
+                drag !== null &&
+                drag.id === fixture.id &&
+                drag.linked === item.linked &&
+                drag.head === item.head
+              const x = dragging ? drag.x : item.x
+              const y = dragging ? drag.y : item.y
+              const colour = blackout ? null : colourOf(fixture, universes)
+              return (
+                <div
+                  key={`${fixture.id}:${item.head}:${item.linked}`}
+                  className="lamp linked-lamp"
+                  data-dragging={dragging}
+                  data-dark={colour === null}
+                  style={{
+                    left: `${(x / across) * 100}%`,
+                    top: `${(y / deep) * 100}%`,
+                    transform: `translate(-50%, -50%) rotate(${item.rotation ?? 0}deg)`,
+                    ...(colour !== null
+                      ? { background: colour, borderColor: colour, boxShadow: `0 0 22px ${colour}` }
+                      : {}),
+                  }}
+                  title={`${item.name} (enlazada con ${fixture.name})`}
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    if (fixture.locked === true) return
+                    pending.current = {
+                      id: fixture.id,
+                      linked: item.linked,
+                      head: item.head,
+                      x: e.clientX,
+                      y: e.clientY,
+                    }
+                  }}
+                  onDoubleClick={() =>
+                    api
+                      .removeLinkedFixture(fixture.id, item.linked, item.head)
+                      .then(reload)
+                      .catch(fail)
+                  }
+                >
+                  <span className="lamp-label">{item.name}</span>
+                </div>
+              )
+            }),
+          )}
 
           {placed.map((fixture) => (
             <Lamp
@@ -288,7 +358,9 @@ export function Plan({
               fixture={fixture}
               /* While it is being dragged the lamp is drawn where the finger is,
                not where the daemon still has it. */
-              at={drag !== null && drag.id === fixture.id ? drag : null}
+              at={
+                drag !== null && drag.id === fixture.id && drag.linked === undefined ? drag : null
+              }
               across={across}
               deep={deep}
               chosen={chosen.includes(fixture.id)}
@@ -584,6 +656,23 @@ function LampProps({
           />
         </label>
       </div>
+
+      <button
+        type="button"
+        title="Dibuja esta lámpara otra vez en la planta: mismo patch, otro sitio (un dímer que alimenta dos focos)"
+        onClick={() =>
+          api
+            .addLinkedFixture(fixture.id, {
+              head,
+              x: (fixture.x ?? 0) + 500,
+              y: fixture.y ?? 0,
+            })
+            .then(onDone)
+            .catch(onFail)
+        }
+      >
+        Añadir enlazada
+      </button>
 
       {flag('hidden', 'Oculta', 'No se dibuja en la planta; se recupera desde «Ocultas»')}
       {flag('locked', 'Bloqueada', 'Se queda donde está: la planta no la deja arrastrar')}
