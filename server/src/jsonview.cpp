@@ -547,7 +547,30 @@ QJsonObject JsonView::functionBody(const Doc *doc, const Function *function)
 
     if (function->type() == Function::VideoType)
     {
-        json["source"] = qobject_cast<const Video *>(function)->sourceUrl();
+        const Video *video = qobject_cast<const Video *>(function);
+        json["source"] = video->sourceUrl();
+        json["screen"] = video->screen();
+        json["fullscreen"] = video->fullscreen();
+        json["layer"] = video->zIndex();
+        const QRect geometry = video->customGeometry();
+        if (geometry.isNull() == false)
+        {
+            QJsonObject rect;
+            rect["x"] = geometry.x();
+            rect["y"] = geometry.y();
+            rect["width"] = geometry.width();
+            rect["height"] = geometry.height();
+            json["geometry"] = rect;
+        }
+        const QVector3D rotation = video->rotation();
+        if (rotation != QVector3D(0, 0, 0))
+        {
+            QJsonObject rot;
+            rot["x"] = rotation.x();
+            rot["y"] = rotation.y();
+            rot["z"] = rotation.z();
+            json["rotation"] = rot;
+        }
         return json;
     }
 

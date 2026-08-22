@@ -126,6 +126,39 @@ fn open_view_window(app: tauri::AppHandle, view: String) -> Result<(), String> {
     Ok(())
 }
 
+/// A projector window: fullscreen on the chosen monitor, showing the
+/// surface page filtered to that screen index. The daemon directs what
+/// plays; this window only exists and sits on the right glass.
+#[tauri::command]
+fn open_surface_window(app: tauri::AppHandle, screen: usize) -> Result<(), String> {
+    let state = app
+        .try_state::<ShellState>()
+        .ok_or("el motor aún no está listo")?;
+    let url = format!("{}/#/surface?screen={screen}", state.sidecar.base_url());
+    let label = format!("surface-{screen}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("URL inválida: {e}"))?;
+    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(parsed))
+        .title(format!("OrchidLights · superficie {screen}"))
+        .inner_size(960.0, 540.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Onto the right glass, when it exists: monitor N for surface N.
+    if let Ok(monitors) = window.available_monitors() {
+        if let Some(monitor) = monitors.get(screen) {
+            let at = monitor.position();
+            let _ = window.set_position(tauri::PhysicalPosition::new(at.x, at.y));
+        }
+    }
+    let _ = window.set_fullscreen(true);
+    Ok(())
+}
+
 /// The kiosk's door: with a PIN configured, only the PIN opens it.
 #[tauri::command]
 fn leave_kiosk(
@@ -218,6 +251,7 @@ fn main() {
             resolve_close,
             toggle_fullscreen,
             open_view_window,
+            open_surface_window,
             leave_kiosk
         ])
         .manage(PendingOpen::default())
@@ -461,6 +495,8 @@ fn arm_tray(handle: &tauri::AppHandle, base: String, token: Option<String>) {
             MenuItemBuilder::with_id("window-desk", "Nueva ventana: Mesa").build(&handle)?;
         let plan_item =
             MenuItemBuilder::with_id("window-plan", "Nueva ventana: Planta").build(&handle)?;
+        let surface_item =
+            MenuItemBuilder::with_id("window-surface", "Superficie de vídeo").build(&handle)?;
         let quit_item = MenuItemBuilder::with_id("quit", "Salir").build(&handle)?;
         let menu = MenuBuilder::new(&handle)
             .items(&[
@@ -469,6 +505,7 @@ fn arm_tray(handle: &tauri::AppHandle, base: String, token: Option<String>) {
                 &show_item,
                 &desk_item,
                 &plan_item,
+                &surface_item,
                 &quit_item,
             ])
             .build()?;
@@ -510,6 +547,9 @@ fn arm_tray(handle: &tauri::AppHandle, base: String, token: Option<String>) {
                     }
                     "window-plan" => {
                         let _ = open_view_window(app.clone(), "plan".into());
+                    }
+                    "window-surface" => {
+                        let _ = open_surface_window(app.clone(), 0);
                     }
                     "quit" => {
                         if let Some(window) = app.get_webview_window("main") {

@@ -421,6 +421,10 @@ namespace DocWriter
     /** Video: source file or URL. */
     Result setVideoSource(Doc *doc, quint32 videoId, const QString &source);
 
+    /** Where and how a video shows: screen index, windowed or fullscreen,
+     *  layer, custom geometry and rotation -- the reference's VideoEditor. */
+    Result setVideoExtras(Doc *doc, quint32 videoId, const QJsonObject &body);
+
     /**
      * EFX: pattern, geometry and the fixtures that follow it.
      *

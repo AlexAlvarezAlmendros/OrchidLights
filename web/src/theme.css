@@ -3390,3 +3390,19 @@ body[data-kiosk="1"] .projectmenu,
 body[data-kiosk="1"] .bpm-dock {
   display: none;
 }
+
+/* ---- Surfaces: any browser as a projector -------------------------------- */
+
+.surface {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  overflow: hidden;
+  cursor: none;
+}
+
+.surface-video {
+  position: absolute;
+  object-fit: contain;
+  background: #000;
+}

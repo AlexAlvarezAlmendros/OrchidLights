@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { Surface } from './surface'
 import { adoptTokenFromLocation } from './token'
 import './theme.css'
 
@@ -21,11 +22,9 @@ window.addEventListener('hashchange', () => {
 
 const root = document.getElementById('root')
 if (root) {
-  createRoot(root).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  )
+  const surface = window.location.hash.includes('/surface')
+
+  createRoot(root).render(<StrictMode>{surface ? <Surface /> : <App />}</StrictMode>)
 }
 
 /* Installed to a home screen, the app opens without browser chrome -- which on

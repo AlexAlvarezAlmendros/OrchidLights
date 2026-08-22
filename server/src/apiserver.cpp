@@ -55,6 +55,7 @@
 #include "qlcpalette.h"
 #include "scene.h"
 #include "audio.h"
+#include "video.h"
 #include "audiodecoder.h"
 #include <QXmlStreamReader>
 #include "rgbalgorithm.h"
@@ -1472,6 +1473,111 @@ void ApiServer::registerRoutes()
     /* The waveform: peak per bucket over the whole file, 0-100. Decoded with
        the same plugins that will play it, so what the editor draws is what
        the show will hear -- or exactly the silence it will not. */
+    /* The media a video (or audio) function plays, served to ANY screen on
+       the network WITHOUT a token -- the confirmed decision 1: a surface page
+       on a bare phone or TV must be able to play, and the only files this
+       will ever serve are the ones the project itself references. Range
+       requests answer 206, because a <video> element seeks by asking for
+       bytes and a server that ignores that cannot be scrubbed. */
+    m_server->route("/api/v1/functions/<arg>/media", QHttpServerRequest::Method::Get,
+                    [doc](const QString &rawId, const QHttpServerRequest &request) {
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Function id must be a number"));
+
+        const Function *function = doc->function(id);
+        QString source;
+        if (function != nullptr && function->type() == Function::VideoType)
+            source = qobject_cast<const Video *>(function)->sourceUrl();
+        else if (function != nullptr && function->type() == Function::AudioType)
+            source = qobject_cast<const Audio *>(function)->getSourceFileName();
+        if (source.isEmpty())
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No media function with id %1").arg(id));
+        }
+
+        /* Only local files: a network source is the surface's to load. */
+        if (source.startsWith(QStringLiteral("http")))
+        {
+            return jsonError(StatusCode::Conflict,
+                             QStringLiteral("\"%1\" is a network source; play it directly")
+                                 .arg(source));
+        }
+        if (source.startsWith(QStringLiteral("file://")))
+            source = QUrl(source).toLocalFile();
+
+        QFile file(source);
+        if (file.exists() == false || file.open(QIODevice::ReadOnly) == false)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("The project names \"%1\" and it is not there")
+                                 .arg(source));
+        }
+
+        const qint64 total = file.size();
+        static const QMap<QString, QByteArray> types{
+            {QStringLiteral("mp4"), QByteArrayLiteral("video/mp4")},
+            {QStringLiteral("m4v"), QByteArrayLiteral("video/mp4")},
+            {QStringLiteral("webm"), QByteArrayLiteral("video/webm")},
+            {QStringLiteral("mov"), QByteArrayLiteral("video/quicktime")},
+            {QStringLiteral("mkv"), QByteArrayLiteral("video/x-matroska")},
+            {QStringLiteral("avi"), QByteArrayLiteral("video/x-msvideo")},
+            {QStringLiteral("mp3"), QByteArrayLiteral("audio/mpeg")},
+            {QStringLiteral("wav"), QByteArrayLiteral("audio/wav")},
+            {QStringLiteral("ogg"), QByteArrayLiteral("audio/ogg")},
+            {QStringLiteral("m4a"), QByteArrayLiteral("audio/mp4")},
+            {QStringLiteral("flac"), QByteArrayLiteral("audio/flac")},
+        };
+        const QByteArray contentType = types.value(QFileInfo(source).suffix().toLower(),
+                                                   QByteArrayLiteral("application/octet-stream"));
+
+        const QByteArray rangeHeader = request.value(QByteArrayLiteral("Range"));
+        if (rangeHeader.startsWith(QByteArrayLiteral("bytes=")))
+        {
+            const QByteArray spec = rangeHeader.mid(6);
+            const int dash = spec.indexOf('-');
+            bool startOk = false;
+            qint64 start = spec.left(dash).toLongLong(&startOk);
+            qint64 end = total - 1;
+            if (dash >= 0 && dash + 1 < spec.size())
+            {
+                bool endOk = false;
+                const qint64 asked = spec.mid(dash + 1).toLongLong(&endOk);
+                if (endOk)
+                    end = qMin(asked, total - 1);
+            }
+            if (startOk == false || start < 0 || start >= total || end < start)
+            {
+                QHttpServerResponse bad(QByteArrayLiteral(""),
+                                        QHttpServerResponse::StatusCode::RequestRangeNotSatisfiable);
+                bad.setHeader(QByteArrayLiteral("Content-Range"),
+                              QByteArrayLiteral("bytes */") + QByteArray::number(total));
+                return bad;
+            }
+
+            /* Chunks capped at 8 MB: a <video> asks again as it plays, and a
+               whole feature film in one response is a memory spike. */
+            end = qMin(end, start + qint64(8 * 1024 * 1024) - 1);
+            file.seek(start);
+            const QByteArray body = file.read(end - start + 1);
+
+            QHttpServerResponse partial(contentType, body,
+                                        QHttpServerResponse::StatusCode::PartialContent);
+            partial.setHeader(QByteArrayLiteral("Content-Range"),
+                              QByteArrayLiteral("bytes ") + QByteArray::number(start)
+                                  + QByteArrayLiteral("-") + QByteArray::number(end)
+                                  + QByteArrayLiteral("/") + QByteArray::number(total));
+            partial.setHeader(QByteArrayLiteral("Accept-Ranges"), QByteArrayLiteral("bytes"));
+            return partial;
+        }
+
+        QHttpServerResponse whole(contentType, file.readAll());
+        whole.setHeader(QByteArrayLiteral("Accept-Ranges"), QByteArrayLiteral("bytes"));
+        return whole;
+    });
+
     m_server->route("/api/v1/functions/<arg>/waveform", QHttpServerRequest::Method::Get,
                     [doc, denied, refused, maskForbidden](const QString &rawId, const QHttpServerRequest &request) {
         if (const int refusal = refused(request))
@@ -1766,7 +1872,10 @@ void ApiServer::registerRoutes()
             break;
         }
         case Function::VideoType:
-            result = DocWriter::setVideoSource(doc, id, body.value("source").toString());
+            if (body.contains("source"))
+                result = DocWriter::setVideoSource(doc, id, body.value("source").toString());
+            if (result.ok)
+                result = DocWriter::setVideoExtras(doc, id, body);
             break;
         case Function::EFXType:
         {
@@ -3294,7 +3403,14 @@ void ApiServer::registerRoutes()
 
         static const QStringList allowed{QStringLiteral("png"), QStringLiteral("jpg"),
                                          QStringLiteral("jpeg"), QStringLiteral("gif"),
-                                         QStringLiteral("bmp"), QStringLiteral("webp")};
+                                         QStringLiteral("bmp"), QStringLiteral("webp"),
+                                         QStringLiteral("svg"),
+                                         /* Media too, since F21: an uploaded film or
+                                            track becomes a source a surface plays. */
+                                         QStringLiteral("mp4"), QStringLiteral("webm"),
+                                         QStringLiteral("mov"), QStringLiteral("mp3"),
+                                         QStringLiteral("wav"), QStringLiteral("ogg"),
+                                         QStringLiteral("m4a"), QStringLiteral("flac")};
         if (allowed.contains(QFileInfo(name).suffix().toLower()) == false)
             return jsonError(StatusCode::BadRequest,
                              QStringLiteral("Only image files: %1").arg(allowed.join(", ")));
