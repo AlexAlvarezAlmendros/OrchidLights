@@ -790,6 +790,12 @@ QJsonObject JsonView::plan(const Doc *doc)
 
     json["background"] = monitor->commonBackgroundImage().isEmpty() == false;
 
+    const MonitorProperties::PointOfView pointOfView = monitor->pointOfView();
+    json["pointOfView"] = pointOfView == MonitorProperties::FrontView ? QStringLiteral("front")
+        : pointOfView == MonitorProperties::RightSideView             ? QStringLiteral("rightside")
+        : pointOfView == MonitorProperties::LeftSideView              ? QStringLiteral("leftside")
+                                                                      : QStringLiteral("top");
+
     QJsonArray fixtures;
 
     for (const Fixture *fixture : doc->fixtures())
@@ -808,11 +814,15 @@ QJsonObject JsonView::plan(const Doc *doc)
             const QVector3D position = monitor->fixturePosition(fixture->id(), 0, 0);
             const QVector3D rotation = monitor->fixtureRotation(fixture->id(), 0, 0);
 
-            /* X and Y only: a plan is a top view, and this build of the engine
-               saves nothing else (monitorproperties.cpp:959). */
             entry["x"] = position.x();
             entry["y"] = position.y();
+            if (position.z() != 0)
+                entry["z"] = position.z();
             entry["rotation"] = rotation.y();
+            if (rotation.x() != 0)
+                entry["rotationX"] = rotation.x();
+            if (rotation.z() != 0)
+                entry["rotationZ"] = rotation.z();
 
             const QColor gel = monitor->fixtureGelColor(fixture->id(), 0, 0);
             if (gel.isValid())
@@ -908,6 +918,18 @@ QJsonObject JsonView::plan(const Doc *doc)
 
         entry["heads"] = fixture->heads();
 
+        /* The real footprint in millimetres, so the plan can draw a bar as a
+           bar and not as the same dot everything else is. */
+        const QLCFixtureMode *fixtureMode = fixture->fixtureMode();
+        if (fixtureMode != nullptr)
+        {
+            const QLCPhysical physical = fixtureMode->physical();
+            if (physical.width() > 0)
+                entry["width"] = physical.width();
+            if (physical.depth() > 0)
+                entry["depth"] = physical.depth();
+        }
+
         /* Which channels decide what this lamp looks like.
          *
          * Offsets from the fixture's address, not absolute addresses: the
@@ -944,6 +966,15 @@ QJsonObject JsonView::plan(const Doc *doc)
         role(QLCChannel::IntensityWhite, "white");
         role(QLCChannel::IntensityAmber, "amber");
         role(QLCChannel::IntensityUV, "uv");
+
+        /* Pan and tilt, so the plan can draw where a moving head points --
+           and honour the inverted flags while doing it. */
+        const quint32 pan = fixture->channelNumber(QLCChannel::Pan, QLCChannel::MSB);
+        if (pan != QLCChannel::invalid())
+            roles["pan"] = qint64(pan);
+        const quint32 tilt = fixture->channelNumber(QLCChannel::Tilt, QLCChannel::MSB);
+        if (tilt != QLCChannel::invalid())
+            roles["tilt"] = qint64(tilt);
 
         entry["roles"] = roles;
 

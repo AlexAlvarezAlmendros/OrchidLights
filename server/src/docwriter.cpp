@@ -1341,13 +1341,18 @@ DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head, 
 
     const QVector3D position(patch.x != nullptr ? float(*patch.x) : was.x(),
                              patch.y != nullptr ? float(*patch.y) : was.y(),
-                             was.z());
+                             patch.z != nullptr ? float(*patch.z) : was.z());
 
     monitor->setFixturePosition(fixtureId, h, l, position);
 
-    if (patch.rotation != nullptr)
-        monitor->setFixtureRotation(fixtureId, h, l,
-                                    QVector3D(turned.x(), float(*patch.rotation), turned.z()));
+    if (patch.rotation != nullptr || patch.rotationX != nullptr || patch.rotationZ != nullptr)
+    {
+        monitor->setFixtureRotation(
+            fixtureId, h, l,
+            QVector3D(patch.rotationX != nullptr ? float(*patch.rotationX) : turned.x(),
+                      patch.rotation != nullptr ? float(*patch.rotation) : turned.y(),
+                      patch.rotationZ != nullptr ? float(*patch.rotationZ) : turned.z()));
+    }
 
     if (patch.gel != nullptr)
         monitor->setFixtureGelColor(fixtureId, h, l, colour);

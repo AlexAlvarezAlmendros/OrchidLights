@@ -224,7 +224,10 @@ namespace DocWriter
     {
         const double *x = nullptr;
         const double *y = nullptr;
-        const double *rotation = nullptr;
+        const double *z = nullptr;          //!< height in millimetres
+        const double *rotation = nullptr;   //!< around Y: how the symbol turns on the plan
+        const double *rotationX = nullptr;  //!< tilt of the hung fixture
+        const double *rotationZ = nullptr;
         const QString *gel = nullptr;
         const int *zoom = nullptr;       //!< fixed beam width in degrees; 0 clears it
         const bool *hidden = nullptr;
