@@ -56,6 +56,23 @@ void WidgetActions::stopFunction(EngineHost *engine, quint32 functionId)
         function->stop(FunctionParent::master());
 }
 
+void WidgetActions::flashFunction(EngineHost *engine, quint32 functionId,
+                                  bool shouldOverride, bool forceLTP)
+{
+    Function *function = engine->doc()->function(functionId);
+    if (function == nullptr)
+        return;
+    function->flash(engine->doc()->masterTimer(), shouldOverride, forceLTP);
+}
+
+void WidgetActions::unflashFunction(EngineHost *engine, quint32 functionId)
+{
+    Function *function = engine->doc()->function(functionId);
+    if (function == nullptr)
+        return;
+    function->unFlash(engine->doc()->masterTimer());
+}
+
 int WidgetActions::pressButton(EngineHost *engine, const VcWidget &widget, bool on)
 {
     /* Toggle is what a button means when its file says nothing else. */
@@ -64,13 +81,16 @@ int WidgetActions::pressButton(EngineHost *engine, const VcWidget &widget, bool 
 
     if (action == QStringLiteral("Flash"))
     {
-        /* Flash follows both edges: light while held, dark on release. */
+        /* Flash follows both edges, through the engine's own overlay: light
+           while held WITHOUT owning the function's run state, honouring the
+           button's override and force-LTP flags. */
         if (widget.hasFunction == false)
             return -1;
         if (on)
-            startFunction(engine, widget.functionId);
+            flashFunction(engine, widget.functionId, widget.flashOverride,
+                          widget.flashForceLTP);
         else
-            stopFunction(engine, widget.functionId);
+            unflashFunction(engine, widget.functionId);
         return on ? 1 : 0;
     }
 
@@ -103,17 +123,23 @@ int WidgetActions::pressButton(EngineHost *engine, const VcWidget &widget, bool 
     if (function->isRunning())
     {
         stopFunction(engine, widget.functionId);
+        if (widget.startupIntensityEnabled)
+            function->adjustAttribute(1.0, Function::Intensity);
         return 0;
     }
+
+    /* The reference presses with the button's startup intensity applied
+       BEFORE the start, so the first frame already wears it. */
+    if (widget.startupIntensityEnabled)
+        function->adjustAttribute(qreal(widget.startupIntensity) / 100.0,
+                                  Function::Intensity);
     startFunction(engine, widget.functionId);
     return 1;
 }
 
 bool WidgetActions::setSliderLevel(EngineHost *engine, quint32 widgetId, uchar value)
 {
-    if (engine->levels() == nullptr || engine->levels()->knows(widgetId) == false)
-        return false;
-
-    engine->levels()->setValue(widgetId, value);
-    return true;
+    /* The engine resolves the mode: level channels, the grand master, or a
+       function's attribute. One entry point so MIDI and WebSocket agree. */
+    return engine->moveSlider(widgetId, value);
 }

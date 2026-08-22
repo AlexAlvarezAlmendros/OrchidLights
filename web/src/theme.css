@@ -2992,3 +2992,61 @@ button.linkish.left {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+
+/* A knob: the same fader, drawn round and short. Same control, same engine
+   path -- roundness is presentation, not behaviour. */
+.widget.fader[data-knob="true"] {
+  min-height: 0;
+}
+
+.widget.fader[data-knob="true"] .track {
+  height: 20px;
+  border-radius: 999px;
+}
+
+/* The clock face. */
+.widget.clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.clock-caption {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.clock-face {
+  font-size: 1.4rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+/* The clock agenda's weekday toggles. */
+.agenda-row {
+  gap: 0.5rem;
+}
+
+.agenda-days {
+  display: flex;
+  gap: 2px;
+}
+
+.agenda-day {
+  min-height: 26px;
+  min-width: 26px;
+  padding: 0 4px;
+  font-size: 0.7rem;
+  border-radius: 6px;
+}
+
+.agenda-day[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}

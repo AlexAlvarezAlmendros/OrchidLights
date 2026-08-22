@@ -42,6 +42,12 @@ namespace WidgetActions
     /** Stop it if it runs; nothing happens if it does not. */
     void stopFunction(EngineHost *engine, quint32 functionId);
 
+    /** The engine's own flash: an overlay that lights without owning the
+     *  function's run state. Override and forceLTP are the button's flags. */
+    void flashFunction(EngineHost *engine, quint32 functionId, bool shouldOverride,
+                       bool forceLTP);
+    void unflashFunction(EngineHost *engine, quint32 functionId);
+
     /**
      * A button's press with the widget's own action semantics.
      *

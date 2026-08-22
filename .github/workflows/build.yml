@@ -224,6 +224,9 @@ jobs:
       - name: Palette smoke test (retint without touching the scene, monotonic fanning)
         run: ./server/test/palette-smoke.sh orchidlightsd
 
+      - name: Clock smoke test (the agenda rings with no browser open)
+        run: ./server/test/clock-smoke.sh orchidlightsd
+
       # The test client uses Node's built-in WebSocket, which landed in 21.
       - uses: actions/setup-node@v4
         with:

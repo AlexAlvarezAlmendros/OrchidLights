@@ -20,6 +20,7 @@
 #ifndef ENGINEHOST_H
 #define ENGINEHOST_H
 
+#include <QSet>
 #include <QStringList>
 #include <QObject>
 
@@ -30,6 +31,7 @@
 #include "vcpatch.h"
 
 class Doc;
+class ClockScheduler;
 class InputRouter;
 
 /**
@@ -329,6 +331,13 @@ public:
     int undoDepth() const { return m_undo.count(); }
     int redoDepth() const { return m_redo.count(); }
 
+    /**
+     * Move a console slider by widget id, whatever its mode: a level fader
+     * writes channels, a grand-master one moves the big fader, an adjust one
+     * turns its function's attribute. False is "this id moves nothing".
+     */
+    bool moveSlider(quint32 widgetId, uchar value);
+
     /** Drop a deleted fixture's references out of the console, so a later
      *  fixture cannot inherit its id and its sliders with it. */
     int forgetFixture(quint32 fixtureId);
@@ -443,6 +452,13 @@ private:
     SeenInput m_lastInput;
     AudioTriggers *m_triggers = nullptr;
     InputRouter *m_router = nullptr;
+    ClockScheduler *m_scheduler = nullptr;
+
+    /** Console sliders in GrandMaster mode: their value IS the GM's. */
+    QSet<quint32> m_gmSliders;
+
+    /** Adjust-mode sliders: widget id -> (function id, attribute index). */
+    QHash<quint32, QPair<quint32, int>> m_adjustSliders;
     bool m_running = false;
 
     int m_manufacturers = 0;

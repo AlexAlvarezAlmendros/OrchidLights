@@ -1770,18 +1770,21 @@ try {
     if (!flash && !black && !stopAll) return 'none'
     if (!flash || !black || !stopAll) return 'only some action buttons drew'
 
-    /* Flash: light while held, out on release. */
+    /* Flash: light while held, out on release. The engine's flash overlay
+       does NOT count as running, so the truth is the flashing flag. */
+    const flashingAny = async () =>
+      (await (await fetch('/api/v1/functions')).json()).some(f => f.flashing === true)
     const before = await status()
     flash.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 21 }))
     await wait(700)
     const during = await status()
-    if (during.runningFunctions !== before.runningFunctions + 1) {
-      return 'flash press did not start the scene: before=' + before.runningFunctions
+    if (!(await flashingAny())) {
+      return 'flash press did not light the scene: before=' + before.runningFunctions
         + ' during=' + during.runningFunctions + ' class=' + flash.className
     }
     flash.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 21 }))
     await wait(700)
-    if ((await status()).runningFunctions !== 0) return 'flash release left the scene running'
+    if (await flashingAny()) return 'flash release left the scene lit'
 
     /* Blackout: the desk goes dark, the button says so, and pressing it again
        brings the desk back -- the half that used to be impossible. */
@@ -2770,6 +2773,148 @@ try {
   })()`)
   check('palettes are created, attached and retinted through the screen',
     paletteUi === 'ok', paletteUi)
+
+  /* F14a's console: every widget type can be BORN from the palette, the
+     clock's face ticks, a GrandMaster-mode fader moves the real GM, and a
+     button's flash flags and startup intensity land in the file. Everything
+     added leaves whole. */
+  const consoleF14 = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const made = []
+
+    const cleanup = async () => {
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+      await wait(400)
+      for (const id of made) {
+        await fetch('/api/v1/vc/widgets/' + id, { method: 'DELETE' })
+      }
+    }
+
+    try {
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Consola')?.click()
+      await wait(700)
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Editar'))?.click()
+      await wait(700)
+
+      /* One of each newcomer, from the palette itself. */
+      const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+      const before = walk(await (await fetch('/api/v1/vc')).json())
+        .filter(w => w.id !== undefined).map(w => w.id)
+
+      for (const label of ['Marco solo', 'Dial de tempo', 'XY pad',
+                           'Triggers de audio', 'Matriz', 'Knob', 'Reloj', 'Fader', 'Botón']) {
+        /* The buttons wear a "+ " prefix: match on the label itself. */
+        const add = [...document.querySelectorAll('.palette button')]
+          .find(b => b.textContent.trim().endsWith(label))
+        if (!add) return 'the palette has no ' + label
+        add.click()
+        await wait(700)
+      }
+
+      const after = walk(await (await fetch('/api/v1/vc')).json())
+        .filter(w => w.id !== undefined)
+      const fresh = after.filter(w => !before.includes(w.id))
+      if (fresh.length !== 9) return fresh.length + ' widgets born of 9'
+      made.push(...fresh.map(w => w.id))
+
+      const freshOf = (type) => fresh.find(w => w.type === type)
+      if (!freshOf('soloframe') || !freshOf('speeddial') || !freshOf('xypad')
+          || !freshOf('audiotriggers') || !freshOf('matrix') || !freshOf('clock')) {
+        return 'a type is missing: ' + JSON.stringify(fresh.map(w => w.type))
+      }
+      const knob = fresh.filter(w => w.type === 'slider')
+        .find(w => w.sliderStyle === 'Knob')
+      if (!knob) return 'the knob was born plain'
+
+      /* The agenda's Programar button writes a schedule into the file. */
+      const clock = freshOf('clock')
+      const drawnClock = [...document.querySelectorAll('.widget')]
+        .find(w => w.textContent.includes('Reloj'))
+      if (!drawnClock) return 'the clock card is not on screen'
+      drawnClock.click()
+      await wait(800)
+      const editorCard = document.querySelector('.editor')
+      if (!editorCard) return 'the clock editor never opened'
+      const fnSelect = [...editorCard.querySelectorAll('select')]
+        .find(sel => sel.getAttribute('aria-label') === 'Función a programar')
+      if (!fnSelect || fnSelect.options.length < 2) return 'the agenda offers no functions'
+      const setSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setSelect.call(fnSelect, fnSelect.options[1].value)
+      fnSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(300)
+      ;[...editorCard.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Programar')?.click()
+      await wait(800)
+      const scheduled = walk(await (await fetch('/api/v1/vc')).json())
+        .find(w => w.id === clock.id)
+      if ((scheduled?.schedules?.length ?? 0) !== 1) {
+        return 'Programar wrote nothing: ' + JSON.stringify(scheduled?.schedules)
+      }
+
+      /* A GrandMaster-mode fader IS the grand master. */
+      const fader = fresh.find(w => w.type === 'slider' && w.sliderStyle !== 'Knob')
+      const flip = await fetch('/api/v1/vc/widgets/' + fader.id, {
+        method: 'PATCH', headers: json,
+        body: JSON.stringify({ sliderMode: 'GrandMaster' }) })
+      if (!flip.ok) return 'the GrandMaster mode was refused: ' + flip.status
+      await wait(700)
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+      await wait(900)
+
+      /* The clock's face ticks a real time -- in run mode, where widgets
+         render as themselves rather than as edit cards. */
+      const face = [...document.querySelectorAll('.clock-face')].at(-1)
+      const shown = (face?.textContent ?? '').trim()
+      const pieces = shown.split(':')
+      if (pieces.length !== 3 || pieces.some(p => p.length !== 2 || Number.isNaN(Number(p)))) {
+        return 'the clock face shows ' + (shown || 'nothing')
+      }
+      /* And it TICKS: a painted-once time is a stopped clock, right at most
+         twice a day. */
+      await wait(1600)
+      if ((face?.textContent ?? '').trim() === shown) {
+        return 'the clock face does not tick: still ' + shown
+      }
+
+      const drawn = [...document.querySelectorAll('.widget.fader')]
+        .find(w => w.textContent.includes('Fader'))
+      const range = drawn?.querySelector('input[type=range]')
+      if (!range || range.disabled) return 'the GM fader is not usable'
+      const setInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      setInput.call(range, '128')
+      range.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(900)
+      const gm = await (await fetch('/api/v1/grandmaster')).json()
+      if (gm.value !== 128) return 'the GM fader moved nothing: gm=' + gm.value
+      await fetch('/api/v1/grandmaster', { method: 'PUT', headers: json,
+        body: JSON.stringify({ value: 255 }) })
+
+      /* Button extras reach the file's JSON view. */
+      const button = fresh.find(w => w.type === 'button')
+      await fetch('/api/v1/vc/widgets/' + button.id, {
+        method: 'PATCH', headers: json,
+        body: JSON.stringify({ action: 'Flash', flashOverride: true,
+                               startupIntensity: { enabled: true, value: 60 } }) })
+      await wait(500)
+      const kept = walk(await (await fetch('/api/v1/vc')).json())
+        .find(w => w.id === button.id)
+      if (kept?.flashOverride !== true || kept?.startupIntensity?.value !== 60) {
+        return 'the button extras never landed: '
+          + JSON.stringify({ o: kept?.flashOverride, i: kept?.startupIntensity })
+      }
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the console bears every widget type, and the newcomers act',
+    consoleF14 === 'ok', consoleF14)
 
   /* The desktop shell's close question, answered by the page.
    *

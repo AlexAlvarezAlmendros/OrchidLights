@@ -24,6 +24,8 @@
 #include <QColor>
 #include <QFont>
 
+#include <QTime>
+
 #include "vcpatch.h"
 #include "xmltree.h"
 
@@ -316,7 +318,8 @@ namespace
 
         static const QStringList modes = {
             QStringLiteral("Level"), QStringLiteral("Playback"),
-            QStringLiteral("Submaster"),
+            QStringLiteral("Submaster"), QStringLiteral("GrandMaster"),
+            QStringLiteral("Adjust"),
         };
 
         for (const QString &candidate : modes)
@@ -716,6 +719,145 @@ namespace
             const Result result = setInput(widget, patch.value(QStringLiteral("input")));
             if (result.ok == false)
                 return result;
+        }
+
+        /* Flash flags: attributes on the <Action> node the reader already
+           takes them from. Written even when the action is not Flash --
+           harmless there, ready the moment the action flips. */
+        if (patch.contains(QStringLiteral("flashOverride"))
+            || patch.contains(QStringLiteral("flashForceLTP")))
+        {
+            if (widget.name != QStringLiteral("Button"))
+                return Result::failure(QStringLiteral("Only buttons flash"));
+            XmlNode &node = widget.childOrCreate(QStringLiteral("Action"));
+            if (node.text.isEmpty())
+                node.text = QStringLiteral("Toggle");
+            if (patch.contains(QStringLiteral("flashOverride")))
+                node.setAttribute(QStringLiteral("Override"),
+                                  patch.value(QStringLiteral("flashOverride")).toBool()
+                                      ? QStringLiteral("1")
+                                      : QStringLiteral("0"));
+            if (patch.contains(QStringLiteral("flashForceLTP")))
+                node.setAttribute(QStringLiteral("ForceLTP"),
+                                  patch.value(QStringLiteral("flashForceLTP")).toBool()
+                                      ? QStringLiteral("1")
+                                      : QStringLiteral("0"));
+        }
+
+        /* Startup intensity: {enabled, value} -> <Intensity Adjust>75; null
+           removes the element (back to "start at whatever it was"). */
+        if (patch.contains(QStringLiteral("startupIntensity")))
+        {
+            if (widget.name != QStringLiteral("Button"))
+                return Result::failure(
+                    QStringLiteral("Only buttons have a startup intensity"));
+            const QJsonValue value = patch.value(QStringLiteral("startupIntensity"));
+            if (value.isNull())
+                removeChildren(widget, QStringLiteral("Intensity"));
+            else if (value.isObject())
+            {
+                const QJsonObject asked = value.toObject();
+                const int percent = asked.value(QStringLiteral("value")).toInt(-1);
+                if (percent < 0 || percent > 100)
+                    return Result::failure(QStringLiteral("The intensity is 0..100"));
+                XmlNode &node = widget.childOrCreate(QStringLiteral("Intensity"));
+                node.setAttribute(QStringLiteral("Adjust"),
+                                  asked.value(QStringLiteral("enabled")).toBool()
+                                      ? QStringLiteral("True")
+                                      : QStringLiteral("False"));
+                node.text = QString::number(percent);
+            }
+            else
+                return Result::failure(QStringLiteral(
+                    "\"startupIntensity\" is {\"enabled\": bool, \"value\": 0-100} or null"));
+        }
+
+        /* A clock's agenda: the whole list at once, {function, start,
+           stop?, weekFlags?} with times as "HH:mm:ss". Replacing whole is
+           what lets the editor reorder and delete without a diff protocol. */
+        if (patch.contains(QStringLiteral("schedules")))
+        {
+            if (widget.name != QStringLiteral("Clock"))
+                return Result::failure(QStringLiteral("Only clocks have an agenda"));
+            const QJsonValue value = patch.value(QStringLiteral("schedules"));
+            if (value.isArray() == false)
+                return Result::failure(QStringLiteral(
+                    "\"schedules\" is a list of {function, start, stop?, weekFlags?}"));
+
+            removeChildren(widget, QStringLiteral("Schedule"));
+            for (const QJsonValue &entry : value.toArray())
+            {
+                const QJsonObject asked = entry.toObject();
+                const int functionId = asked.value(QStringLiteral("function")).toInt(-1);
+                const QString start = asked.value(QStringLiteral("start")).toString();
+                if (functionId < 0
+                    || QTime::fromString(start, QStringLiteral("HH:mm:ss")).isValid() == false)
+                    return Result::failure(QStringLiteral(
+                        "Each schedule needs a \"function\" id and a \"start\" HH:mm:ss"));
+
+                XmlNode node;
+                node.name = QStringLiteral("Schedule");
+                node.setAttribute(QStringLiteral("Function"), QString::number(functionId));
+                node.setAttribute(QStringLiteral("StartTime"), start);
+                const QString stop = asked.value(QStringLiteral("stop")).toString();
+                if (stop.isEmpty() == false)
+                {
+                    if (QTime::fromString(stop, QStringLiteral("HH:mm:ss")).isValid() == false)
+                        return Result::failure(
+                            QStringLiteral("\"stop\" is HH:mm:ss when present"));
+                    node.setAttribute(QStringLiteral("StopTime"), stop);
+                }
+                if (asked.contains(QStringLiteral("weekFlags")))
+                    node.setAttribute(QStringLiteral("WeekFlags"),
+                                      QString::number(
+                                          asked.value(QStringLiteral("weekFlags")).toInt(0)));
+                widget.children.append(node);
+            }
+        }
+
+        /* An adjust-mode slider's target: {function, attribute} writes the
+           <Adjust> element; null removes it. */
+        if (patch.contains(QStringLiteral("adjust")))
+        {
+            if (widget.name != QStringLiteral("Slider"))
+                return Result::failure(QStringLiteral("Only sliders adjust functions"));
+            const QJsonValue value = patch.value(QStringLiteral("adjust"));
+            if (value.isNull())
+                removeChildren(widget, QStringLiteral("Adjust"));
+            else if (value.isObject())
+            {
+                const QJsonObject asked = value.toObject();
+                const int functionId = asked.value(QStringLiteral("function")).toInt(-1);
+                if (functionId < 0)
+                    return Result::failure(
+                        QStringLiteral("\"adjust\" needs a \"function\" id"));
+                XmlNode &node = widget.childOrCreate(QStringLiteral("Adjust"));
+                node.setAttribute(QStringLiteral("Function"), QString::number(functionId));
+                node.setAttribute(QStringLiteral("Attribute"),
+                                  QString::number(asked.value(QStringLiteral("attribute"))
+                                                      .toInt(0)));
+            }
+            else
+                return Result::failure(QStringLiteral(
+                    "\"adjust\" is {\"function\": id, \"attribute\": n} or null"));
+        }
+
+        /* How a slider is drawn: "Knob" or "Slider", the file's spellings
+           (qmlui writes the WidgetStyle attribute). Refused on any other
+           widget type rather than written where nothing will read it. */
+        if (patch.contains(QStringLiteral("sliderStyle")))
+        {
+            if (widget.name != QStringLiteral("Slider"))
+                return Result::failure(
+                    QStringLiteral("Only sliders have a style; this is a %1")
+                        .arg(widget.name.toLower()));
+            const QString style = patch.value(QStringLiteral("sliderStyle")).toString();
+            if (style.compare(QStringLiteral("Knob"), Qt::CaseInsensitive) != 0
+                && style.compare(QStringLiteral("Slider"), Qt::CaseInsensitive) != 0)
+                return Result::failure(
+                    QStringLiteral("sliderStyle is \"Knob\" or \"Slider\""));
+            widget.setAttribute(QStringLiteral("WidgetStyle"),
+                                style.at(0).toUpper() + style.mid(1).toLower());
         }
 
         /* The keyboard shortcut: QKeySequence text ("Ctrl+F1"). null or ""

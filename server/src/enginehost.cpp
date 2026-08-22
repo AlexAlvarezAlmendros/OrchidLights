@@ -36,6 +36,7 @@
 #include "virtualconsole.h"
 #include "docwriter.h"
 #include "levelsource.h"
+#include "clockscheduler.h"
 #include "inputrouter.h"
 #include "simpledesksource.h"
 
@@ -216,6 +217,10 @@ bool EngineHost::start(const Options &options, QString &errorMessage)
        (its constructor connects itself to those signals). */
     m_router = new InputRouter(this, this);
 
+    /* The clocks' weekly agenda runs HERE: an alarm that only rings while a
+       browser is open is not an alarm. */
+    m_scheduler = new ClockScheduler(this, this);
+
     m_doc->masterTimer()->start();
     m_running = true;
 
@@ -356,6 +361,36 @@ bool EngineHost::setGrandMaster(int value, const QString &channelMode,
 
     emit grandMasterChanged();
     return true;
+}
+
+bool EngineHost::moveSlider(quint32 widgetId, uchar value)
+{
+    if (m_gmSliders.contains(widgetId))
+    {
+        QString ignored;
+        setGrandMaster(int(value), QString(), QString(), -1, ignored);
+        return true;
+    }
+
+    const auto adjust = m_adjustSliders.constFind(widgetId);
+    if (adjust != m_adjustSliders.constEnd())
+    {
+        Function *function = m_doc->function(adjust.value().first);
+        if (function == nullptr)
+            return false;
+        /* Attributes are fractions; the fader is 0-255. The engine clamps. */
+        function->adjustAttribute(qreal(value) / qreal(UCHAR_MAX),
+                                  adjust.value().second);
+        return true;
+    }
+
+    if (m_levels != nullptr && m_levels->knows(widgetId))
+    {
+        m_levels->setValue(widgetId, value);
+        return true;
+    }
+
+    return false;
 }
 
 QList<EngineHost::DumpValue> EngineHost::dumpableValues() const
@@ -617,6 +652,8 @@ void EngineHost::teachSliders()
         return;
 
     m_levels->forgetSliders();
+    m_gmSliders.clear();
+    m_adjustSliders.clear();
 
     /* Channels groups first, and outside the console walk on purpose: they
        belong to the document, not to the Virtual Console, so they must survive
@@ -681,6 +718,17 @@ void EngineHost::teachSliders()
                 channels.append(channel);
 
             m_levels->defineSlider(widget->id, channels, item.scope);
+        }
+        else if (widget->sliderMode == QStringLiteral("grandmaster"))
+        {
+            m_gmSliders.insert(widget->id);
+        }
+        else if (widget->sliderMode == QStringLiteral("adjust")
+                 && widget->adjustFunction != UINT_MAX)
+        {
+            m_adjustSliders.insert(widget->id,
+                                   qMakePair(widget->adjustFunction,
+                                             widget->adjustAttribute));
         }
         else if (widget->sliderMode == QStringLiteral("playback") && widget->hasFunction
                  && widget->functionId != UINT_MAX)
