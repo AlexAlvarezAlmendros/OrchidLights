@@ -31,6 +31,7 @@
 #include "grouphead.h"
 #include "qlcpoint.h"
 #include "fixtureremapper.h"
+#include "undoring.h"
 #include "efxfixture.h"
 #include "grouphead.h"
 #include "collection.h"
@@ -134,6 +135,7 @@ DocWriter::Result DocWriter::addUniverse(Doc *doc)
         return Result::failure(QStringLiteral("The engine refused to add a universe"));
 
     doc->inputOutputMap()->startUniverses();
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -162,6 +164,7 @@ DocWriter::Result DocWriter::removeUniverse(Doc *doc, int index)
     if (doc->inputOutputMap()->removeUniverse(engine) == false)
         return Result::failure(QStringLiteral("The engine refused to remove universe %1").arg(index));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -177,6 +180,7 @@ DocWriter::Result DocWriter::renameUniverse(Doc *doc, int index, const QString &
         return Result::failure(QStringLiteral("A universe needs a name"));
 
     doc->inputOutputMap()->setUniverseName(engine, name);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -189,6 +193,7 @@ DocWriter::Result DocWriter::setPassthrough(Doc *doc, int index, bool enabled)
         return Result::failure(error);
 
     doc->inputOutputMap()->setUniversePassthrough(engine, enabled);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -261,6 +266,7 @@ DocWriter::Result DocWriter::setOutputPatch(Doc *doc, int index, const QString &
                             false, qMax(0, patchIndex)) == false)
         return Result::failure(QStringLiteral("The engine refused the output patch"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -303,6 +309,7 @@ DocWriter::Result DocWriter::setPatchParameters(Doc *doc, int index, const QStri
         return Result::failure(QStringLiteral("\"target\" is input or output"));
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -342,6 +349,7 @@ DocWriter::Result DocWriter::setFeedbackPatch(Doc *doc, int index, const QString
                             true) == false)
         return Result::failure(QStringLiteral("The engine refused the feedback patch"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -389,6 +397,7 @@ DocWriter::Result DocWriter::setInputPatch(Doc *doc, int index, const QString &p
         return Result::failure(QStringLiteral("The engine refused the input patch"));
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -440,6 +449,7 @@ namespace
 DocWriter::Result DocWriter::addFixtures(Doc *doc, const FixturePlacement &placement,
                                          QList<quint32> &ids)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("addFixtures"), QList<quint32>{});
     ids.clear();
 
     QString error;
@@ -527,6 +537,9 @@ DocWriter::Result DocWriter::addFixtures(Doc *doc, const FixturePlacement &place
         ids.append(fixture->id());
     }
 
+    for (quint32 madeId : ids)
+        guard.note(madeId);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -534,6 +547,7 @@ DocWriter::Result DocWriter::addFixtures(Doc *doc, const FixturePlacement &place
 DocWriter::Result DocWriter::cloneFixtures(Doc *doc, quint32 sourceId, int quantity, int gap,
                                            QList<quint32> &ids)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("cloneFixtures"), QList<quint32>{});
     ids.clear();
 
     Fixture *source = doc->fixture(sourceId);
@@ -628,6 +642,9 @@ DocWriter::Result DocWriter::cloneFixtures(Doc *doc, quint32 sourceId, int quant
         ids.append(fixture->id());
     }
 
+    for (quint32 madeId : ids)
+        guard.note(madeId);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -769,6 +786,7 @@ DocWriter::Result DocWriter::addRgbPanel(Doc *doc, const PanelSpec &spec, quint3
         currRow += rowInc;
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -884,12 +902,14 @@ DocWriter::Result DocWriter::remapFixture(Doc *doc, quint32 sourceId, const Rema
     /* replaceFixtures copied them into the document; these were the blueprint. */
     qDeleteAll(targets);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removeFixture(Doc *doc, quint32 fixtureId)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("removeFixture"), fixtureId);
     const Fixture *fixture = doc->fixture(fixtureId);
     if (fixture == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
@@ -926,6 +946,7 @@ DocWriter::Result DocWriter::removeFixture(Doc *doc, quint32 fixtureId)
        fixture inherits this one's id, and with it whatever the console still
        had pointed at it. */
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -933,6 +954,7 @@ DocWriter::Result DocWriter::removeFixture(Doc *doc, quint32 fixtureId)
 DocWriter::Result DocWriter::updateFixture(Doc *doc, quint32 fixtureId, const QString &name,
                                            int universe, int address)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("updateFixture"), fixtureId);
     Fixture *fixture = doc->fixture(fixtureId);
     if (fixture == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
@@ -990,6 +1012,7 @@ DocWriter::Result DocWriter::updateFixture(Doc *doc, quint32 fixtureId, const QS
 
     fixture->setID(fixture->id());
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1001,6 +1024,7 @@ DocWriter::Result DocWriter::updateFixture(Doc *doc, quint32 fixtureId, const QS
 DocWriter::Result DocWriter::addFixtureGroup(Doc *doc, const QString &name,
                                              const QList<quint32> &fixtureIds, quint32 &groupId)
 {
+    UndoGuard guard(doc, UndoRing::GroupScope, QStringLiteral("addFixtureGroup"), QList<quint32>{});
     if (name.trimmed().isEmpty())
         return Result::failure(QStringLiteral("A group needs a name"));
 
@@ -1029,12 +1053,15 @@ DocWriter::Result DocWriter::addFixtureGroup(Doc *doc, const QString &name,
         group->assignFixture(id, QLCPoint(x++, 0));
 
     groupId = group->id();
+    guard.note(groupId);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::renameFixtureGroup(Doc *doc, quint32 groupId, const QString &name)
 {
+    UndoGuard guard(doc, UndoRing::GroupScope, QStringLiteral("renameFixtureGroup"), groupId);
     FixtureGroup *group = doc->fixtureGroup(groupId);
     if (group == nullptr)
         return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
@@ -1042,6 +1069,7 @@ DocWriter::Result DocWriter::renameFixtureGroup(Doc *doc, quint32 groupId, const
         return Result::failure(QStringLiteral("A group needs a name"));
 
     group->setName(name.trimmed());
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1049,6 +1077,7 @@ DocWriter::Result DocWriter::renameFixtureGroup(Doc *doc, quint32 groupId, const
 DocWriter::Result DocWriter::setFixtureGroupGrid(Doc *doc, quint32 groupId, int width, int height,
                                                  const QList<GroupCell> &cells)
 {
+    UndoGuard guard(doc, UndoRing::GroupScope, QStringLiteral("setFixtureGroupGrid"), groupId);
     FixtureGroup *group = doc->fixtureGroup(groupId);
     if (group == nullptr)
         return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
@@ -1100,12 +1129,14 @@ DocWriter::Result DocWriter::setFixtureGroupGrid(Doc *doc, quint32 groupId, int 
     for (const GroupCell &cell : cells)
         group->assignHead(QLCPoint(cell.x, cell.y), GroupHead(cell.fixture, cell.head));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::transformFixtureGroup(Doc *doc, quint32 groupId, const QString &op)
 {
+    UndoGuard guard(doc, UndoRing::GroupScope, QStringLiteral("transformFixtureGroup"), groupId);
     FixtureGroup *group = doc->fixtureGroup(groupId);
     if (group == nullptr)
         return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
@@ -1153,18 +1184,21 @@ DocWriter::Result DocWriter::transformFixtureGroup(Doc *doc, quint32 groupId, co
     for (auto it = heads.constBegin(); it != heads.constEnd(); ++it)
         group->assignHead(map(it.key()), it.value());
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removeFixtureGroup(Doc *doc, quint32 groupId)
 {
+    UndoGuard guard(doc, UndoRing::GroupScope, QStringLiteral("removeFixtureGroup"), groupId);
     if (doc->fixtureGroup(groupId) == nullptr)
         return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
 
     if (doc->deleteFixtureGroup(groupId) == false)
         return Result::failure(QStringLiteral("The engine refused to delete the group"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1172,6 +1206,7 @@ DocWriter::Result DocWriter::removeFixtureGroup(Doc *doc, quint32 groupId)
 DocWriter::Result DocWriter::setFixtureGroupMembers(Doc *doc, quint32 groupId,
                                                     const QList<quint32> &fixtureIds)
 {
+    UndoGuard guard(doc, UndoRing::GroupScope, QStringLiteral("setFixtureGroupMembers"), groupId);
     FixtureGroup *group = doc->fixtureGroup(groupId);
     if (group == nullptr)
         return Result::failure(QStringLiteral("No fixture group with id %1").arg(groupId));
@@ -1217,6 +1252,7 @@ DocWriter::Result DocWriter::setFixtureGroupMembers(Doc *doc, quint32 groupId,
             group->assignFixture(id, QLCPoint(x++, row));
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1224,6 +1260,7 @@ DocWriter::Result DocWriter::setFixtureGroupMembers(Doc *doc, quint32 groupId,
 DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
                                                  const QMap<quint32, QString> &byChannel)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("setChannelModifiers"), fixtureId);
     Fixture *fixture = doc->fixture(fixtureId);
     if (fixture == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
@@ -1293,6 +1330,7 @@ DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
 
     doc->inputOutputMap()->releaseUniverses(true);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1304,6 +1342,7 @@ DocWriter::Result DocWriter::setChannelModifiers(Doc *doc, quint32 fixtureId,
 DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head, int linked,
                                          const PlanItemPatch &patch)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("setPlanItem"), fixtureId);
     const Fixture *fixture = doc->fixture(fixtureId);
     if (fixture == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
@@ -1377,6 +1416,7 @@ DocWriter::Result DocWriter::setPlanItem(Doc *doc, quint32 fixtureId, int head, 
     apply(patch.invertTilt, MonitorProperties::InvertedTiltFlag);
     monitor->setFixtureFlags(fixtureId, h, l, flags);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1385,6 +1425,7 @@ DocWriter::Result DocWriter::addLinkedFixture(Doc *doc, quint32 fixtureId, int h
                                               const QString &name, double x, double y,
                                               int &linkedIndex)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("addLinkedFixture"), fixtureId);
     const Fixture *fixture = doc->fixture(fixtureId);
     if (fixture == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
@@ -1415,12 +1456,14 @@ DocWriter::Result DocWriter::addLinkedFixture(Doc *doc, quint32 fixtureId, int h
                                 QVector3D(float(x), float(y), 0));
 
     linkedIndex = next;
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removeLinkedFixture(Doc *doc, quint32 fixtureId, int head, int linked)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("removeLinkedFixture"), fixtureId);
     if (doc->fixture(fixtureId) == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
     if (linked < 1)
@@ -1444,12 +1487,14 @@ DocWriter::Result DocWriter::removeLinkedFixture(Doc *doc, quint32 fixtureId, in
         return Result::failure(QStringLiteral("No linked item %1 on head %2").arg(linked).arg(head));
 
     monitor->removeFixture(fixtureId, quint16(head), quint16(linked));
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::clearPlanPosition(Doc *doc, quint32 fixtureId)
 {
+    UndoGuard guard(doc, UndoRing::FixtureScope, QStringLiteral("clearPlanPosition"), fixtureId);
     if (doc->fixture(fixtureId) == nullptr)
         return Result::failure(QStringLiteral("No fixture with id %1").arg(fixtureId));
 
@@ -1459,6 +1504,7 @@ DocWriter::Result DocWriter::clearPlanPosition(Doc *doc, quint32 fixtureId)
 
     monitor->removeFixture(fixtureId, 0, 0);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1518,6 +1564,7 @@ namespace
 DocWriter::Result DocWriter::addShowTrack(Doc *doc, quint32 showId, const QString &name,
                                           quint32 sceneId, quint32 &trackId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("addShowTrack"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1546,12 +1593,14 @@ DocWriter::Result DocWriter::addShowTrack(Doc *doc, quint32 showId, const QStrin
     }
 
     trackId = track->id();
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removeShowTrack(Doc *doc, quint32 showId, quint32 trackId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("removeShowTrack"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1573,6 +1622,7 @@ DocWriter::Result DocWriter::removeShowTrack(Doc *doc, quint32 showId, quint32 t
     if (show->removeTrack(trackId) == false)
         return Result::failure(QStringLiteral("The engine refused to remove the track"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1581,6 +1631,7 @@ DocWriter::Result DocWriter::setShowTrack(Doc *doc, quint32 showId, quint32 trac
                                           const QString *name, const bool *mute,
                                           const quint32 *sceneId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setShowTrack"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1610,6 +1661,7 @@ DocWriter::Result DocWriter::setShowTrack(Doc *doc, quint32 showId, quint32 trac
     if (sceneId != nullptr)
         track->setSceneID(*sceneId);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1618,6 +1670,7 @@ DocWriter::Result DocWriter::addShowItem(Doc *doc, quint32 showId, quint32 track
                                          quint32 functionId, quint32 start, quint32 duration,
                                          quint32 &itemId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("addShowItem"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1672,6 +1725,7 @@ DocWriter::Result DocWriter::addShowItem(Doc *doc, quint32 showId, quint32 track
     item->setDuration(duration);
 
     itemId = item->id();
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1680,6 +1734,7 @@ DocWriter::Result DocWriter::setShowItem(Doc *doc, quint32 showId, quint32 itemI
                                          const quint32 *start, const quint32 *duration,
                                          const QString *color, const bool *locked)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setShowItem"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1740,12 +1795,14 @@ DocWriter::Result DocWriter::setShowItem(Doc *doc, quint32 showId, quint32 itemI
     if (locked != nullptr)
         item->setLocked(*locked);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removeShowItem(Doc *doc, quint32 showId, quint32 itemId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("removeShowItem"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1769,6 +1826,7 @@ DocWriter::Result DocWriter::removeShowItem(Doc *doc, quint32 showId, quint32 it
     if (track->removeShowFunction(item) == false)
         return Result::failure(QStringLiteral("The engine refused to remove the item"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1776,6 +1834,7 @@ DocWriter::Result DocWriter::removeShowItem(Doc *doc, quint32 showId, quint32 it
 DocWriter::Result DocWriter::setShowTimeDivision(Doc *doc, quint32 showId, const QString &type,
                                                  int bpm)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setShowTimeDivision"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1791,12 +1850,14 @@ DocWriter::Result DocWriter::setShowTimeDivision(Doc *doc, quint32 showId, const
         return Result::failure(QStringLiteral("BPM must be between 1 and 500"));
 
     show->setTimeDivision(division, bpm);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::setShowTrackSolo(Doc *doc, quint32 showId, quint32 trackId, bool solo)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setShowTrackSolo"), showId);
     QString error;
     Show *show = showById(doc, showId, error);
     if (show == nullptr)
@@ -1817,6 +1878,7 @@ DocWriter::Result DocWriter::setShowTrackSolo(Doc *doc, quint32 showId, quint32 
             track->setMute(solo);
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1880,6 +1942,7 @@ namespace
 DocWriter::Result DocWriter::insertShowTime(Doc *doc, quint32 showId, quint32 at, quint32 amount,
                                             int &stretched, int &moved)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("insertShowTime"), showId);
     stretched = 0;
     moved = 0;
 
@@ -1934,6 +1997,7 @@ DocWriter::Result DocWriter::insertShowTime(Doc *doc, quint32 showId, quint32 at
         }
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -1941,6 +2005,7 @@ DocWriter::Result DocWriter::insertShowTime(Doc *doc, quint32 showId, quint32 at
 DocWriter::Result DocWriter::cutShowTime(Doc *doc, quint32 showId, quint32 at, quint32 amount,
                                          int &shrunk, int &moved)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("cutShowTime"), showId);
     shrunk = 0;
     moved = 0;
 
@@ -1988,6 +2053,7 @@ DocWriter::Result DocWriter::cutShowTime(Doc *doc, quint32 showId, quint32 at, q
 
     slideItemsAfter(doc, show, at, -qint64(amount), moved);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2050,6 +2116,7 @@ DocWriter::Result DocWriter::addChannelsGroup(Doc *doc, const QString &name,
                                               const QList<QPair<quint32, quint32>> &channels,
                                               quint32 &groupId)
 {
+    UndoGuard guard(doc, UndoRing::ChannelsScope, QStringLiteral("addChannelsGroup"), QList<quint32>{});
     if (name.trimmed().isEmpty())
         return Result::failure(QStringLiteral("A channels group needs a name"));
 
@@ -2069,18 +2136,22 @@ DocWriter::Result DocWriter::addChannelsGroup(Doc *doc, const QString &name,
     }
 
     groupId = group->id();
+    guard.note(groupId);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removeChannelsGroup(Doc *doc, quint32 groupId)
 {
+    UndoGuard guard(doc, UndoRing::ChannelsScope, QStringLiteral("removeChannelsGroup"), groupId);
     if (doc->channelsGroup(groupId) == nullptr)
         return Result::failure(QStringLiteral("No channels group with id %1").arg(groupId));
 
     if (doc->deleteChannelsGroup(groupId) == false)
         return Result::failure(QStringLiteral("The engine refused to delete the group"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2088,6 +2159,7 @@ DocWriter::Result DocWriter::removeChannelsGroup(Doc *doc, quint32 groupId)
 DocWriter::Result DocWriter::setChannelsGroup(Doc *doc, quint32 groupId, const QString *name,
                                               const QList<QPair<quint32, quint32>> *channels)
 {
+    UndoGuard guard(doc, UndoRing::ChannelsScope, QStringLiteral("setChannelsGroup"), groupId);
     ChannelsGroup *group = doc->channelsGroup(groupId);
     if (group == nullptr)
         return Result::failure(QStringLiteral("No channels group with id %1").arg(groupId));
@@ -2115,6 +2187,7 @@ DocWriter::Result DocWriter::setChannelsGroup(Doc *doc, quint32 groupId, const Q
             group->addChannel(entry.first, entry.second);
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2154,6 +2227,7 @@ namespace
 DocWriter::Result DocWriter::createFunction(Doc *doc, const QString &type, const QString &name,
                                             quint32 &id)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("createFunction"), QList<quint32>{});
     Function *function = makeFunction(doc, type);
     if (function == nullptr)
     {
@@ -2178,12 +2252,15 @@ DocWriter::Result DocWriter::createFunction(Doc *doc, const QString &type, const
                           ? QStringLiteral("New %1 %2").arg(type, QString::number(id))
                           : name);
 
+    guard.note(id);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::renameFunction(Doc *doc, quint32 id, const QString &name)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("renameFunction"), id);
     Function *function = doc->function(id);
     if (function == nullptr)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
@@ -2192,6 +2269,7 @@ DocWriter::Result DocWriter::renameFunction(Doc *doc, quint32 id, const QString 
         return Result::failure(QStringLiteral("A function needs a name"));
 
     function->setName(name);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2199,6 +2277,7 @@ DocWriter::Result DocWriter::renameFunction(Doc *doc, quint32 id, const QString 
 DocWriter::Result DocWriter::setFunctionSpeeds(Doc *doc, quint32 id, int fadeIn, int fadeOut,
                                                int duration)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setFunctionSpeeds"), id);
     Function *function = doc->function(id);
     if (function == nullptr)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
@@ -2210,6 +2289,7 @@ DocWriter::Result DocWriter::setFunctionSpeeds(Doc *doc, quint32 id, int fadeIn,
     if (duration >= 0)
         function->setDuration(uint(duration));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2217,6 +2297,7 @@ DocWriter::Result DocWriter::setFunctionSpeeds(Doc *doc, quint32 id, int fadeIn,
 DocWriter::Result DocWriter::setFunctionRun(Doc *doc, quint32 id, const QString &runOrder,
                                             const QString &direction)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setFunctionRun"), id);
     Function *function = doc->function(id);
     if (function == nullptr)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
@@ -2244,12 +2325,14 @@ DocWriter::Result DocWriter::setFunctionRun(Doc *doc, quint32 id, const QString 
             return Result::failure(QStringLiteral("Direction must be forward or backward"));
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::deleteFunction(Doc *doc, quint32 id, bool force)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("deleteFunction"), id);
     Function *function = doc->function(id);
     if (function == nullptr)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
@@ -2288,6 +2371,7 @@ DocWriter::Result DocWriter::deleteFunction(Doc *doc, quint32 id, bool force)
     if (doc->deleteFunction(id) == false)
         return Result::failure(QStringLiteral("The engine refused to delete the function"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2299,6 +2383,7 @@ DocWriter::Result DocWriter::deleteFunction(Doc *doc, quint32 id, bool force)
 DocWriter::Result DocWriter::setSceneValue(Doc *doc, quint32 sceneId, quint32 fixtureId,
                                            quint32 channel, int value)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setSceneValue"), sceneId);
     Function *function = doc->function(sceneId);
     if (function == nullptr || function->type() != Function::SceneType)
         return Result::failure(QStringLiteral("No scene with id %1").arg(sceneId));
@@ -2332,6 +2417,7 @@ DocWriter::Result DocWriter::setSceneValue(Doc *doc, quint32 sceneId, quint32 fi
         scene->setValue(fixtureId, channel, uchar(value));
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2339,6 +2425,7 @@ DocWriter::Result DocWriter::setSceneValue(Doc *doc, quint32 sceneId, quint32 fi
 DocWriter::Result DocWriter::addChaserStep(Doc *doc, quint32 chaserId, quint32 functionId,
                                            int index, int fadeIn, int hold, int fadeOut)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("addChaserStep"), chaserId);
     Function *function = doc->function(chaserId);
     if (function == nullptr
         || (function->type() != Function::ChaserType
@@ -2358,12 +2445,14 @@ DocWriter::Result DocWriter::addChaserStep(Doc *doc, quint32 chaserId, quint32 f
     if (chaser->addStep(step, index) == false)
         return Result::failure(QStringLiteral("The engine refused the step"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removeChaserStep(Doc *doc, quint32 chaserId, int index)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("removeChaserStep"), chaserId);
     Function *function = doc->function(chaserId);
     if (function == nullptr
         || (function->type() != Function::ChaserType
@@ -2381,6 +2470,7 @@ DocWriter::Result DocWriter::removeChaserStep(Doc *doc, quint32 chaserId, int in
     if (chaser->removeStep(index) == false)
         return Result::failure(QStringLiteral("The engine refused to remove the step"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2388,6 +2478,7 @@ DocWriter::Result DocWriter::removeChaserStep(Doc *doc, quint32 chaserId, int in
 DocWriter::Result DocWriter::setCollectionMembers(Doc *doc, quint32 collectionId,
                                                   const QList<quint32> &functionIds)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setCollectionMembers"), collectionId);
     Function *function = doc->function(collectionId);
     if (function == nullptr || function->type() != Function::CollectionType)
         return Result::failure(QStringLiteral("No collection with id %1").arg(collectionId));
@@ -2408,6 +2499,7 @@ DocWriter::Result DocWriter::setCollectionMembers(Doc *doc, quint32 collectionId
     for (quint32 id : functionIds)
         collection->addFunction(id);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2416,6 +2508,7 @@ DocWriter::Result DocWriter::setCollectionMembers(Doc *doc, quint32 collectionId
 DocWriter::Result DocWriter::setRgbMatrix(Doc *doc, quint32 matrixId, int fixtureGroupId,
                                           const QString &algorithm, const QList<QString> &colours)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setRgbMatrix"), matrixId);
     Function *function = doc->function(matrixId);
     if (function == nullptr || function->type() != Function::RGBMatrixType)
         return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
@@ -2473,6 +2566,7 @@ DocWriter::Result DocWriter::setRgbMatrix(Doc *doc, quint32 matrixId, int fixtur
         matrix->setColor(i, colour);
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2482,6 +2576,7 @@ DocWriter::Result DocWriter::applyMatrixPreset(Doc *doc, quint32 matrixId, const
                                                const QList<QPair<QString, QString>> &properties,
                                                bool instant)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("applyMatrixPreset"), matrixId);
     Function *function = doc->function(matrixId);
     if (function == nullptr || function->type() != Function::RGBMatrixType)
         return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
@@ -2566,6 +2661,7 @@ DocWriter::Result DocWriter::applyMatrixPreset(Doc *doc, quint32 matrixId, const
 
 DocWriter::Result DocWriter::setScriptData(Doc *doc, quint32 scriptId, const QString &data)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setScriptData"), scriptId);
     Function *function = doc->function(scriptId);
     if (function == nullptr || function->type() != Function::ScriptType)
         return Result::failure(QStringLiteral("No script with id %1").arg(scriptId));
@@ -2578,6 +2674,7 @@ DocWriter::Result DocWriter::setScriptData(Doc *doc, quint32 scriptId, const QSt
     if (script->setData(data) == false)
         return Result::failure(QStringLiteral("The engine could not parse that script"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2585,6 +2682,7 @@ DocWriter::Result DocWriter::setScriptData(Doc *doc, quint32 scriptId, const QSt
 DocWriter::Result DocWriter::setAudioSource(Doc *doc, quint32 audioId, const QString &fileName,
                                             double volume, const QString *device)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setAudioSource"), audioId);
     Function *function = doc->function(audioId);
     if (function == nullptr || function->type() != Function::AudioType)
         return Result::failure(QStringLiteral("No audio function with id %1").arg(audioId));
@@ -2654,12 +2752,14 @@ DocWriter::Result DocWriter::setAudioSource(Doc *doc, quint32 audioId, const QSt
     if (device != nullptr)
         audio->setAudioDevice(*device);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::setVideoSource(Doc *doc, quint32 videoId, const QString &source)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setVideoSource"), videoId);
     Function *function = doc->function(videoId);
     if (function == nullptr || function->type() != Function::VideoType)
         return Result::failure(QStringLiteral("No video function with id %1").arg(videoId));
@@ -2676,6 +2776,7 @@ DocWriter::Result DocWriter::setVideoSource(Doc *doc, quint32 videoId, const QSt
     Video *video = qobject_cast<Video *>(function);
     video->setSourceUrl(source);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2684,6 +2785,7 @@ DocWriter::Result DocWriter::setVideoSource(Doc *doc, quint32 videoId, const QSt
 DocWriter::Result DocWriter::setEfx(Doc *doc, quint32 efxId, const QString &algorithm,
                                     const QJsonObject &geometry, const QList<quint32> *fixtureIds)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setEfx"), efxId);
     Function *function = doc->function(efxId);
     if (function == nullptr || function->type() != Function::EFXType)
         return Result::failure(QStringLiteral("No EFX with id %1").arg(efxId));
@@ -2833,12 +2935,14 @@ DocWriter::Result DocWriter::setEfx(Doc *doc, quint32 efxId, const QString &algo
         }
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::setSequenceScene(Doc *doc, quint32 sequenceId, quint32 sceneId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setSequenceScene"), sequenceId);
     Function *function = doc->function(sequenceId);
     if (function == nullptr || function->type() != Function::SequenceType)
         return Result::failure(QStringLiteral("No sequence with id %1").arg(sequenceId));
@@ -2861,23 +2965,27 @@ DocWriter::Result DocWriter::setSequenceScene(Doc *doc, quint32 sequenceId, quin
 
     sequence->setBoundSceneID(sceneId);
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::setFunctionPath(Doc *doc, quint32 id, const QString &path)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setFunctionPath"), id);
     Function *function = doc->function(id);
     if (function == nullptr)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
 
     function->setPath(path);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::setFunctionTempo(Doc *doc, quint32 id, const QString &tempoType)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setFunctionTempo"), id);
     Function *function = doc->function(id);
     if (function == nullptr)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
@@ -2890,6 +2998,7 @@ DocWriter::Result DocWriter::setFunctionTempo(Doc *doc, quint32 id, const QStrin
     else
         return Result::failure(QStringLiteral("Tempo must be \"time\" or \"beats\""));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2915,6 +3024,7 @@ DocWriter::Result DocWriter::setChaserSpeedModes(Doc *doc, quint32 chaserId,
                                                  const QString &fadeIn, const QString &fadeOut,
                                                  const QString &duration)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setChaserSpeedModes"), chaserId);
     Function *function = doc->function(chaserId);
     if (function == nullptr
         || (function->type() != Function::ChaserType
@@ -2945,6 +3055,7 @@ DocWriter::Result DocWriter::setChaserSpeedModes(Doc *doc, quint32 chaserId,
         chaser->setDurationMode(mode);
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -2954,6 +3065,7 @@ DocWriter::Result DocWriter::setChaserStep(Doc *doc, quint32 chaserId, int index
                                            const int *duration, const QString *note,
                                            const quint32 *functionId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setChaserStep"), chaserId);
     Function *function = doc->function(chaserId);
     if (function == nullptr
         || (function->type() != Function::ChaserType
@@ -3002,6 +3114,7 @@ DocWriter::Result DocWriter::setChaserStep(Doc *doc, quint32 chaserId, int index
     if (chaser->replaceStep(step, index) == false)
         return Result::failure(QStringLiteral("The engine refused the step"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -3009,6 +3122,7 @@ DocWriter::Result DocWriter::setChaserStep(Doc *doc, quint32 chaserId, int index
 DocWriter::Result DocWriter::setChaserStepsOrder(Doc *doc, quint32 chaserId,
                                                  const QList<int> &order)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setChaserStepsOrder"), chaserId);
     Function *function = doc->function(chaserId);
     if (function == nullptr
         || (function->type() != Function::ChaserType
@@ -3041,12 +3155,14 @@ DocWriter::Result DocWriter::setChaserStepsOrder(Doc *doc, quint32 chaserId,
             return Result::failure(QStringLiteral("The engine refused the reorder"));
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::cloneFunction(Doc *doc, quint32 id, quint32 &newId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("cloneFunction"), QList<quint32>{});
     Function *function = doc->function(id);
     if (function == nullptr)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
@@ -3056,6 +3172,8 @@ DocWriter::Result DocWriter::cloneFunction(Doc *doc, quint32 id, quint32 &newId)
         return Result::failure(QStringLiteral("The engine refused the copy"));
 
     newId = copy->id();
+    guard.note(newId);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -3063,6 +3181,7 @@ DocWriter::Result DocWriter::cloneFunction(Doc *doc, quint32 id, quint32 &newId)
 DocWriter::Result DocWriter::setSequenceStepValues(Doc *doc, quint32 sequenceId, int index,
                                                    const QList<SceneValue> &values)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setSequenceStepValues"), sequenceId);
     Function *function = doc->function(sequenceId);
     if (function == nullptr || function->type() != Function::SequenceType)
         return Result::failure(QStringLiteral("No sequence with id %1").arg(sequenceId));
@@ -3089,6 +3208,7 @@ DocWriter::Result DocWriter::setSequenceStepValues(Doc *doc, quint32 sequenceId,
     if (sequence->replaceStep(step, index) == false)
         return Result::failure(QStringLiteral("The engine refused the step"));
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -3099,6 +3219,7 @@ DocWriter::Result DocWriter::setStartupFunction(Doc *doc, qint64 id)
         return Result::failure(QStringLiteral("No function with id %1").arg(id));
 
     doc->setStartupFunction(id >= 0 ? quint32(id) : Function::invalidId());
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -3106,6 +3227,7 @@ DocWriter::Result DocWriter::setStartupFunction(Doc *doc, qint64 id)
 DocWriter::Result DocWriter::setRgbMatrixExtras(Doc *doc, quint32 matrixId,
                                                 const QJsonObject &body)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setRgbMatrixExtras"), matrixId);
     Function *function = doc->function(matrixId);
     if (function == nullptr || function->type() != Function::RGBMatrixType)
         return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
@@ -3206,6 +3328,7 @@ DocWriter::Result DocWriter::setRgbMatrixExtras(Doc *doc, quint32 matrixId,
         }
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -3213,6 +3336,7 @@ DocWriter::Result DocWriter::setRgbMatrixExtras(Doc *doc, quint32 matrixId,
 DocWriter::Result DocWriter::bakeMatrixToSequence(Doc *doc, quint32 matrixId, quint32 &sceneId,
                                                   quint32 &sequenceId)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("bakeMatrixToSequence"), QList<quint32>{});
     Function *function = doc->function(matrixId);
     if (function == nullptr || function->type() != Function::RGBMatrixType)
         return Result::failure(QStringLiteral("No RGB matrix with id %1").arg(matrixId));
@@ -3385,6 +3509,9 @@ DocWriter::Result DocWriter::bakeMatrixToSequence(Doc *doc, quint32 matrixId, qu
 
     sceneId = scene->id();
     sequenceId = sequence->id();
+    guard.note(sceneId);
+    guard.note(sequenceId);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -3485,6 +3612,7 @@ namespace
 DocWriter::Result DocWriter::addPalette(Doc *doc, const QString &type, const QString &name,
                                         const QJsonObject &body, quint32 &newId)
 {
+    UndoGuard guard(doc, UndoRing::PaletteScope, QStringLiteral("addPalette"), QList<quint32>{});
     const QLCPalette::PaletteType wanted = QLCPalette::stringToType(type);
     if (wanted == QLCPalette::Undefined
         || QLCPalette::typeToString(wanted).compare(type, Qt::CaseInsensitive) != 0)
@@ -3511,12 +3639,15 @@ DocWriter::Result DocWriter::addPalette(Doc *doc, const QString &type, const QSt
     }
 
     newId = palette->id();
+    guard.note(newId);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::updatePalette(Doc *doc, quint32 id, const QJsonObject &body)
 {
+    UndoGuard guard(doc, UndoRing::PaletteScope, QStringLiteral("updatePalette"), id);
     QLCPalette *palette = doc->palette(id);
     if (palette == nullptr)
         return Result::failure(QStringLiteral("No palette with id %1").arg(id));
@@ -3525,12 +3656,14 @@ DocWriter::Result DocWriter::updatePalette(Doc *doc, quint32 id, const QJsonObje
     if (applied.ok == false)
         return applied;
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
 
 DocWriter::Result DocWriter::removePalette(Doc *doc, quint32 id)
 {
+    UndoGuard guard(doc, UndoRing::PaletteScope, QStringLiteral("removePalette"), id);
     if (doc->palette(id) == nullptr)
         return Result::failure(QStringLiteral("No palette with id %1").arg(id));
 
@@ -3549,6 +3682,7 @@ DocWriter::Result DocWriter::removePalette(Doc *doc, quint32 id)
         return Result::failure(QStringLiteral("Still used by: %1").arg(holders.join(", ")));
 
     doc->deletePalette(id);
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }
@@ -3557,6 +3691,7 @@ DocWriter::Result DocWriter::setScenePalettes(Doc *doc, quint32 sceneId,
                                               const QList<quint32> &paletteIds,
                                               const QList<quint32> *fixtureIds)
 {
+    UndoGuard guard(doc, UndoRing::FunctionScope, QStringLiteral("setScenePalettes"), sceneId);
     Function *function = doc->function(sceneId);
     if (function == nullptr || function->type() != Function::SceneType)
         return Result::failure(QStringLiteral("No scene with id %1").arg(sceneId));
@@ -3587,6 +3722,7 @@ DocWriter::Result DocWriter::setScenePalettes(Doc *doc, quint32 sceneId,
             scene->addFixture(id);
     }
 
+    UNDO_COMMIT();
     doc->setModified();
     return Result::success();
 }

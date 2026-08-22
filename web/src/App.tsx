@@ -161,8 +161,9 @@ export function App() {
   >({})
   /** Which page of the frame on screen, for a frame that has pages. */
   const [framePage, setFramePage] = useState(0)
-  /** How much of this console's editing history is behind and ahead. */
-  const [history, setHistory] = useState({ undo: 0, redo: 0 })
+
+  /** Whether the global ring has anything behind and ahead. */
+  const [ring, setRing] = useState<{ undo: boolean; redo: boolean }>({ undo: false, redo: false })
 
   const live = useRef<Live | null>(null)
   const editing = mode === 'arrange'
@@ -744,20 +745,46 @@ export function App() {
     setVc(console_)
     setDirty(true)
     api
-      .vcHistory()
-      .then(setHistory)
+      .globalHistory()
+      .then((h) => setRing({ undo: h.undo, redo: h.redo }))
       .catch(() => undefined)
   }, [])
 
+  /* The GLOBAL ring (F19): console edits ride along as markers, so these two
+     buttons are the only undo the operator needs -- the console's own history
+     is reached THROUGH them, never beside them (two stacks popped from two
+     buttons drift apart). */
   const undo = useCallback(async () => {
-    await api.undoConsole()
+    await api.globalUndo().catch(() => undefined)
     await refresh()
   }, [refresh])
 
   const redo = useCallback(async () => {
-    await api.redoConsole()
+    await api.globalRedo().catch(() => undefined)
     await refresh()
   }, [refresh])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision is the trigger
+  useEffect(() => {
+    api
+      .globalHistory()
+      .then((h) => setRing({ undo: h.undo, redo: h.redo }))
+      .catch(() => undefined)
+  }, [revision])
+
+  /* Ctrl+Z / Ctrl+Shift+Z, anywhere somebody is not typing. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
+      const target = event.target as HTMLElement
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+      event.preventDefault()
+      if (event.shiftKey) void redo()
+      else void undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [undo, redo])
 
   const selectedWidget = useMemo(() => {
     if (selected === null || !vc) return null
@@ -954,16 +981,17 @@ export function App() {
                 Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
               </button>
             ))}
-          {view === 'console' && mode === 'edit' && (
-            <>
-              <button type="button" disabled={history.undo === 0} onClick={undo} title="Deshacer">
-                ↶ {history.undo || ''}
-              </button>
-              <button type="button" disabled={history.redo === 0} onClick={redo} title="Rehacer">
-                ↷ {history.redo || ''}
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            disabled={!ring.undo}
+            onClick={undo}
+            title="Deshacer (Ctrl+Z) — todo edit, consola incluida"
+          >
+            ↶
+          </button>
+          <button type="button" disabled={!ring.redo} onClick={redo} title="Rehacer (Ctrl+Mayús+Z)">
+            ↷
+          </button>
           {/* Reachable whenever there is something to save. It used to hide
               outside the console's edit modes, which left every other screen
               -- patch a fixture, edit a function -- with the "sin guardar"

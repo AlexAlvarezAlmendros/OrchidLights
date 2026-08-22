@@ -3837,6 +3837,45 @@ try {
   check('the 2D grows depth: sweep, align in millimetres, a needle that inverts, an editable stage',
     planDepth === 'ok', planDepth)
 
+  /* F19 through the screen: the bar's global undo reverts the LAST edit --
+     whatever screen made it -- and redo brings it back. */
+  const globalUndo = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    let born = null
+
+    try {
+      const made = await (await fetch('/api/v1/functions', { method: 'POST', headers: json,
+        body: JSON.stringify({ type: 'Scene', name: 'EfimeraUI' }) })).json()
+      born = made.id
+      await wait(600)
+
+      const undoButton = [...document.querySelectorAll('button')]
+        .find(b => (b.title ?? '').startsWith('Deshacer'))
+      if (!undoButton) return 'there is no global undo in the bar'
+      if (undoButton.disabled) return 'the undo button does not know there is an edit'
+      undoButton.click()
+      await wait(1000)
+      const gone = (await (await fetch('/api/v1/functions')).json())
+        .every(f => f.id !== born)
+      if (!gone) return 'the bar undo removed nothing'
+
+      const redoButton = [...document.querySelectorAll('button')]
+        .find(b => (b.title ?? '').startsWith('Rehacer'))
+      redoButton?.click()
+      await wait(1000)
+      const back = (await (await fetch('/api/v1/functions')).json())
+        .some(f => f.id === born && f.name === 'EfimeraUI')
+      if (!back) return 'redo brought nothing back'
+
+      return 'ok'
+    } finally {
+      if (born !== null)
+        await fetch('/api/v1/functions/' + born + '?force=true', { method: 'DELETE' })
+    }
+  })()`)
+  check('the bar undoes any edit and redoes it', globalUndo === 'ok', globalUndo)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches

@@ -42,6 +42,7 @@
 #include "audiorenderer.h"
 #include "docwriter.h"
 #include "projectimport.h"
+#include "undoring.h"
 #include "grouphead.h"
 #include "qlcpoint.h"
 #include "chaser.h"
@@ -188,8 +189,10 @@ namespace
 ApiServer::ApiServer(EngineHost *engine, QObject *parent)
     : QObject(parent)
     , m_engine(engine)
+    , m_undo(std::make_unique<UndoRing>(engine))
 {
     Q_ASSERT(engine != nullptr);
+    UndoGuard::setRing(m_undo.get());
 }
 
 ApiServer::~ApiServer() = default;
@@ -613,6 +616,7 @@ void ApiServer::registerRoutes()
                                 body, newId);
         if (result.ok == false)
             return jsonError(StatusCode::BadRequest, result.error);
+        m_undo->pushConsoleMarker(QStringLiteral("console: crear widget"));
 
         QJsonObject response;
         response["id"] = newId;
@@ -642,6 +646,7 @@ void ApiServer::registerRoutes()
                                  : StatusCode::BadRequest,
                              result.error);
         }
+        m_undo->pushConsoleMarker(QStringLiteral("console: editar widget"));
 
         /* Answer with the widget as it now stands, read back out of the XML
            rather than echoed from the request -- so the response says what was
@@ -667,6 +672,7 @@ void ApiServer::registerRoutes()
         const VcPatch::Result result = m_engine->removeWidget(widgetId);
         if (result.ok == false)
             return jsonError(StatusCode::NotFound, result.error);
+        m_undo->pushConsoleMarker(QStringLiteral("console: borrar widget"));
 
         QJsonObject body;
         body["removed"] = widgetId;
@@ -3841,6 +3847,64 @@ void ApiServer::registerRoutes()
             ? QStringLiteral("internal") : QStringLiteral("none");
         response["bpm"] = doc->masterTimer()->bpmNumber();
         return QHttpServerResponse(response);
+    });
+
+    /* Global undo: every edit above went through a snapshot guard, and the
+       console rides along as markers into its own string-swap history. The
+       live desk and the run state are OUTSIDE on purpose: stopping a chaser
+       is not an edit, and undo must never cut a running show. */
+    m_server->route("/api/v1/undo", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QString error;
+        QString label;
+        m_engine->withFixturesLocked([&] {
+            label = m_undo->undo(doc, error);
+            return true;
+        });
+        if (label.isEmpty())
+            return jsonError(StatusCode::BadRequest, error);
+
+        QJsonObject response;
+        response["undone"] = label;
+        response["undo"] = m_undo->canUndo();
+        response["redo"] = m_undo->canRedo();
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/redo", QHttpServerRequest::Method::Post,
+                    [this, doc, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QString error;
+        QString label;
+        m_engine->withFixturesLocked([&] {
+            label = m_undo->redo(doc, error);
+            return true;
+        });
+        if (label.isEmpty())
+            return jsonError(StatusCode::BadRequest, error);
+
+        QJsonObject response;
+        response["redone"] = label;
+        response["undo"] = m_undo->canUndo();
+        response["redo"] = m_undo->canRedo();
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/history", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        QJsonObject body;
+        body["entries"] = m_undo->history();
+        body["undo"] = m_undo->canUndo();
+        body["redo"] = m_undo->canRedo();
+        return QHttpServerResponse(body);
     });
 
     m_server->route("/api/v1/project/import/preview", QHttpServerRequest::Method::Post,

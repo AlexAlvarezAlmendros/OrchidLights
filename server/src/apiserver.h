@@ -21,12 +21,14 @@
 #define APISERVER_H
 
 #include <QObject>
+#include <memory>
 #include <QString>
 
 #include "apiauth.h"
 
 class QHttpServer;
 class EngineHost;
+class UndoRing;
 class LiveFeed;
 
 /**
@@ -109,6 +111,7 @@ private:
     QHttpServer *m_server = nullptr;
     LiveFeed *m_feed = nullptr;
     ApiAuth m_auth;
+    std::unique_ptr<UndoRing> m_undo;
     quint16 m_port = 0;
     bool m_listenAll = false;
 };

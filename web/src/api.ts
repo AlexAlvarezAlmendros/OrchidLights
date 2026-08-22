@@ -1074,6 +1074,17 @@ export const api = {
      deleted fixture is re-patched by hand, because undoing a change to the
      document would drop every running function. */
   vcHistory: () => json<{ undo: number; redo: number }>('/api/v1/vc/history'),
+  /** The GLOBAL ring: every edit, console included (via markers). */
+  globalHistory: () =>
+    json<{
+      entries: { label: string; scope: number; items: number }[]
+      undo: boolean
+      redo: boolean
+    }>('/api/v1/history'),
+  globalUndo: () =>
+    json<{ undone: string; undo: boolean; redo: boolean }>('/api/v1/undo', { method: 'POST' }),
+  globalRedo: () =>
+    json<{ redone: string; undo: boolean; redo: boolean }>('/api/v1/redo', { method: 'POST' }),
   undoConsole: () => json<{ undo: number; redo: number }>('/api/v1/vc/undo', { method: 'POST' }),
   redoConsole: () => json<{ undo: number; redo: number }>('/api/v1/vc/redo', { method: 'POST' }),
 
