@@ -636,7 +636,7 @@ jobs:
             APPIMAGE_EXTRACT_AND_RUN=1 "'"$AI"'" > /tmp/ai.log 2>&1 &
             DP=""
             for _ in $(seq 1 120); do
-              DP=$(pgrep -f "sidecar/bin/orchidlightsd" | head -1 || true)
+              DP=$(pgrep -x orchidlightsd | head -1 || true)
               [ -n "$DP" ] && break
               sleep 0.5
             done
