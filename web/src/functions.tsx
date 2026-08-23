@@ -223,6 +223,40 @@ export function Functions({
           <button
             type="button"
             disabled={checked.size === 0}
+            title="Un marco con un fader de playback por función elegida: nivel = intensidad de la función"
+            onClick={() => {
+              const ids = [...checked]
+              run(async () => {
+                const frame = await api.addWidget({
+                  type: 'frame',
+                  caption: batchName.trim() || 'Faders',
+                  geometry: { x: 0, y: 240, width: 460, height: 240 },
+                })
+                let column = 0
+                for (const id of ids) {
+                  const fn = functions.find((f) => f.id === id)
+                  await api.addWidget({
+                    type: 'slider',
+                    parent: Number(frame.id),
+                    caption: fn?.name ?? `#${id}`,
+                    functionId: id,
+                    geometry: {
+                      x: column * 90,
+                      y: 0,
+                      width: 80,
+                      height: 200,
+                    },
+                  })
+                  column++
+                }
+              }).catch(() => undefined)
+            }}
+          >
+            Crear faders
+          </button>
+          <button
+            type="button"
+            disabled={checked.size === 0}
             title="Mueve las elegidas a esa carpeta; vacío las saca a la raíz"
             onClick={() => {
               const folder = batchName.trim()

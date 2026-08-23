@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy } from 'react'
 import {
   type FixtureState,
   type FunctionState,
@@ -34,6 +35,8 @@ import { ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
 import { leaveKiosk, resolveClose, takePendingOpen, toggleFullscreen } from './shell'
+
+const Stage3D = lazy(() => import('./stage3d'))
 import { Slider } from './slider'
 import { keySequenceOf, typingSomewhere } from './teclas'
 import { getToken, setToken } from './token'
@@ -614,7 +617,7 @@ export function App() {
     const ids = [...new Set(fixtures.map((f) => f.universe))]
     if (ids.length === 0) return
 
-    if (view !== 'plan' && view !== 'desk') {
+    if (view !== 'plan' && view !== 'desk' && view !== 'stage3d') {
       live.current?.unsubscribe(ids)
       setFrames({})
       return
@@ -825,6 +828,8 @@ export function App() {
       desk: 'desk',
       mesa: 'desk',
       plan: 'plan',
+      escenario: 'stage3d',
+      stage3d: 'stage3d',
       planta: 'plan',
     }
     const segment = window.location.hash
@@ -977,6 +982,7 @@ export function App() {
             ...(access.io || access.fixtures ? (['setup'] as View[]) : []),
             ...(access.simpleDesk ? (['desk'] as View[]) : []),
             ...(access.fixtures ? (['plan'] as View[]) : []),
+            ...(access.fixtures ? (['stage3d'] as View[]) : []),
           ]}
           onView={(target) => {
             setView(target)
@@ -1334,6 +1340,12 @@ export function App() {
               }
               onError={setToast}
             />
+          </main>
+        ) : view === 'stage3d' ? (
+          <main className="console">
+            <Suspense fallback={<p className="hint">Cargando el escenario…</p>}>
+              <Stage3D universes={frames} onError={setToast} />
+            </Suspense>
           </main>
         ) : view === 'plan' ? (
           <main className="console">

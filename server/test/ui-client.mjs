@@ -4083,6 +4083,212 @@ try {
   check('a surface plays what the engine starts, advances, seeks and stops',
     surfacePlays === 'ok', surfacePlays)
 
+  /* F22 through the screen: the 3D stage. A mover's beam matrix answers the
+     DMX at the promised angle, and picking a floor point writes the pan/tilt
+     the geometry demands -- byte-exact, read back off the wire. */
+  const stage3d = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    let mover = null
+
+    const cleanup = async () => {
+      await fetch('/api/v1/live', { method: 'DELETE' }).catch(() => undefined)
+      if (mover !== null) {
+        await fetch('/api/v1/plan/fixtures/' + mover, { method: 'DELETE' })
+        await fetch('/api/v1/fixtures/' + mover, { method: 'DELETE' })
+      }
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Consola')?.click()
+      await wait(500)
+    }
+
+    try {
+      const before = await (await fetch('/api/v1/fixtures')).json()
+      const taken = new Set()
+      for (const f of before) {
+        if (f.universe !== 1) continue
+        for (let c = f.address - 1; c < f.address - 1 + f.channels; c++) taken.add(c)
+      }
+      let start = -1
+      for (let c = 0; c <= 512 - 16 && start < 0; c++) {
+        let free = true
+        for (let i = 0; i < 16; i++) if (taken.has(c + i)) { free = false; break }
+        if (free) start = c
+      }
+      if (start < 0) return 'ok'
+
+      const made = await (await fetch('/api/v1/fixtures', { method: 'POST', headers: json,
+        body: JSON.stringify({ manufacturer: 'Martin', model: 'MAC500', mode: 'DMX4',
+          name: 'Mover3D', universe: 1, address: start + 1 }) })).json()
+      if (!made.created) return 'the mover was refused'
+      mover = made.created[0]
+
+      /* Centre of the stage, hung at three metres. */
+      const plan = await (await fetch('/api/v1/plan')).json()
+      const stageW = plan.grid.units === 'feet' ? plan.grid.width * 304.8 : plan.grid.width * 1000
+      const stageD = plan.grid.units === 'feet' ? plan.grid.depth * 304.8 : plan.grid.depth * 1000
+      await fetch('/api/v1/plan/fixtures/' + mover, { method: 'PUT', headers: json,
+        body: JSON.stringify({ x: stageW / 2, y: stageD / 2, z: 3000 }) })
+      const moverPlan = (await (await fetch('/api/v1/plan')).json())
+        .fixtures.find(f => f.id === mover)
+      if (moverPlan?.roles?.pan === undefined || moverPlan?.roles?.tilt === undefined) {
+        return 'the mover reports no pan/tilt roles'
+      }
+
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Escenario')?.click()
+      let stage = null
+      for (let tries = 0; tries < 60 && !stage; tries++) {
+        stage = window.__orchidStage ?? null
+        if (stage && !stage.fixtures().includes(mover)) stage = null
+        await wait(250)
+      }
+      if (!stage) return 'the 3D stage never rigged the mover'
+
+      /* The promised angle: pan DMX 191 is +90 degrees in the generic model,
+         and the beam pivot's matrix must say so. */
+      await fetch('/api/v1/live', { method: 'PUT', headers: json,
+        body: JSON.stringify({ values: [
+          { fixture: mover, channel: moverPlan.roles.pan, value: 191 },
+          { fixture: mover, channel: moverPlan.roles.tilt, value: 255 },
+          { fixture: mover, channel: moverPlan.roles.intensity ?? 0, value: 255 },
+        ] }) })
+      let angles = null
+      for (let tries = 0; tries < 30; tries++) {
+        angles = stage.beamAngles(mover)
+        if (angles && Math.abs(angles.pan - 89.6) < 3) break
+        await wait(200)
+      }
+      if (!angles || Math.abs(angles.pan - 89.6) > 3 || Math.abs(angles.tilt - 90) > 3) {
+        return 'the beam matrix answers ' + JSON.stringify(angles) + ' for pan 191, tilt 255'
+      }
+
+      /* Picking: aim at a floor point two metres right of the mover. The
+         same generic model inverted says pan comes back to ~+90 (atan2 of a
+         pure +x offset) and tilt leans by atan(horizontal / height). */
+      await fetch('/api/v1/live', { method: 'DELETE' })
+      await wait(300)
+      const fx = stageW / 2 / 1000 - stageW / 2000 // 0: the mover sits at world origin
+      const aimX = 2, aimZ = 0
+      if (!stage.aimAt(aimX + fx, aimZ)) return 'aimAt refused'
+      await wait(600)
+
+      const expectPan = Math.round(((90 + 180) / 360) * 255)
+      const vertical = Math.atan2(2, 3) * 180 / Math.PI
+      const expectTilt = Math.round(128 + Math.min(90, vertical) / 90 * 127)
+
+      const read = await new Promise((resolve) => {
+        const ws = new WebSocket('ws://' + location.host + '/ws')
+        ws.binaryType = 'arraybuffer'
+        const seen = {}
+        ws.onmessage = (event) => {
+          if (typeof event.data === 'string') return
+          const bytes = new Uint8Array(event.data)
+          const universe = bytes[0] | (bytes[1] << 8)
+          if (universe !== 1) return
+          const frame = bytes.subarray(2)
+          resolve({
+            pan: frame[start + moverPlan.roles.pan],
+            tilt: frame[start + moverPlan.roles.tilt],
+          })
+          ws.close()
+        }
+        ws.onopen = () => ws.send(JSON.stringify({ type: 'subscribe', universes: [1] }))
+        setTimeout(() => resolve(null), 4000)
+      })
+      if (!read) return 'no frame came back to verify the picking'
+      if (read.pan !== expectPan || read.tilt !== expectTilt) {
+        return 'picking wrote pan=' + read.pan + ' tilt=' + read.tilt
+          + ', the geometry demanded pan=' + expectPan + ' tilt=' + expectTilt
+      }
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the 3D stage answers: beam matrix at the promised angle, picking writes exact pan/tilt',
+    stage3d === 'ok', stage3d)
+
+  /* The reference's slider-bank generator, closing the widget-matrix pair:
+     pick two functions, press «Crear faders», and a frame with two PLAYBACK
+     sliders bound to them appears. */
+  const faderBank = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const json = { 'Content-Type': 'application/json' }
+    const born = []
+    const widgets = []
+    const walk = w => [w, ...(w.children ?? []).flatMap(walk)]
+
+    const cleanup = async () => {
+      for (const id of widgets) await fetch('/api/v1/vc/widgets/' + id, { method: 'DELETE' })
+      for (const id of born)
+        await fetch('/api/v1/functions/' + id + '?force=true', { method: 'DELETE' })
+      const toggle = [...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Selección' && b.getAttribute('aria-pressed') === 'true')
+      toggle?.click()
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      if (searchBox && searchBox.value !== '') {
+        const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        setI.call(searchBox, '')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+      await wait(400)
+    }
+
+    try {
+      for (const name of ['FaderUno', 'FaderDos']) {
+        const made = await (await fetch('/api/v1/functions', { method: 'POST', headers: json,
+          body: JSON.stringify({ type: 'Scene', name }) })).json()
+        born.push(made.id)
+      }
+
+      ;[...document.querySelectorAll('.rail-item')]
+        .find(b => b.textContent.trim() === 'Funciones')?.click()
+      await wait(900)
+      const searchBox = [...document.querySelectorAll('input')]
+        .find(i => i.placeholder === 'Nombre de función')
+      const setI = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      if (searchBox) {
+        setI.call(searchBox, 'Fader')
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }))
+        await wait(500)
+      }
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Selección')?.click()
+      await wait(400)
+      const boxes = [...document.querySelectorAll('input[type=checkbox]')]
+        .filter(b => b.closest('li, .fn-row, tr, div')?.textContent.includes('Fader'))
+      let ticked = 0
+      for (const box of boxes) {
+        if (ticked >= 2) break
+        box.click()
+        ticked++
+        await wait(150)
+      }
+      if (ticked < 2) return 'could not tick two functions: ' + boxes.length
+
+      ;[...document.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === 'Crear faders')?.click()
+      await wait(1500)
+
+      const consoleNow = walk(await (await fetch('/api/v1/vc')).json())
+      const bank = consoleNow.find(w => w.caption === 'Faders' && w.type === 'frame')
+      if (!bank) return 'the fader bank frame never appeared'
+      widgets.push(bank.id)
+      const sliders = (bank.children ?? []).filter(w => w.type === 'slider')
+      if (sliders.length !== 2) return 'the bank has ' + sliders.length + ' sliders'
+      const bound = sliders.every(s => born.includes(s.functionId ?? s.function ?? -1))
+      if (!bound) return 'the sliders are not bound: ' + JSON.stringify(sliders.map(s => s.functionId))
+
+      return 'ok'
+    } finally {
+      await cleanup()
+    }
+  })()`)
+  check('the slider-bank generator builds bound playback faders', faderBank === 'ok', faderBank)
+
   /* The desktop shell's close question, answered by the page.
    *
      The shell (when there is one) prevents the close and dispatches
