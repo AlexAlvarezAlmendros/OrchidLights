@@ -485,8 +485,9 @@ jobs:
       - name: Install build dependencies
         run: |
           ./install-deps.sh
+          # patchelf: collect-sidecar sets the staged daemon's runpath with it.
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev librsvg2-dev xvfb
+            libwebkit2gtk-4.1-dev librsvg2-dev xvfb patchelf
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

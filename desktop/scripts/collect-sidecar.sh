@@ -79,6 +79,19 @@ cp -r "$STAGE/share" "$OUT/share"
 find "$OUT/lib" -name '*.a' -delete
 
 strip "$OUT/bin/orchidlightsd" 2>/dev/null || true
+
+# The daemon links libqlcplusengine.so and the build leaves it with NO runpath:
+# on a machine where the engine also happens to be installed system-wide it
+# resolves by accident, and on a clean one (the CI bundler) linuxdeploy dies
+# with "Could not find dependency". $ORIGIN/../lib makes the staged tree say
+# where its own engine lives, everywhere, forever.
+if command -v patchelf > /dev/null; then
+    patchelf --set-rpath '$ORIGIN/../lib' "$OUT/bin/orchidlightsd"
+else
+    echo "patchelf is missing: the staged daemon keeps no runpath and a clean" >&2
+    echo "machine's bundler will not find libqlcplusengine.so" >&2
+    exit 1
+fi
 find "$OUT/lib" -name 'libqlcplusengine.so*' -exec strip {} \; 2>/dev/null || true
 
 # The daemon's audio decoders live under <plugins>/audio; assert rather than
