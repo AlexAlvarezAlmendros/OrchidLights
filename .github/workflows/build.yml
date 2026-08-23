@@ -541,8 +541,11 @@ jobs:
       - name: Install build dependencies
         run: |
           ./install-deps.sh
+          # libayatana: since the tray (F20), tauri's bundler refuses to build
+          # without an appindicator library to ship alongside the deb.
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev librsvg2-dev patchelf xvfb file
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf xvfb file \
+            libayatana-appindicator3-dev
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
