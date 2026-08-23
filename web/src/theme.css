@@ -2796,8 +2796,14 @@ button.linkish.left {
   min-height: 64px;
 }
 
-/* A frame brings its own children and needs the room to show them. */
-.grid > .widget.frame,
+/* A frame brings its own children and needs the room to show them -- the
+   whole line of it. Sharing a row with loose buttons stretched those buttons
+   to the frame's full height: four slabs of nothing beside a frame of twelve
+   looks. A frame is a band of the console, and a band owns its row. */
+.grid > .widget.frame {
+  grid-column: 1 / -1;
+}
+
 .grid > .widget.cuelist,
 .grid > .widget.xypad,
 .grid > .widget.matrix,

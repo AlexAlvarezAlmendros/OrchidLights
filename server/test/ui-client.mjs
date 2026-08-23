@@ -1355,6 +1355,48 @@ try {
   })()`)
   check('a widget can be dragged into place', dragged === 'none' || dragged === 'ok', dragged)
 
+  /* The way back out of an arrangement.
+   *
+     The drag above left one, so "Orden original" must be on the bar -- and
+     pressing it must actually make the daemon forget the page, not just
+     redraw. This is the escape hatch for the release that saved a derived
+     arrangement nobody made: without it, a project once mis-grouped stayed
+     mis-grouped forever, immune to every fix to the grouping itself. */
+  const restored = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const find = (text) => [...document.querySelectorAll('button')]
+      .find(b => b.textContent.trim() === text)
+    const widgets = () => [...document.querySelectorAll('.widget.arranging')]
+    if (widgets().length < 2 || widgets().some(w => !w.dataset.widgetId)) return 'none'
+
+    const button = find('Orden original')
+    if (!button) return 'the drag made an arrangement but no way back appeared'
+
+    /* Through the daemon, not just the screen: save first, so forgetting has
+       something real to forget. */
+    const save = find('Guardar')
+    if (!save) return 'the drag left nothing to save'
+    save.click()
+    await wait(900)
+    const held = await (await fetch('/api/v1/layout')).json()
+    if (!held.pages.some(p => p.rows.length > 0)) {
+      return 'saving did not hand the daemon the arrangement: ' + JSON.stringify(held)
+    }
+
+    find('Orden original').click()
+    await wait(700)
+
+    const state = await (await fetch('/api/v1/layout')).json()
+    if (state.pages.some(p => p.rows.length > 0)) {
+      return 'the daemon still holds an arrangement: ' + JSON.stringify(state)
+    }
+    if (find('Orden original')) return 'the arrangement is gone but the button stayed'
+    if (!find('Guardar')) return 'forgetting the arrangement is not offered as a change to save'
+    if (widgets().length < 2) return 'the console lost its widgets on the way back'
+    return 'ok'
+  })()`)
+  check('the saved arrangement can be given back', restored === 'none' || restored === 'ok', restored)
+
   check('leaving arrange mode', (await click('Listo')) === 'ok')
   await sleep(500)
 
