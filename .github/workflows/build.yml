@@ -575,7 +575,9 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           NO_STRIP: "1"
-        run: pnpm dlx @tauri-apps/cli@^2 build --bundles deb,appimage
+        # --verbose: linuxdeploy's own stderr is the only way to see WHY a
+        # bundle failed; without it the error is one useless line.
+        run: pnpm dlx @tauri-apps/cli@^2 build --bundles deb,appimage --verbose
 
       # The deb, installed for real and driven from outside: the daemon must
       # come up self-contained (fixtures, plugins, audio decoders all from the
