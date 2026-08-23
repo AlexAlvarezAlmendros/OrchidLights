@@ -3352,8 +3352,12 @@ void ApiServer::registerRoutes()
         /* Held in memory until the project is saved, like every other edit. An
            arrangement that wrote itself to disk on every drag would be a
            surprise the first time someone rearranged a show they did not mean
-           to change. */
-        QJsonObject body = ConsoleLayout::toJson(pages);
+           to change.
+         *
+           Answered from the engine, not from the request: a page sent empty is
+           a deletion, and echoing it back as if it were stored would show an
+           arrangement that no longer exists. */
+        QJsonObject body = ConsoleLayout::toJson(m_engine->layout());
         body["saved"] = false;
         body["note"] = QStringLiteral("Kept in memory; POST /api/v1/project/save to write it.");
         return QHttpServerResponse(body);

@@ -1120,6 +1120,16 @@ void EngineHost::setLayout(const QVector<ConsoleLayout::Page> &pages)
             merged.append(page);
     }
 
+    /* A page sent with no rows is the operator asking for the designer's
+       geometry back. Kept, it would survive as an empty <Page> that says
+       nothing; dropped, the section disappears entirely once the last page
+       goes -- which is the honest shape of "no arrangement". */
+    for (int i = merged.count() - 1; i >= 0; i--)
+    {
+        if (merged.at(i).rows.isEmpty())
+            merged.removeAt(i);
+    }
+
     /* The layout lives among the preserved sections, which is what carries it
        through a save. Replacing means dropping the copy that was read in --
        otherwise the file would grow a second, stale arrangement every time. */

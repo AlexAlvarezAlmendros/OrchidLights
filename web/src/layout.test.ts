@@ -40,6 +40,20 @@ describe('groupIntoRows', () => {
     expect(rows.at(-1)?.widgets.map((w) => w.id)).toContain(3)
   })
 
+  it('does not chain a lower band in through a very tall neighbour', () => {
+    // The real console this broke on: buttons at y=30 beside 560 px master
+    // faders at y=40, with a frame of looks starting at y=96. Half the fader's
+    // height "tolerates" the frame, and the whole console collapsed into one
+    // row. 56 px is a band boundary, not hand-drift.
+    const rows = groupIntoRows([
+      widget(1, 32, 30, 200, 56),
+      widget(2, 980, 40, 60, 560),
+      widget(3, 32, 96, 940, 268),
+    ])
+
+    expect(rows.map((r) => r.widgets.map((w) => w.id))).toEqual([[1, 2], [3]])
+  })
+
   it('handles an empty console without inventing rows', () => {
     expect(groupIntoRows([])).toEqual([])
   })

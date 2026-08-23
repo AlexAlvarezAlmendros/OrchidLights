@@ -143,11 +143,21 @@ export interface Row {
  */
 const TOP_TOLERANCE = 0.5
 
+/**
+ * The fraction alone is not enough. Next to a 560 px master fader it allows
+ * 280 px of drift, which is not alignment, it is half the console: a frame a
+ * whole band lower joined the fader's row, and everything the frame started
+ * together with chained in after it. Hand alignment is off by single-digit
+ * pixels whatever the widgets' heights, so past this many the designer meant
+ * two rows.
+ */
+const TOP_TOLERANCE_CAP = 24
+
 function startsTogether(a: Geometry, b: Geometry): boolean {
   const shorter = Math.min(a.height, b.height)
   if (shorter <= 0) return Math.abs(a.y - b.y) === 0
 
-  return Math.abs(a.y - b.y) <= shorter * TOP_TOLERANCE
+  return Math.abs(a.y - b.y) <= Math.min(shorter * TOP_TOLERANCE, TOP_TOLERANCE_CAP)
 }
 
 /**

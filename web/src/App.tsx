@@ -47,6 +47,14 @@ import { XYPad } from './xypad'
 
 type Theme = 'stage' | 'blackout'
 
+/** The arrangement a project actually carries. A page without rows is what a
+ *  reset leaves in the daemon's memory: for the screen it is the same as no
+ *  arrangement at all, and must fall back to geometry the same way. */
+function storedRows(l: { pages: { id: number; rows: number[][] }[] }): LayoutRows | null {
+  const rows = l.pages[0]?.rows
+  return rows !== undefined && rows.length > 0 ? rows : null
+}
+
 /**
  * What the console is for right now.
  *
@@ -347,7 +355,7 @@ export function App() {
         if (all) {
           api
             .layout()
-            .then((l) => setLayout(l.pages[0]?.rows ?? null))
+            .then((l) => setLayout(storedRows(l)))
             .catch(() => undefined)
         }
         /* The patch screen holds its own state; this is what tells it to look
@@ -432,7 +440,7 @@ export function App() {
       .catch(() => setFixtures([]))
     api
       .layout()
-      .then((l) => setLayout(l.pages[0]?.rows ?? null))
+      .then((l) => setLayout(storedRows(l)))
       .catch(() => setLayout(null))
 
     return () => feed.close()
@@ -770,11 +778,28 @@ export function App() {
   }, [dragging, selected])
 
   const persist = useCallback(async () => {
-    const pageId = current?.id ?? 0
-    await api.putLayout({ pages: [{ id: pageId, rows: layout ?? rowsToLayout(rows) }] })
+    /* Only an arrangement someone actually made. Saving the derived grouping
+       froze the algorithm-of-the-day into the file, and a project nobody ever
+       rearranged came back with its console nailed to whatever the grouping
+       got wrong -- immune to every later fix. No arrangement, no layout. */
+    if (layout !== null) {
+      const pageId = current?.id ?? 0
+      await api.putLayout({ pages: [{ id: pageId, rows: layout }] })
+    }
     await api.saveProject()
     setDirty(false)
-  }, [current, layout, rows])
+  }, [current, layout])
+
+  /* The way out of a saved arrangement -- including one an earlier bug saved
+     without anyone asking. Sending the page with no rows makes the daemon
+     forget it; the screen falls back to the designer's geometry on the spot,
+     and the next save writes a file without the section. */
+  const resetLayout = useCallback(async () => {
+    const pageId = current?.id ?? 0
+    await api.putLayout({ pages: [{ id: pageId, rows: [] }] })
+    setLayout(null)
+    setDirty(true)
+  }, [current])
 
   /* Every edit re-reads the console rather than patching the local copy: the
      daemon is the one that decides what a change means, and two clients editing
@@ -1071,16 +1096,27 @@ export function App() {
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                aria-pressed={true}
-                onClick={() => {
-                  setMode('run')
-                  setSelected(null)
-                }}
-              >
-                Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
-              </button>
+              <>
+                {mode === 'arrange' && layout !== null && (
+                  <button
+                    type="button"
+                    onClick={resetLayout}
+                    title="Olvida el orden guardado y vuelve al del proyecto"
+                  >
+                    Orden original
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-pressed={true}
+                  onClick={() => {
+                    setMode('run')
+                    setSelected(null)
+                  }}
+                >
+                  Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
+                </button>
+              </>
             ))}
           <button
             type="button"
