@@ -245,6 +245,9 @@ jobs:
       - name: Access smoke test (the kiosk mask, bar by bar)
         run: ./server/test/access-smoke.sh orchidlightsd
 
+      - name: Remote smoke test (doors, keys, and the wire that closes)
+        run: ./server/test/remote-smoke.sh orchidlightsd resources/samples/Sample.qxw
+
       - name: Video smoke test (media without a token, the feed directs)
         run: ./server/test/video-smoke.sh orchidlightsd
 

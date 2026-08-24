@@ -105,6 +105,7 @@ fn open_view_window(app: tauri::AppHandle, view: String) -> Result<(), String> {
         "desk" | "mesa" => "#/mesa",
         "plan" | "planta" => "#/planta",
         "functions" | "funciones" => "#/funciones",
+        "remote" | "remoto" => "#/remoto",
         _ => "#/vc",
     };
     let url = match &state.token {
@@ -497,6 +498,8 @@ fn arm_tray(handle: &tauri::AppHandle, base: String, token: Option<String>) {
             MenuItemBuilder::with_id("window-plan", "Nueva ventana: Planta").build(&handle)?;
         let surface_item =
             MenuItemBuilder::with_id("window-surface", "Superficie de vídeo").build(&handle)?;
+        let remote_item =
+            MenuItemBuilder::with_id("window-remote", "Conexiones remotas").build(&handle)?;
         let quit_item = MenuItemBuilder::with_id("quit", "Salir").build(&handle)?;
         let menu = MenuBuilder::new(&handle)
             .items(&[
@@ -506,6 +509,7 @@ fn arm_tray(handle: &tauri::AppHandle, base: String, token: Option<String>) {
                 &desk_item,
                 &plan_item,
                 &surface_item,
+                &remote_item,
                 &quit_item,
             ])
             .build()?;
@@ -550,6 +554,9 @@ fn arm_tray(handle: &tauri::AppHandle, base: String, token: Option<String>) {
                     }
                     "window-surface" => {
                         let _ = open_surface_window(app.clone(), 0);
+                    }
+                    "window-remote" => {
+                        let _ = open_view_window(app.clone(), "remoto".into());
                     }
                     "quit" => {
                         if let Some(window) = app.get_webview_window("main") {
