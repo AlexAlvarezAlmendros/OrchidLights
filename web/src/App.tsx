@@ -37,6 +37,7 @@ import { Setup } from './setup'
 import { leaveKiosk, resolveClose, takePendingOpen, toggleFullscreen } from './shell'
 
 const Stage3D = lazy(() => import('./stage3d'))
+import { RemotePanel } from './remote'
 import { Slider } from './slider'
 import { keySequenceOf, typingSomewhere } from './teclas'
 import { getToken, setToken } from './token'
@@ -117,6 +118,7 @@ export function App() {
      the show had stopped. */
   const [shows, setShows] = useState<Record<number, { elapsed: number; paused: boolean }>>({})
   const [beatTick, setBeatTick] = useState(0)
+  const [remoteRev, setRemoteRev] = useState(0)
   /* The latest frame of each universe, kept only while the plan is open.
      Sixty frames a second through React state would re-render the whole app;
      the plan is the one screen that needs them, so nothing else subscribes. */
@@ -327,6 +329,10 @@ export function App() {
       onSimpleDesk: (universe, held) =>
         setDeskHeld((current) => ({ ...current, [universe]: held })),
       onError: setToast,
+      /* A connection came or went: whoever is looking at the remote screen
+         re-reads the list. Deliberately not the dirty flag -- an arrival is
+         not an edit. */
+      onRemote: () => setRemoteRev((current) => current + 1),
       onProject: (isDirty) => {
         setDirty(isDirty)
         /* The identity (name, autosave) re-reads cheaply; the flag is what
@@ -856,6 +862,8 @@ export function App() {
       escenario: 'stage3d',
       stage3d: 'stage3d',
       planta: 'plan',
+      remoto: 'remote',
+      remote: 'remote',
     }
     const segment = window.location.hash
       .replace(/^#/, '')
@@ -1008,6 +1016,7 @@ export function App() {
             ...(access.simpleDesk ? (['desk'] as View[]) : []),
             ...(access.fixtures ? (['plan'] as View[]) : []),
             ...(access.fixtures ? (['stage3d'] as View[]) : []),
+            ...(access.io ? (['remote'] as View[]) : []),
           ]}
           onView={(target) => {
             setView(target)
@@ -1382,6 +1391,10 @@ export function App() {
             <Suspense fallback={<p className="hint">Cargando el escenario…</p>}>
               <Stage3D universes={frames} onError={setToast} />
             </Suspense>
+          </main>
+        ) : view === 'remote' ? (
+          <main className="console">
+            <RemotePanel revision={remoteRev} />
           </main>
         ) : view === 'plan' ? (
           <main className="console">

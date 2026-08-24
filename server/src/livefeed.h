@@ -21,6 +21,7 @@
 #define LIVEFEED_H
 
 #include <QByteArray>
+#include <QJsonArray>
 #include <QObject>
 #include <QTimer>
 #include <QHash>
@@ -64,6 +65,13 @@ public:
 
     int clientCount() const { return m_clients.count(); }
 
+    /** The connections as the operator sees them: who, since when, and with
+     *  what standing. The socket pointer stays private; the id is the handle. */
+    QJsonArray clientsJson() const;
+
+    /** Close one connection on purpose. False when the id is nobody. */
+    bool closeClient(quint32 id);
+
 private slots:
     void onBeat();
     void onNewConnection();
@@ -97,6 +105,12 @@ private:
         /** Presented the real token: the access mask does not apply to it. */
         bool trusted = false;
         QSet<quint32> universes;  //!< 0-based engine ids
+
+        /** The operator-facing handle. Never reused within a run, so a kick
+         *  aimed at a row that just reconnected misses instead of hitting the
+         *  wrong session. */
+        quint32 id = 0;
+        qint64 connectedAt = 0;  //!< ms since epoch
     };
 
     void handleMessage(QWebSocket *socket, Client &client, const QJsonObject &message);
@@ -111,6 +125,12 @@ private:
     const ApiAuth *m_auth = nullptr;
 
     QHash<QWebSocket *, Client> m_clients;
+    quint32 m_nextClientId = 1;
+
+    /** A connection came or went since the last flush. Its own flag rather
+     *  than a `changed` topic: connections are not edits, and must not read
+     *  as the project having changed. */
+    bool m_remoteDirty = false;
 
     /** Latest frame per universe, overwritten as it arrives. Overwriting is
         the coalescing: a client never needs the frame before last. */

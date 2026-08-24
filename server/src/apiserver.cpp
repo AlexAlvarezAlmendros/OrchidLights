@@ -26,6 +26,7 @@
 #include <QDateTime>
 #include <QSettings>
 #include <QHttpServerRequest>
+#include <QNetworkInterface>
 #include <QUrlQuery>
 #include <QFileInfo>
 #include <QDir>
@@ -318,7 +319,8 @@ void ApiServer::registerRoutes()
         else if (path.startsWith(QStringLiteral("/api/v1/universes"))
                  || path.startsWith(QStringLiteral("/api/v1/io"))
                  || path.startsWith(QStringLiteral("/api/v1/inputprofiles"))
-                 || path.startsWith(QStringLiteral("/api/v1/beat")))
+                 || path.startsWith(QStringLiteral("/api/v1/beat"))
+                 || path.startsWith(QStringLiteral("/api/v1/remote")))
         {
             area = EngineHost::AccessIO;
         }
@@ -4120,6 +4122,85 @@ void ApiServer::registerRoutes()
         QJsonObject response;
         response["mask"] = qint64(m_engine->accessMask());
         return QHttpServerResponse(response);
+    });
+
+    /* Remote access, as a thing the operator can see: where this desk can be
+       reached, and who is on it right now.
+     *
+       The join URLs carry the token ONLY for a caller that presented it. On a
+       masked desk the whole point of the mask is that an untrusted client
+       cannot widen its own cage, and a URL with the token in it is the whole
+       cage handed over. */
+    m_server->route("/api/v1/remote", QHttpServerRequest::Method::Get,
+                    [this, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        const bool bearer = m_auth.authorizeStrict(request);
+        const bool tokenInUrl = bearer && m_auth.isRequired();
+
+        QJsonObject body;
+        body["listenAll"] = m_listenAll;
+        body["port"] = m_port;
+        body["authRequired"] = m_auth.isRequired();
+        body["localUrl"] = QStringLiteral("http://127.0.0.1:%1/").arg(m_port);
+
+        /* Real doors only. With the daemon on loopback these addresses would
+           be URLs that do not answer, and a QR code to nowhere is worse than
+           none -- so a desk that is not listening shows no addresses. */
+        QJsonArray addresses;
+        if (m_listenAll)
+        {
+            for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
+            {
+                const auto flags = iface.flags();
+                if (!(flags & QNetworkInterface::IsUp)
+                    || !(flags & QNetworkInterface::IsRunning)
+                    || (flags & QNetworkInterface::IsLoopBack))
+                    continue;
+
+                for (const QNetworkAddressEntry &entry : iface.addressEntries())
+                {
+                    /* Phones dial IPv4: a link-local IPv6 needs a zone id no
+                       phone keyboard has. */
+                    if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol)
+                        continue;
+
+                    QString url = QStringLiteral("http://%1:%2/")
+                                      .arg(entry.ip().toString())
+                                      .arg(m_port);
+                    if (tokenInUrl)
+                        url += QStringLiteral("#token=%1")
+                                   .arg(QString::fromUtf8(m_auth.token()));
+
+                    QJsonObject address;
+                    address["interface"] = iface.humanReadableName();
+                    address["ip"] = entry.ip().toString();
+                    address["url"] = url;
+                    addresses.append(address);
+                }
+            }
+        }
+        body["addresses"] = addresses;
+        body["clients"] = m_feed->clientsJson();
+
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/remote/clients/<arg>", QHttpServerRequest::Method::Delete,
+                    [this, refused, maskForbidden](quint32 id, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        if (m_feed->closeClient(id) == false)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("No such connection"));
+        }
+
+        QJsonObject body;
+        body["closed"] = qint64(id);
+        return QHttpServerResponse(body);
     });
 
     /* Global undo: every edit above went through a snapshot guard, and the

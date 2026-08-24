@@ -514,6 +514,26 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+  /** Remote access: where this desk can be reached, and who is on it. The
+   *  join URLs carry the token only when this client presented it. */
+  remote: () =>
+    json<{
+      listenAll: boolean
+      port: number
+      authRequired: boolean
+      localUrl: string
+      addresses: { interface: string; ip: string; url: string }[]
+      clients: {
+        id: number
+        address: string
+        connectedAt: string
+        authenticated: boolean
+        trusted: boolean
+        universes: number
+      }[]
+    }>('/api/v1/remote'),
+  kickRemote: (id: number) =>
+    json<{ closed: number }>(`/api/v1/remote/clients/${id}`, { method: 'DELETE' }),
   project: () => json<ProjectState>('/api/v1/project'),
   functions: () => json<FunctionState[]>('/api/v1/functions'),
   vc: () => json<import('./layout').VcWidget>('/api/v1/vc'),

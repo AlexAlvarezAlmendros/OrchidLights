@@ -76,6 +76,9 @@ export interface LiveHandlers {
    *  a press that did nothing and said nothing teaches the operator that the
    *  desk is broken. */
   onError?: (message: string) => void
+  /** A connection came or went. The count travels; whoever is showing the
+   *  connections re-reads the list. */
+  onRemote?: (clients: number) => void
 }
 
 export class Live {
@@ -196,6 +199,9 @@ export class Live {
           break
         case 'error':
           this.handlers.onError?.(String(message.message ?? 'La mesa rechazó la orden'))
+          break
+        case 'remote':
+          this.handlers.onRemote?.(Number(message.clients ?? 0))
           break
         case 'subscribed':
           // An acknowledgement, deliberately unused: the effect of a

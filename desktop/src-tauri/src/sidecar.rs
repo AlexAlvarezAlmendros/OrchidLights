@@ -50,12 +50,23 @@ pub struct Layout {
 }
 
 impl Sidecar {
-    /// Pick a free loopback port by binding to :0 and letting it go.
+    /// The port the phones will bookmark: stable when it can be, fresh when
+    /// it cannot.
+    ///
+    /// 9998 is the daemon's own default, so the join URL survives a restart
+    /// on any machine not already running a separate daemon there -- and on
+    /// one that is, the shell quietly takes a random port and the remote
+    /// screen shows whichever it got. Bound on all interfaces because that
+    /// is where the daemon itself will bind.
     ///
     /// There is a sliver of a race between the drop and the daemon's own
     /// bind; `spawn` retries with a fresh port if the daemon loses it.
     pub fn free_port() -> std::io::Result<u16> {
-        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        const PREFERRED: u16 = 9998;
+        if TcpListener::bind(("0.0.0.0", PREFERRED)).is_ok() {
+            return Ok(PREFERRED);
+        }
+        let listener = TcpListener::bind(("0.0.0.0", 0))?;
         Ok(listener.local_addr()?.port())
     }
 
@@ -72,6 +83,11 @@ impl Sidecar {
             // The shell dies with the rig dark: it exists to be quit on
             // purpose, unlike a headless daemon someone walks away from.
             .arg("--zero-on-exit")
+            // The venue's phones are the point of this desk. Opening beyond
+            // loopback makes the daemon demand its token on every request,
+            // and the shell already carries it -- the phones get theirs from
+            // the remote screen's QR.
+            .arg("--listen-all")
             .env("QT_QPA_PLATFORM", "offscreen")
             .env("ORCHID_FIXTURE_DIR", &layout.fixtures)
             .env("ORCHID_PLUGIN_DIR", &layout.plugins)

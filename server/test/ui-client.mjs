@@ -4361,6 +4361,61 @@ try {
   })()`)
   check('the close question offers its three answers', closeAsk === 'ok', closeAsk)
 
+  /* The remote screen: who can get in, and who is in.
+   *
+     This daemon listens on loopback, so the honest render is NO network
+     doors -- a QR to a URL that does not answer is worse than none -- plus
+     the live list, where this very page is client number one. A raw socket
+     opened from here must appear in the list without anyone refreshing, and
+     its Desconectar button must close it on the wire, not just in the DOM. */
+  const remote = await evaluate(`(async () => {
+    const wait = (ms) => new Promise(r => setTimeout(r, ms))
+    const tab = [...document.querySelectorAll('.rail-item')]
+      .find(b => b.textContent.trim() === 'Remoto')
+    if (!tab) return 'no Remoto in the rail'
+    tab.click()
+    await wait(900)
+
+    const panel = document.querySelector('.remote')
+    if (!panel) return 'the remote screen never drew'
+
+    /* Honesty on loopback: the no-doors message, and no QR pretending. */
+    if (!panel.textContent.includes('--listen-all')) {
+      return 'the loopback daemon does not say how to open the network'
+    }
+    if (panel.querySelector('.qr')) return 'a QR code for a door that does not answer'
+
+    const ids = () => [...panel.querySelectorAll('[data-client-id]')]
+      .map(li => li.dataset.clientId)
+    const before = ids()
+    if (before.length < 1) return 'this page is connected and the list does not say so'
+
+    /* A stranger arrives; the list follows without a refresh. */
+    let closedByWire = false
+    const raw = new WebSocket('ws://' + location.host + '/ws')
+    raw.onclose = () => { closedByWire = true }
+    await wait(1500)
+
+    const now = ids()
+    const arrived = now.filter(id => !before.includes(id))
+    if (arrived.length !== 1) {
+      return 'one arrival, but the list went ' + before.length + ' -> ' + now.length
+    }
+
+    /* And is shown the door. */
+    const row = panel.querySelector('[data-client-id="' + arrived[0] + '"]')
+    const kick = [...row.querySelectorAll('button')]
+      .find(b => b.textContent.trim() === 'Desconectar')
+    if (!kick) return 'a connection with no way to close it'
+    kick.click()
+    await wait(1500)
+
+    if (!closedByWire) return 'Desconectar did not reach the wire'
+    if (ids().includes(arrived[0])) return 'closed on the wire, still on the list'
+    return 'ok'
+  })()`)
+  check('the remote screen tells doors and guests the truth', remote === 'ok', remote)
+
   /* One slider in the app, everywhere.
    *
      The rule this guards is the one that already broke once: a speed dial kept

@@ -25,6 +25,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QHostAddress>
 #include <QWebSocket>
 
 #include <QFileInfo>
@@ -309,7 +310,10 @@ void LiveFeed::onNewConnection()
         Client client;
         /* With no token demanded, a socket is usable the moment it opens. */
         client.authenticated = (m_auth->isRequired() == false);
+        client.id = m_nextClientId++;
+        client.connectedAt = QDateTime::currentMSecsSinceEpoch();
         m_clients.insert(socket, client);
+        m_remoteDirty = true;
 
         connect(socket, &QWebSocket::textMessageReceived, this, &LiveFeed::onTextMessage);
         connect(socket, &QWebSocket::disconnected, this, &LiveFeed::onDisconnected);
@@ -887,7 +891,57 @@ void LiveFeed::onDisconnected()
         return;
 
     m_clients.remove(socket);
+    m_remoteDirty = true;
     socket->deleteLater();
+}
+
+QJsonArray LiveFeed::clientsJson() const
+{
+    QJsonArray clients;
+
+    for (auto it = m_clients.constBegin(); it != m_clients.constEnd(); ++it)
+    {
+        const QWebSocket *socket = it.key();
+        const Client &client = it.value();
+
+        /* A browser on this machine arrives as an IPv4-mapped IPv6 address;
+           shown raw it reads as a stranger. */
+        QHostAddress address = socket->peerAddress();
+        bool isV4 = false;
+        const quint32 v4 = address.toIPv4Address(&isV4);
+        if (isV4)
+            address = QHostAddress(v4);
+
+        QJsonObject entry;
+        entry["id"] = qint64(client.id);
+        entry["address"] = address.toString();
+        entry["connectedAt"] = QDateTime::fromMSecsSinceEpoch(client.connectedAt)
+                                   .toString(Qt::ISODate);
+        entry["authenticated"] = client.authenticated;
+        entry["trusted"] = client.trusted;
+        entry["universes"] = client.universes.count();
+        clients.append(entry);
+    }
+
+    return clients;
+}
+
+bool LiveFeed::closeClient(quint32 id)
+{
+    for (auto it = m_clients.constBegin(); it != m_clients.constEnd(); ++it)
+    {
+        if (it.value().id != id)
+            continue;
+
+        /* A normal close, with the reason on it: the phone's console says
+           what happened instead of showing a dead desk. onDisconnected does
+           the bookkeeping when the close completes. */
+        it.key()->close(QWebSocketProtocol::CloseCodeNormal,
+                        QStringLiteral("Desconectado por el operador"));
+        return true;
+    }
+
+    return false;
 }
 
 QByteArray LiveFeed::framePayload(quint32 universeId, const QByteArray &values)
@@ -988,6 +1042,7 @@ void LiveFeed::flush()
         m_playingVideos.clear();
         m_changed.clear();
         m_projectDirty = false;
+        m_remoteDirty = false;
         return;
     }
 
@@ -1162,6 +1217,26 @@ void LiveFeed::flush()
                 if (it.value().authenticated)
                     it.key()->sendTextMessage(payload);
             }
+        }
+    }
+
+    if (m_remoteDirty)
+    {
+        m_remoteDirty = false;
+
+        /* Somebody arrived or left. The count travels; whoever is showing the
+           connections re-reads the list, everyone else has a number. */
+        QJsonObject message;
+        message["type"] = "remote";
+        message["clients"] = m_clients.count();
+
+        const QString payload =
+            QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact));
+
+        for (auto it = m_clients.begin(); it != m_clients.end(); ++it)
+        {
+            if (it.value().authenticated)
+                it.key()->sendTextMessage(payload);
         }
     }
 

@@ -84,6 +84,14 @@ TOKEN=$(cat "$TOKEN_FILE")
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/status")
 [ "$CODE" = "200" ] || fail "the token did not authorize ($CODE)"
 
+# 2b. The daemon is open to the venue -- the phones are the point -- and,
+#     precisely because of that, guarded: nothing answers without the token.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/status")
+[ "$CODE" = "401" ] || fail "open to the network yet answering without the token ($CODE)"
+LISTEN=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/remote" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['listenAll'])" 2>/dev/null || true)
+[ "$LISTEN" = "True" ] || fail "the sidecar daemon is not listening for the venue (listenAll=$LISTEN)"
+
 # 3. A second launch carrying a project opens it in the FIRST instance -- the
 #    whole chain, through the real webview: single-instance forwards the path,
 #    the shell evals an orchid-open-request into the page, the page (holding

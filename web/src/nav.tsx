@@ -61,6 +61,14 @@ const ICONS: Record<View, React.ReactNode> = {
       <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" />
     </>
   ),
+  /* Waves leaving an antenna: the desk, reachable. */
+  remote: (
+    <>
+      <path d="M12 21v-8" />
+      <circle cx="12" cy="11" r="2" />
+      <path d="M8.5 7.5a5 5 0 0 1 7 0M5.5 4.5a9 9 0 0 1 13 0" />
+    </>
+  ),
 }
 
 const LABELS: Record<View, string> = {
@@ -70,9 +78,10 @@ const LABELS: Record<View, string> = {
   desk: 'Mesa',
   plan: 'Planta',
   stage3d: 'Escenario',
+  remote: 'Remoto',
 }
 
-export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan', 'stage3d']
+export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan', 'stage3d', 'remote']
 
 export function Nav({
   view,

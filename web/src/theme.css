@@ -3441,3 +3441,99 @@ body[data-kiosk="1"] .bpm-dock {
   width: 100% !important;
   height: 100% !important;
 }
+
+/* ---- Remote access -------------------------------------------------- */
+
+.remote {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+  max-width: 72rem;
+}
+
+.remote-doors {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.9rem;
+}
+
+.remote-door {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.remote-door header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.remote-iface {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* The camera reads contrast, not design systems: the code stays dark on
+   light in every theme, and crisp -- antialiasing blurs modules. */
+.qr {
+  width: 100%;
+  max-width: 15rem;
+  align-self: center;
+  border-radius: 8px;
+  shape-rendering: crispEdges;
+}
+
+.remote-url {
+  font-size: 0.72rem;
+  word-break: break-all;
+  color: var(--muted);
+  user-select: all;
+}
+
+.remote-note {
+  margin-top: 0.7rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.remote-empty {
+  color: var(--muted);
+}
+
+.remote-clients {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.remote-clients li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.remote-who {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.remote-who span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
