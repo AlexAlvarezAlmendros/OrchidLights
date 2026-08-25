@@ -1642,7 +1642,14 @@ function Surface({
         <div className="blocks">
           {sections.map((section, index) => (
             <section className="block" key={section.title ?? `block-${index}`}>
-              {section.title !== null && <Heading text={section.title} />}
+              {section.title !== null && (
+                /* A label with nothing under it is the designer talking, not
+                   organizing: drawn quieter than the headings that head. */
+                <Heading
+                  text={section.title}
+                  quiet={section.controls.length === 0 && section.levels.length === 0}
+                />
+              )}
               {section.controls.length > 0 && (
                 <div className="grid">{section.controls.map(draw)}</div>
               )}
@@ -1905,6 +1912,12 @@ function Widget({
           }}
         >
           {label}
+          {/* A frame arranged as a chip hides its children; the count says the
+              box is full, so five near-empty cards stop reading as five
+              broken sections. */}
+          {isContainer(widget) && (widget.children?.length ?? 0) > 0 && (
+            <span className="hint num">· {widget.children?.length} dentro</span>
+          )}
         </button>
       </>
     )
@@ -2317,10 +2330,10 @@ function SpeedDial({
 }
 
 /** A section heading, and the aside the operator bracketed after it. */
-function Heading({ text }: { text: string }) {
+function Heading({ text, quiet = false }: { text: string; quiet?: boolean }) {
   const { title, note } = splitHeading(text)
   return (
-    <h2 className="section">
+    <h2 className="section" data-note={quiet}>
       {title}
       {note !== null && <span className="section-note">{note}</span>}
     </h2>
@@ -2561,8 +2574,8 @@ function Settings({
         </label>
 
         <p className="hint">
-          OrchidLights{about?.version ? ` · ${about.version}` : ''}
-          {about?.name ? ` · ${about.name}` : ''} · Apache-2.0 · motor QLC+ (fork)
+          {/* The daemon's name IS OrchidLights; repeating it read as a stutter. */}
+          OrchidLights{about?.version ? ` · ${about.version}` : ''} · Apache-2.0 · motor QLC+ (fork)
         </p>
 
         <div className="gate-actions">

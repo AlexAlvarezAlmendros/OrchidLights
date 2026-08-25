@@ -418,6 +418,18 @@ export function Plan({
             <Lamp
               key={fixture.id}
               fixture={fixture}
+              /* Unplaced rigs pile up on the default spot and their labels
+                 print through each other into noise. Each lamp knows how many
+                 neighbours share its spot before it, and steps its label down
+                 that many lines -- the lamps stay where the file says. */
+              crowd={
+                placed.filter(
+                  (other) =>
+                    other.id < fixture.id &&
+                    Math.abs((other.x ?? 0) - (fixture.x ?? 0)) < 150 &&
+                    Math.abs((other.y ?? 0) - (fixture.y ?? 0)) < 150,
+                ).length
+              }
               aim={blackout ? null : aimOf(fixture, universes)}
               /* While it is being dragged the lamp is drawn where the finger is,
                not where the daemon still has it. */
@@ -933,6 +945,7 @@ function Lamp({
   deep,
   chosen,
   colour,
+  crowd = 0,
   onGrab,
   onRemove,
 }: {
@@ -947,6 +960,8 @@ function Lamp({
   /** Part of what you are working on. */
   chosen: boolean
   colour: string | null
+  /** How many lamps share this spot before this one; its label steps down. */
+  crowd?: number
   onGrab: (event: React.PointerEvent) => void
   onRemove: () => void
 }) {
@@ -1000,7 +1015,10 @@ function Lamp({
       {/* The label carries the position while the lamp is moving. Placing a rig
           means putting a lamp *somewhere*, and "somewhere" on a plan is a
           measurement, not a feeling. */}
-      <span className="lamp-label">
+      <span
+        className="lamp-label"
+        style={crowd > 0 ? { transform: `translateY(${crowd * 1.05}em)` } : undefined}
+      >
         {at !== null ? `${(x / 1000).toFixed(2)} · ${(y / 1000).toFixed(2)} m` : fixture.name}
       </span>
     </div>

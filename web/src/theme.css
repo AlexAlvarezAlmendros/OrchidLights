@@ -783,7 +783,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(6px);
   padding: 1rem;
 }
 
@@ -1207,6 +1208,11 @@ button.danger {
 .widget.arranging {
   cursor: grab;
   opacity: 0.9;
+  /* Chips, not layout: while arranging, the geometry-derived grow would let
+     the straggler of a wrapped row swell to half the console. Every widget
+     the same draggable size is what a hand mid-drag expects. */
+  flex-grow: 0;
+  min-height: 56px;
   /* The browser must not claim the gesture for scrolling: on a phone a drag
      that starts as a scroll is a drag that never happens. */
   touch-action: none;
@@ -1657,7 +1663,10 @@ button.danger {
    is a generic dimmer standing in for one. Both look fine until they don't. */
 .card[data-warn="true"],
 .table-row[data-warn="true"] {
-  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+  /* A warning is an edge to notice, not a cage: the full danger border made
+     every universe card shout over the one thing actually wrong inside. */
+  border-color: var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--danger) 70%, var(--border));
 }
 
 .card > header {
@@ -1756,6 +1765,9 @@ input.narrow {
 button.linkish {
   border: none;
   background: none;
+  /* The button relief (inset top highlight) on a transparent button paints a
+     floating outline over the text it labels. A link has no relief. */
+  box-shadow: none;
   color: var(--accent);
   padding: 0;
   min-height: 0;
@@ -2804,6 +2816,27 @@ button.linkish.left {
   grid-column: 1 / -1;
 }
 
+/* Inside a frame the same rule as the sections' grid, for the same reason:
+   the straggler of a geometric row otherwise grows to fill it, and a chase
+   left alone on the last line reads as the section's main button. */
+.widget.frame .row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+}
+
+.widget.frame .row > .widget {
+  flex: initial;
+  min-width: 0;
+  min-height: 64px;
+}
+
+.widget.frame .row > .widget.cuelist,
+.widget.frame .row > .widget.xypad,
+.widget.frame .row > .widget.matrix,
+.widget.frame .row > .widget.audiotriggers {
+  grid-column: span 2;
+}
+
 .grid > .widget.cuelist,
 .grid > .widget.xypad,
 .grid > .widget.matrix,
@@ -2851,7 +2884,9 @@ button.linkish.left {
 .levels .widget.fader {
   flex: initial;
   min-height: 0;
-  padding: 0;
+  /* Room for the colour tab the background paints at x=0: without it the
+     stripe lands under the caption's first glyph and reads as dirt. */
+  padding: 0 0 0 0.6rem;
   border: none;
   background-color: transparent;
 }
@@ -3536,4 +3571,139 @@ body[data-kiosk="1"] .bpm-dock {
 .remote-who span {
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+/* ---- Native controls, brought into the house ------------------------- */
+
+/* The browser's own widgets (scrollbars, checkboxes, number spinners) were
+   the only light-grey things on a dark desk. color-scheme tells the engine
+   the truth; the rules below finish the job where it does not listen. */
+:root {
+  color-scheme: dark;
+}
+
+input,
+select,
+textarea {
+  accent-color: var(--accent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 80%, var(--text-dim));
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The BPM box sits between themed pills and was the one user-agent-grey
+   control in every screen's header. Same recipe as .field input. */
+.bpm-dock input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 0.35rem 0.5rem;
+  min-height: 34px;
+}
+
+/* ---- Screen-level coherence ----------------------------------------- */
+
+/* The camera in use, said out loud -- four identical buttons hid which view
+   was on. Same accent language as the tabs. */
+.stage3d-bar {
+  align-items: center;
+}
+
+.stage3d-bar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* One rhythm for both sections of the remote screen. */
+.remote section > .section {
+  margin: 0 0 0.9rem;
+}
+
+/* Functions and patch: at 1920 a full-bleed row is a band of nothing with a
+   name on the far left. The remote screen already sets this width. */
+.setup {
+  max-width: 76rem;
+}
+
+/* Small accent text on dark needs more light than the accent itself. */
+.mesa-modes button[aria-pressed="true"],
+.mesa-pages button[aria-pressed="true"] {
+  color: color-mix(in srgb, var(--accent) 55%, white);
+}
+
+/* The palettes drawer is a card like its create-form neighbour, not a hollow
+   ring of page background. */
+details.palettes {
+  background: var(--surface);
+}
+
+/* A section heading that heads nothing is a note the designer left on the
+   desk. Drawn as one: quieter than the headings that actually organize. */
+h2.section[data-note="true"] {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* The gate's one action reads as the card's full-width foot, not as a small
+   button lost in the corner. */
+.gate-actions button {
+  width: 100%;
+}
+
+/* Lamps at rest were nearly invisible on the stage they sit on. */
+.lamp {
+  border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border));
+  background: var(--surface);
+}
+
+.lamp-label {
+  color: color-mix(in srgb, var(--text) 70%, var(--text-dim));
+}
+
+/* The one button that commits a form, told apart from the card it sits on:
+   same accent language as a selected tab, quieter than danger. */
+button.primary {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+button.primary:disabled {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+/* The lone button of a filter bar lines up with the inputs beside it: same
+   floor height, feet on the same baseline. */
+.fields > button {
+  align-self: flex-end;
+  min-height: 44px;
+}
+
+/* The child count of an arranged frame: its own quiet line, never a word
+   broken vertically inside a narrow chip. */
+.widget.arranging > .hint {
+  display: block;
+  white-space: nowrap;
+  margin-top: 0.15rem;
 }

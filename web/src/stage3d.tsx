@@ -119,17 +119,26 @@ export function Stage3D({
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x0d0e11)
     const cam = new THREE.PerspectiveCamera(55, width / height, 0.1, 200)
-    cam.position.set(0, stageD * 0.9, stageD * 1.2)
+    /* High enough that the rig (lamps hang at 1-4 m) is in frame, not just
+       the floor: the first framing cut every fixture off the top edge. */
+    cam.position.set(0, stageD * 1.05 + 1.5, stageD * 1.5)
     cameraRef.current = cam
 
     const renderer = new THREE.WebGLRenderer({ antialias: quality === 'high' })
     renderer.setSize(width, height)
+    /* Nothing shines through the stage: a 6 m beam from a 3.5 m truss used
+       to keep going below the floor as a spike out of the underworld. */
+    renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)]
     element.appendChild(renderer.domElement)
 
     const controls = new OrbitControls(cam, renderer.domElement)
+    /* Orbit around the middle of the AIR the rig lives in, not the floor's
+       origin -- orbiting the floor keeps pushing the lamps off-screen. */
+    controls.target.set(0, 1.2, 0)
+    controls.update()
     controlsRef.current = controls
 
-    scene.add(new THREE.AmbientLight(0x404050, 2))
+    scene.add(new THREE.AmbientLight(0x50535f, 2.4))
     const moon = new THREE.DirectionalLight(0x8888aa, 1)
     moon.position.set(5, 10, 5)
     scene.add(moon)
@@ -184,12 +193,30 @@ export function Stage3D({
 
       const body = new THREE.Mesh(
         new THREE.BoxGeometry(0.3, 0.25, 0.3),
-        new THREE.MeshStandardMaterial({ color: 0x30343c }),
+        /* Bright enough to find and click on a dark stage: the point of the
+           bodies is being pickable, and 0x30343c on 0x0d0e11 was a rig you
+           could not see, let alone choose from. */
+        new THREE.MeshStandardMaterial({ color: 0x646c7a, emissive: 0x171a20 }),
       )
       root.add(body)
       void meshFor(type).then((mesh) => {
         if (mesh === null) return
-        mesh.scale.setScalar(0.001) // the .dae files are in millimetres
+        /* The .dae files declare <unit meter="1"/> and the loader honours
+           it: they arrive in metres already. The 0.001 that used to live here
+           shrank every body to a third of a millimetre -- a rig you could
+           prove existed (the picking worked) but never see. */
+        /* One body language for the whole rig: the .dae files arrive with
+           their own near-black materials, which on this stage made the mesh
+           an invisibility cloak -- the box it replaced could at least be
+           seen and clicked. */
+        mesh.traverse((part) => {
+          if ((part as THREE.Mesh).isMesh) {
+            ;(part as THREE.Mesh).material = new THREE.MeshStandardMaterial({
+              color: 0x646c7a,
+              emissive: 0x171a20,
+            })
+          }
+        })
         root.remove(body)
         root.add(mesh)
       })
@@ -209,9 +236,10 @@ export function Stage3D({
           depthWrite: false,
         }),
       )
-      /* Cone apex at the fixture, spreading down. */
+      /* Cone apex at the fixture, spreading down. The old PI flip put the
+         BASE at the lamp: light leaving a lens six metres wide and landing in
+         a point is a projector running backwards. */
       beam.position.y = -length / 2
-      beam.rotation.x = Math.PI
       beamPivot.add(beam)
       root.add(beamPivot)
 
