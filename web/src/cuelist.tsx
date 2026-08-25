@@ -50,7 +50,10 @@ export function CueList({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (chaser === undefined) return
+    /* The same guard the render uses: the unset sentinel draws "sin chaser",
+       and a widget drawn as having no chaser must not ask the daemon for the
+       body of function 4294967295. */
+    if (chaser === undefined || chaser >= 0xffffffff) return
     let live = true
     api
       .functionBody(chaser)

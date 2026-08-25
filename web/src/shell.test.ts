@@ -27,7 +27,7 @@ function shellWindow(answers: Record<string, unknown>): Invocation[] {
   vi.stubGlobal('window', {
     __TAURI_INTERNALS__: {
       invoke: (command: string, args?: Record<string, unknown>) => {
-        calls.push({ command, args })
+        calls.push(args === undefined ? { command } : { command, args })
         return Promise.resolve(answers[command])
       },
     },

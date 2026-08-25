@@ -134,15 +134,10 @@ describe('moveWidget', () => {
     expect(moveWidget([[1, 2, 3]], 3, 0, null)).toEqual([[1, 2, 3]])
   })
 
-  // BUG: moveWidget(rows, id, row, id) -- a widget dropped before ITSELF --
-  // appends it to the end of the row instead of leaving it in place: the
-  // anchor is stripped out of `next` before indexOf looks for it, so the
-  // "vanished anchor" fallback fires. moveWidget([[1,2,3]], 2, 0, 2) returns
-  // [[1,3,2]], a real reordering out of a drop that means "exactly here".
-  // The UI is saved today by the isNoop guard in App.tsx, which swallows the
-  // self-drop before moveWidget runs -- but the function's own contract is
-  // identity, and any caller without the guard silently scrambles the row.
-  it.skip('treats "before itself" as staying exactly where it is', () => {
+  // Regression: "before itself" once fired the vanished-anchor fallback (the
+  // anchor was stripped with the dragged id before indexOf looked for it) and
+  // sent the widget to the end of the row.
+  it('treats "before itself" as staying exactly where it is', () => {
     expect(moveWidget([[1, 2, 3]], 2, 0, 2)).toEqual([[1, 2, 3]])
   })
 

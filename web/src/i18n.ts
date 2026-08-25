@@ -29,6 +29,7 @@ const EN: Record<string, string> = {
   Patch: 'Patch',
   Mesa: 'Desk',
   Planta: 'Plan',
+  Escenario: 'Stage',
   Remoto: 'Remote',
   'Acceso desde la red': 'Network access',
   'Código QR de acceso': 'Access QR code',

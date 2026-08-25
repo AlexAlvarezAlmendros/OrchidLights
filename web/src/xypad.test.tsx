@@ -61,14 +61,8 @@ describe('XYPad', () => {
 
   it('treats a widget without an id as unusable too', () => {
     // Every move addresses the widget by id; without one there is nothing to say.
-    render(
-      <XYPad
-        widget={pad({ id: undefined })}
-        style={{}}
-        position={{ x: 0, y: 0 }}
-        onMove={vi.fn()}
-      />,
-    )
+    const { id: _absent, ...anonymous } = pad()
+    render(<XYPad widget={anonymous} style={{}} position={{ x: 0, y: 0 }} onMove={vi.fn()} />)
 
     expect(screen.getByText('sin cabezas')).toBeInTheDocument()
   })

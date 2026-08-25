@@ -149,14 +149,8 @@ describe('CueList', () => {
   })
 
   it('shows a widget with no chaser honestly, with nothing to press', () => {
-    render(
-      <CueList
-        widget={cuelist({ chaserId: undefined })}
-        style={{}}
-        functions={[]}
-        onCommand={vi.fn()}
-      />,
-    )
+    const { chaserId: _absent, ...unassigned } = cuelist()
+    render(<CueList widget={unassigned} style={{}} functions={[]} onCommand={vi.fn()} />)
 
     expect(screen.getByText('sin chaser')).toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
@@ -179,13 +173,9 @@ describe('CueList', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
-  // BUG: the effect only bails on `chaser === undefined`, so a widget whose
-  // chaser is the unset sentinel 0xffffffff renders as "sin chaser" yet still
-  // sends GET /api/v1/functions/4294967295/body to the daemon -- a request for
-  // a function that cannot exist. Observed: api.functionBody called once with
-  // 4294967295 ("expected spy to not be called at all, but actually been
-  // called 1 times").
-  it.skip('does not ask the daemon for the body of the unset-chaser sentinel', () => {
+  // Regression: the fetch effect once bailed only on undefined, so a widget
+  // drawn as "sin chaser" still asked the daemon for function 4294967295.
+  it('does not ask the daemon for the body of the unset-chaser sentinel', () => {
     render(
       <CueList
         widget={cuelist({ chaserId: 0xffffffff })}
@@ -213,9 +203,11 @@ describe('CueList', () => {
   })
 
   it('falls back to the live function name when the widget has no caption', () => {
+    // Omit rather than undefined: absent is what the parser actually produces.
+    const { caption: _absent, ...uncaptioned } = cuelist()
     render(
       <CueList
-        widget={cuelist({ caption: undefined })}
+        widget={uncaptioned}
         style={{}}
         functions={[chaserState({ name: 'Main show' })]}
         onCommand={vi.fn()}

@@ -112,11 +112,9 @@ describe('the labels speak the desk language', () => {
     }
   })
 
-  // BUG: the stage3d rail label 'Escenario' has no entry in the EN dictionary
-  // (src/i18n.ts), so an English desk shows a Spanish word in the middle of an
-  // otherwise translated rail. Every other rail label is covered; the i18n
-  // module's own contract says the chrome comes first.
-  it.skip('translates every visible rail label, stage3d included', () => {
+  // Regression: 'Escenario' landed after the EN dictionary and shipped
+  // untranslated between otherwise-translated rail labels.
+  it('translates every visible rail label, stage3d included', () => {
     localStorage.setItem('orchid.lang', 'en')
     renderNav({ visible: VIEWS })
 

@@ -29,9 +29,10 @@ const bank: NonNullable<VcWidget['presets']> = [
 
 describe('MatrixWidget', () => {
   it('shows a widget with no matrix honestly, with nothing to ride', () => {
+    const { functionId: _absent, ...unassigned } = matrix()
     render(
       <MatrixWidget
-        widget={matrix({ functionId: undefined })}
+        widget={unassigned}
         style={{}}
         value={0}
         onLevel={vi.fn()}
@@ -44,14 +45,9 @@ describe('MatrixWidget', () => {
   })
 
   it('treats a widget without an id the same way', () => {
+    const { id: _absent, ...anonymous } = matrix()
     render(
-      <MatrixWidget
-        widget={matrix({ id: undefined })}
-        style={{}}
-        value={0}
-        onLevel={vi.fn()}
-        onPreset={vi.fn()}
-      />,
+      <MatrixWidget widget={anonymous} style={{}} value={0} onLevel={vi.fn()} onPreset={vi.fn()} />,
     )
 
     expect(screen.getByText('sin matriz')).toBeInTheDocument()

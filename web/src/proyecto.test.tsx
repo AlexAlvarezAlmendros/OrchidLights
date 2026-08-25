@@ -261,11 +261,9 @@ describe('guardar como', () => {
     await waitFor(() => expect(api.saveProjectNamed).toHaveBeenCalledWith('nochevieja.qxw'))
   })
 
-  // BUG: the extension check is case-sensitive (`endsWith('.qxw')`) while the
-  // display strip in the same file is case-insensitive (/\.qxw$/i), so a name
-  // typed as "FIESTA.QXW" is sent as "FIESTA.QXW.qxw" -- shown in the open
-  // list as "FIESTA.QXW", a file the operator never named.
-  it.skip('accepts the extension whatever its case', async () => {
+  // Regression: the extension check was case-sensitive while the display
+  // strip was not, so "FIESTA.QXW" was saved as "FIESTA.QXW.qxw".
+  it('accepts the extension whatever its case', async () => {
     vi.mocked(window.prompt).mockReturnValue('FIESTA.QXW')
     await openMenu()
 

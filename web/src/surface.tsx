@@ -59,7 +59,10 @@ export function Surface() {
           return
         }
 
-        if (wanted !== null && event.screen !== wanted) return
+        /* Read the field the same way the store below does: a film without a
+           screen is aimed at screen 0, so a surface declared ?screen=0 must
+           play it rather than drop it on undefined !== 0. */
+        if (wanted !== null && (event.screen ?? 0) !== wanted) return
 
         setPlaying((current) => ({
           ...current,

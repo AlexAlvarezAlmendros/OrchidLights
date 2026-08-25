@@ -167,15 +167,9 @@ describe('GrandMasterDock', () => {
     expect(api.setGrandMaster).not.toHaveBeenCalled()
   })
 
-  // BUG: pressing Aprender binds instantly to the LAST control that moved,
-  // however long ago, instead of waiting for the NEXT movement. App.tsx keeps
-  // `lastInput` forever (it is set on every input event and never cleared), and
-  // the learn effect fires on `listening` turning true with that stale value
-  // already present -- so the button flashes 'Esperando… mueve el control' and
-  // binds before the operator touches anything. Failure observed:
-  // api.setGrandMaster was called with {"input": {"channel": 3, "universe": 1}}
-  // immediately after the Aprender click, with no new movement.
-  it.skip('waits for a NEW movement instead of binding to a stale one', async () => {
+  // Regression: Aprender once bound instantly to the LAST control that had
+  // moved, however long ago, while the button still said "Esperando…".
+  it('waits for a NEW movement instead of binding to a stale one', async () => {
     const user = userEvent.setup()
     mountGm({ learning: { universe: 1, channel: 3, value: 90 } })
 

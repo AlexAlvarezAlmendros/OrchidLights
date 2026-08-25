@@ -199,14 +199,10 @@ describe('the ?screen filter', () => {
     expect(videos()).toHaveLength(0)
   })
 
-  // BUG: the surface itself defaults a missing `screen` field to 0 when it
-  // stores the event (`event.screen ?? 0`), but the filter compares the raw
-  // field: with ?screen=0 in the URL, an event without `screen` fails
-  // `event.screen !== wanted` (undefined !== 0) and is dropped. A surface
-  // explicitly declared as screen 0 thus ignores films the same client
-  // treats as aimed at screen 0. Expected below is the consistent reading.
-  // Evidence when run: expected 1 video, received 0.
-  it.skip('treats a film without a screen field as aimed at screen 0', () => {
+  // Regression: the filter once compared the raw field (undefined !== 0)
+  // while the store defaulted it, so ?screen=0 dropped screenless films the
+  // same client stored as screen 0.
+  it('treats a film without a screen field as aimed at screen 0', () => {
     window.location.hash = '#/surface?screen=0'
     render(<Surface />)
 
