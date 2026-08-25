@@ -51,6 +51,38 @@ describe('placeBelow', () => {
     expect(unknown.height).toBeGreaterThan(0)
   })
 
+  it('stacks repeated additions into successive rows', () => {
+    // Adding three widgets one after another must read as three additions,
+    // not as one row that grew sideways: each lands below the previous.
+    const page: VcWidget[] = []
+    for (const type of ['button', 'slider', 'label']) {
+      page.push({ ...widget(page.length + 1, 0, 0), type, geometry: placeBelow(page, type) })
+    }
+
+    expect(groupIntoRows(page).map((r) => r.widgets.map((w) => w.id))).toEqual([[1], [2], [3]])
+  })
+
+  it('clears the lowest edge, not the last listed widget', () => {
+    // Children carry no promised order in the .qxw: the bottom-most widget
+    // may well be listed first. Placement must clear all of them.
+    const siblings = [widget(1, 0, 500), widget(2, 0, 10)]
+    const created = { ...widget(3, 0, 0), geometry: placeBelow(siblings, 'button') }
+
+    const rows = groupIntoRows([...siblings, created])
+
+    expect(rows.at(-1)?.widgets.map((w) => w.id)).toEqual([3])
+  })
+
+  it('still places a type the palette does not know below everything', () => {
+    // A .qxw from a newer build can name a widget type this palette has never
+    // heard of. The size falls back; the placement rule must not.
+    const created = { ...widget(2, 0, 0), geometry: placeBelow([widget(1, 0, 10)], 'holo-panel') }
+
+    expect(created.geometry.width).toBeGreaterThan(0)
+    expect(created.geometry.height).toBeGreaterThan(0)
+    expect(groupIntoRows([widget(1, 0, 10), created])).toHaveLength(2)
+  })
+
   it('only offers types the console can actually render', () => {
     // Creating a widget the interface draws as a grey box is worse than not
     // offering it: it looks like the feature exists. F14a taught the console
@@ -70,5 +102,27 @@ describe('placeBelow', () => {
       'matrix',
       'knob',
     ])
+  })
+})
+
+describe('CREATABLE', () => {
+  it('gives every palette entry a label an operator can tell apart', () => {
+    // The palette is a menu. Two entries sharing a name -- or an entry with
+    // none -- are indistinguishable in the dark at the back of a venue.
+    const labels = CREATABLE.map((c) => c.label)
+
+    expect(new Set(labels).size).toBe(labels.length)
+    for (const label of labels) {
+      expect(label.trim()).not.toBe('')
+    }
+  })
+
+  it('shapes a knob like a knob, not like the fader it secretly is', () => {
+    // In the file a knob IS a slider (WidgetStyle="Knob"), but on screen it
+    // must arrive compact, not as a second 220 px fader.
+    const knob = placeBelow([], 'knob')
+    const fader = placeBelow([], 'slider')
+
+    expect(knob.height).toBeLessThan(fader.height)
   })
 })

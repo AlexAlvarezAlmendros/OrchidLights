@@ -27,6 +27,28 @@ describe('headingOf', () => {
   it('does not eat a dash inside the name', () => {
     expect(headingOf(widget({ type: 'label', caption: '— Front-fill —' }))).toBe('Front-fill')
   })
+
+  it('strips en dashes, em dashes and mixed runs alike', () => {
+    // Operators reach for whatever dash their keyboard offers; the workaround
+    // is the padding, not the particular Unicode point they landed on.
+    expect(headingOf(widget({ type: 'label', caption: '– Colores –' }))).toBe('Colores')
+    expect(headingOf(widget({ type: 'label', caption: '—-— MAESTRO' }))).toBe('MAESTRO')
+    expect(headingOf(widget({ type: 'label', caption: 'FX –—-' }))).toBe('FX')
+  })
+
+  it('keeps an en dash that is part of the name while shedding the padding', () => {
+    expect(headingOf(widget({ type: 'label', caption: '– AÑOS 80–90 –' }))).toBe('AÑOS 80–90')
+  })
+
+  it('reads a label with no caption at all as empty', () => {
+    expect(headingOf(widget({ type: 'label' }))).toBe('')
+  })
+
+  it('reduces a label that is nothing but dashes to nothing', () => {
+    // "———" is a horizontal rule someone drew, not a group named after
+    // punctuation.
+    expect(headingOf(widget({ type: 'label', caption: '———' }))).toBe('')
+  })
 })
 
 describe('toSections', () => {
@@ -110,6 +132,78 @@ describe('toSections', () => {
     )
     expect(result[0]?.controls.map((w) => w.caption)).toEqual(['C', 'A'])
   })
+
+  it('treats a dashes-only label as a spacer, like an empty one', () => {
+    // Cleaning turns "———" into nothing, and nothing is not a heading: the
+    // groups either side of a drawn rule belong together.
+    const result = toSections(
+      rows([widget({ id: 1 })], [widget({ type: 'label', caption: '———' })], [widget({ id: 2 })]),
+    )
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.controls.map((w) => w.id)).toEqual([1, 2])
+  })
+
+  it('lets a label mid-row close one group and open the next', () => {
+    // Sections follow document order, not row boundaries: a label dragged into
+    // the middle of a row splits the run exactly where it stands.
+    const result = toSections(
+      rows([
+        widget({ id: 1, caption: 'ROJO' }),
+        widget({ type: 'label', caption: 'FX' }),
+        widget({ id: 2, caption: 'STROBE' }),
+      ]),
+    )
+
+    expect(result).toHaveLength(2)
+    expect(result[0]?.title).toBeNull()
+    expect(result[0]?.controls.map((w) => w.caption)).toEqual(['ROJO'])
+    expect(result[1]?.title).toBe('FX')
+    expect(result[1]?.controls.map((w) => w.caption)).toEqual(['STROBE'])
+  })
+
+  it('opens back-to-back labels as separate sections, the first left empty', () => {
+    // Two headings in a row happen when a group was emptied. Both labels are in
+    // the project; both must be on screen, one of them with nothing under it.
+    const result = toSections(
+      rows(
+        [widget({ type: 'label', caption: 'A' }), widget({ type: 'label', caption: 'B' })],
+        [widget({ id: 1 })],
+      ),
+    )
+
+    expect(result.map((s) => s.title)).toEqual(['A', 'B'])
+    expect(result[0]?.controls).toHaveLength(0)
+    expect(result[1]?.controls.map((w) => w.id)).toEqual([1])
+  })
+
+  it('sends every slider mode to the levels column, whatever the mode is', () => {
+    // Level, submaster or adjust: it is the shape that will not sit in a grid
+    // of buttons, not the particular job the fader does.
+    const result = toSections(
+      rows([
+        widget({ id: 1, type: 'slider', sliderMode: 'level', caption: 'Spots' }),
+        widget({ id: 2, type: 'slider', sliderMode: 'submaster', caption: 'Master' }),
+        widget({ id: 3, type: 'slider', sliderMode: 'adjust', caption: 'Velocidad' }),
+      ]),
+    )
+
+    expect(result[0]?.levels.map((w) => w.caption)).toEqual(['Spots', 'Master', 'Velocidad'])
+    expect(result[0]?.controls).toHaveLength(0)
+  })
+
+  it('keeps pressable widgets of every kind with the controls', () => {
+    const result = toSections(
+      rows([
+        widget({ id: 1, type: 'cuelist', caption: 'Show' }),
+        widget({ id: 2, type: 'xypad', caption: 'Movers' }),
+        widget({ id: 3, type: 'frame', caption: 'Looks' }),
+      ]),
+    )
+
+    expect(result[0]?.controls.map((w) => w.caption)).toEqual(['Show', 'Movers', 'Looks'])
+    expect(result[0]?.levels).toHaveLength(0)
+  })
 })
 
 /**
@@ -160,6 +254,25 @@ describe('splitHeading', () => {
     })
   })
 
+  it('leaves nested brackets whole rather than guessing where they split', () => {
+    // "(A (B))" has no unambiguous name/aside boundary. Splitting it wrong
+    // rewrites the label; not splitting it merely draws it long, as QLC+ does.
+    expect(splitHeading('GRUPO (A (B))')).toEqual({ title: 'GRUPO (A (B))', note: null })
+    expect(splitHeading('FX ((doble))')).toEqual({ title: 'FX ((doble))', note: null })
+  })
+
+  it('splits on the bracket that closes the line even when an earlier one exists', () => {
+    expect(splitHeading('A (B) (C)')).toEqual({ title: 'A (B)', note: 'C' })
+  })
+
+  it('keeps a bracket holding only spaces, like an empty one', () => {
+    expect(splitHeading('COLORES ( )')).toEqual({ title: 'COLORES ( )', note: null })
+  })
+
+  it('keeps a heading that is a lone empty bracket', () => {
+    expect(splitHeading('()')).toEqual({ title: '()', note: null })
+  })
+
   it('never loses a character', () => {
     for (const heading of [
       'COLORES (Washes + Spots)',
@@ -167,6 +280,8 @@ describe('splitHeading', () => {
       '(sin usar)',
       'Wash (RGB) frontal',
       'Blinders (2)',
+      'GRUPO (A (B))',
+      'A (B) (C)',
     ]) {
       const { title, note } = splitHeading(heading)
       const letters = (text: string) => text.replace(/[\s()]/g, '')
