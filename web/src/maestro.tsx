@@ -59,10 +59,16 @@ export function GrandMasterDock({
   /* Bind to whatever arrives while listening -- the operator's hand is on the
      control, exactly like a widget's Aprender. BEFORE the early return below:
      every hook must run on every render, including the renders where the dock
-     is hidden. */
+     is hidden.
+   *
+     Only a NEW movement counts. `learning` holds the last control that moved,
+     however long ago; the press captures that value, and the effect refuses
+     to bind to it -- otherwise "Esperando… mueve el control" is a lie told
+     while the desk binds to whatever the operator brushed an hour earlier. */
+  const heard = useRef<typeof learning>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: apply is stable per render and listing it would re-arm on every state echo
   useEffect(() => {
-    if (!listening || learning === null) return
+    if (!listening || learning === null || learning === heard.current) return
     setListening(false)
     apply({ input: { universe: learning.universe, channel: learning.channel } })
   }, [listening, learning])
@@ -139,7 +145,10 @@ export function GrandMasterDock({
               <button
                 type="button"
                 aria-pressed={listening}
-                onClick={() => setListening((on) => !on)}
+                onClick={() => {
+                  heard.current = learning
+                  setListening((on) => !on)
+                }}
               >
                 {listening ? 'Esperando… mueve el control' : 'Aprender'}
               </button>

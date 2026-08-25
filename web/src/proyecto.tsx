@@ -115,7 +115,11 @@ export function ProjectMenu({
     guard(async () => {
       const file = window.prompt('Nombre del proyecto (en la carpeta de proyectos):')
       if (file === null || file.trim() === '') return
-      const cleaned = file.trim().endsWith('.qxw') ? file.trim() : `${file.trim()}.qxw`
+      /* Case-insensitive, like the display strip below: a name typed as
+         "FIESTA.QXW" must not be sent as "FIESTA.QXW.qxw" -- a file the
+         operator never named, shown in the open list under the name they did. */
+      const trimmed = file.trim()
+      const cleaned = /\.qxw$/i.test(trimmed) ? trimmed : `${trimmed}.qxw`
       await api.saveProjectNamed(cleaned)
     })
 

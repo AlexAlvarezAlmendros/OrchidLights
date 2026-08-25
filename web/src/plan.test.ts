@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanFixture } from './api'
-import { colourOf, colourValues } from './plan'
+import { aimOf, colourOf, colourValues, parseHex } from './plan'
 
 /**
  * What colour a lamp is showing, from the frame on the wire.
@@ -56,6 +56,13 @@ describe('colourOf', () => {
     expect(colourOf(rgbw, frame({ 0: 100, 1: 0, 2: 0, 3: 100 }))).toBe('rgb(200, 100, 100)')
   })
 
+  it('warms with amber instead of whitening', () => {
+    // Amber is not white with a different name: it must leave the blues alone,
+    // or an amber wash on the plan reads as a cold one.
+    const rgba = fixture({ roles: { red: 0, green: 1, blue: 2, amber: 3 } })
+    expect(colourOf(rgba, frame({ 3: 200 }))).toBe('rgb(200, 150, 0)')
+  })
+
   it('is dark when the dimmer is down, whatever the colour says', () => {
     // The trap: red at full behind a dimmer at zero is an unlit lamp, and a
     // plan that draws it red sends somebody chasing a fault that is not there.
@@ -105,6 +112,11 @@ describe('colourValues', () => {
     expect(colourValues(rgbw, { r: 255, g: 0, b: 0 })).toContainEqual({ channel: 3, value: 0 })
   })
 
+  it('takes the amber down for the same reason', () => {
+    const rgba = fixture({ roles: { red: 0, green: 1, blue: 2, amber: 3 } })
+    expect(colourValues(rgba, { r: 0, g: 0, b: 255 })).toContainEqual({ channel: 3, value: 0 })
+  })
+
   it('leaves the dimmer alone: colour and intensity are separate questions', () => {
     expect(colourValues(rgbw, { r: 255, g: 0, b: 0 }).some((v) => v.channel === 4)).toBe(false)
   })
@@ -130,5 +142,99 @@ describe('colourValues', () => {
     for (const v of values) bytes[v.channel] = v.value
     bytes[4] = 255 // dimmer at full, so nothing is scaled away
     expect(colourOf(rgbw, { 1: bytes })).toBe('rgb(200, 100, 20)')
+  })
+})
+
+/**
+ * The swatch string, taken apart into the numbers the channels want. Small,
+ * but it sits at the top of the whole paint pipeline: every colour an operator
+ * picks arrives here as "#rrggbb" before colourValues resolves it per fixture.
+ */
+describe('parseHex', () => {
+  it('splits #rrggbb into its three channels', () => {
+    expect(parseHex('#ff8000')).toEqual({ r: 255, g: 128, b: 0 })
+  })
+
+  it('does not care about case or the leading hash', () => {
+    expect(parseHex('FF8000')).toEqual({ r: 255, g: 128, b: 0 })
+  })
+
+  it('turns garbage into black rather than NaN', () => {
+    // A broken swatch string must never push NaN at a DMX channel.
+    expect(parseHex('not-a-colour')).toEqual({ r: 0, g: 0, b: 0 })
+  })
+
+  it('feeds colourValues: the paint pipeline end to end', () => {
+    const rgb = fixture({ roles: { red: 0, green: 1, blue: 2 } })
+    expect(colourValues(rgb, parseHex('#00ff00'))).toContainEqual({ channel: 1, value: 255 })
+  })
+})
+
+/**
+ * Where a moving head points, read off the frame. The needle on the plan is
+ * only as true as this: direction from pan, length from how far the beam leans
+ * off straight-down, and null for anything that cannot move or is not being
+ * received -- a needle on a PAR would send somebody looking for motors that
+ * do not exist.
+ */
+describe('aimOf', () => {
+  const head = fixture({ roles: { pan: 0, tilt: 1 } })
+
+  it('says nothing about a lamp with no pan or tilt', () => {
+    expect(aimOf(fixture({ roles: { red: 0 } }), frame({ 0: 255 }))).toBeNull()
+  })
+
+  it('says nothing when the universe is not being received', () => {
+    // Same rule as colourOf: an unknown aim drawn as some aim is a lie.
+    const other = fixture({ universe: 2, roles: { pan: 0, tilt: 1 } })
+    expect(aimOf(other, frame({ 0: 128 }))).toBeNull()
+  })
+
+  it('sweeps the full circle with pan', () => {
+    expect(aimOf(head, frame({ 0: 0 }))?.angle).toBe(-180)
+    expect(aimOf(head, frame({ 0: 255 }))?.angle).toBe(180)
+  })
+
+  it('shows a stub for a beam pointing straight down', () => {
+    expect(aimOf(head, frame({ 1: 128 }))?.lean).toBe(0)
+  })
+
+  it('stretches to full throw at the end of tilt', () => {
+    expect(aimOf(head, frame({ 1: 0 }))?.lean).toBe(1)
+  })
+
+  it('flips pan when the fixture is marked inverted', () => {
+    // The flags exist for the head hung backwards: the plan must show where
+    // the beam goes, not what the raw byte says.
+    const inverted = fixture({ roles: { pan: 0, tilt: 1 }, invertPan: true })
+    expect(aimOf(inverted, frame({ 0: 0 }))?.angle).toBe(180)
+  })
+
+  it('flips tilt when the fixture is marked inverted', () => {
+    const inverted = fixture({ roles: { pan: 0, tilt: 1 }, invertTilt: true })
+    expect(aimOf(inverted, frame({ 1: 255 }))?.lean).toBe(1)
+  })
+
+  it('reads channels as offsets from the address, not from zero', () => {
+    const patched = fixture({ address: 100, roles: { pan: 0, tilt: 1 } })
+    expect(aimOf(patched, frame({ 100: 255, 101: 0 }))).toEqual({ angle: 180, lean: 1 })
+    // And is not fooled by whatever sits at the bottom of the universe.
+    expect(aimOf(patched, frame({ 0: 255, 1: 0 }))?.angle).toBe(-180)
+  })
+
+  it('still aims a pan-only mover, with the needle long enough to see', () => {
+    // No tilt channel means no lean reading; drawing the needle as a stub
+    // would hide the one thing this fixture can actually do.
+    const panOnly = fixture({ roles: { pan: 0 } })
+    const aim = aimOf(panOnly, frame({ 0: 255 }))
+    expect(aim?.angle).toBe(180)
+    expect(aim?.lean).toBeGreaterThan(0.9)
+  })
+
+  it('points a tilt-only mover straight up the plan', () => {
+    const tiltOnly = fixture({ roles: { tilt: 0 } })
+    const aim = aimOf(tiltOnly, frame({ 0: 0 }))
+    expect(aim?.lean).toBe(1)
+    expect(Math.abs(aim?.angle ?? 99)).toBeLessThan(1)
   })
 })

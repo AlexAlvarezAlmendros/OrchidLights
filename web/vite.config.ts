@@ -48,6 +48,12 @@ export default defineConfig({
     },
   },
   test: {
+    /* Two kinds of test, told apart by extension: .test.ts is pure logic and
+       runs on bare node; .test.tsx renders components and gets a DOM. The
+       split keeps the fast half fast -- jsdom boots in hundreds of
+       milliseconds that geometry math does not owe anybody. */
     environment: 'node',
+    environmentMatchGlobs: [['src/**/*.test.tsx', 'jsdom']],
+    setupFiles: ['src/test-setup.ts'],
   },
 })

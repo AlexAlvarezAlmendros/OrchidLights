@@ -68,6 +68,12 @@ export function moveWidget(
   rowIndex: number,
   beforeId: number | null,
 ): LayoutRows {
+  /* "Before itself" is identity by definition. Without this, the anchor is
+     stripped out of `next` below before indexOf looks for it, the vanished-
+     anchor fallback fires, and a drop that meant "exactly here" quietly sends
+     the widget to the end of the row. */
+  if (beforeId === widgetId) return rows
+
   const next = rows.map((row) => row.filter((id) => id !== widgetId))
 
   while (next.length <= rowIndex) next.push([])
