@@ -17,6 +17,9 @@
  */
 
 import { spawn } from 'node:child_process'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
 
 const [base, token] = process.argv.slice(2)
@@ -34,6 +37,11 @@ function check(name, ok, detail) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const port = Number(process.env.CDP_PORT ?? 9230)
 
+/* An ephemeral profile, like every other harness here: a Chrome sharing the
+   default profile dir is a Chrome that can silently latch onto state (or a
+   lock) this test never wrote. */
+const profile = mkdtempSync(join(tmpdir(), 'orchid-auth-'))
+
 const chrome = spawn(
   process.env.CHROME ?? 'google-chrome',
   [
@@ -41,6 +49,7 @@ const chrome = spawn(
     '--disable-gpu',
     '--no-sandbox',
     '--no-first-run',
+    `--user-data-dir=${profile}`,
     `--remote-debugging-port=${port}`,
     '--window-size=1280,900',
     'about:blank',
@@ -49,9 +58,14 @@ const chrome = spawn(
 )
 
 async function debuggerUrl() {
-  for (let i = 0; i < 100; i++) {
+  /* A CI runner cold-starting Chrome for the first time in the job has been
+     seen to need well past twenty seconds. Say what WAS there when giving
+     up, or the failure reads as nothing at all. */
+  let lastTargets = 'unreachable'
+  for (let i = 0; i < 300; i++) {
     try {
       const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json()
+      lastTargets = JSON.stringify(targets)
       const page = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl)
       if (page) return page.webSocketDebuggerUrl
     } catch {
@@ -59,6 +73,7 @@ async function debuggerUrl() {
     }
     await sleep(200)
   }
+  console.error(`targets at give-up: ${lastTargets}`)
   throw new Error('no debugger')
 }
 
