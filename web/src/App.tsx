@@ -1870,6 +1870,14 @@ function Widget({
           className={`widget ${widget.type} arranging`}
           style={style}
           data-tint={tint !== undefined}
+          /* A frame arranged as a chip hides its children; the count (drawn by
+             CSS, so the drag ghost's text stays the caption alone) says the
+             box is full, and five near-empty cards stop reading as broken. */
+          data-inside={
+            isContainer(widget) && (widget.children?.length ?? 0) > 0
+              ? widget.children?.length
+              : undefined
+          }
           data-dragged={dragged}
           data-widget-id={widget.id ?? ''}
           data-row={rowIndex}
@@ -1912,12 +1920,6 @@ function Widget({
           }}
         >
           {label}
-          {/* A frame arranged as a chip hides its children; the count says the
-              box is full, so five near-empty cards stop reading as five
-              broken sections. */}
-          {isContainer(widget) && (widget.children?.length ?? 0) > 0 && (
-            <span className="hint num">· {widget.children?.length} dentro</span>
-          )}
         </button>
       </>
     )

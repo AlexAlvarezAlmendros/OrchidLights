@@ -3700,10 +3700,15 @@ button.primary:disabled {
   min-height: 44px;
 }
 
-/* The child count of an arranged frame: its own quiet line, never a word
-   broken vertically inside a narrow chip. */
-.widget.arranging > .hint {
+/* The child count of an arranged frame: its own quiet line, drawn by CSS so
+   the drag ghost's text stays the caption alone, and never a word broken
+   vertically inside a narrow chip. */
+.widget.arranging[data-inside]::after {
+  content: "· " attr(data-inside) " dentro";
   display: block;
   white-space: nowrap;
   margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
 }
