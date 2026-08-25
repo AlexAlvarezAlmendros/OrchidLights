@@ -294,6 +294,7 @@ export function Functions({
         </div>
         <button
           type="button"
+          className="primary"
           disabled={name.trim() === ''}
           onClick={() =>
             run(() =>
