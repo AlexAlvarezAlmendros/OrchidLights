@@ -874,6 +874,19 @@ export function App() {
     if (target !== undefined) setView(target)
   }, [])
 
+  /* The browser's page zoom, declined: Ctrl+wheel (and a touchpad pinch,
+     which WebKit reports the same way) scaled the WHOLE desk while the hand
+     only meant to zoom the 3D stage or scroll. The desk's own size lives in
+     Ajustes > Escala; accidental viewport zoom mid-show is a desk whose
+     buttons moved. */
+  useEffect(() => {
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) event.preventDefault()
+    }
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    return () => window.removeEventListener('wheel', onWheel, { capture: true })
+  }, [])
+
   /* Ctrl+F11: the shell's own fullscreen. In a browser this quietly does
      nothing, which is honest -- F11 already exists there. */
   useEffect(() => {
