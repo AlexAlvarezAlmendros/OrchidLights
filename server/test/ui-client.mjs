@@ -4244,46 +4244,102 @@ try {
           + ', the geometry demanded pan=' + expectPan + ' tilt=' + expectTilt
       }
 
-      /* Placing by hand: a drag on the lamp itself moves it on its own
-         height plane and the PLAN keeps the new spot -- a lamp that snaps
-         back on reload was never really moved. Alt turns it. */
-      const at = stage.screenOf(mover)
-      if (!at) return 'the stage cannot say where the mover sits on screen'
+      /* The Blender hand, behind its door. Nothing moves in run mode; the
+         Editar toggle brings the gizmo, and every gesture is measured where
+         it counts: the PLAN the daemon holds. */
+      const stageBar = () => [...document.querySelectorAll('.stage3d-bar button')]
       const canvas = document.querySelector('.stage3d-canvas canvas')
       canvas.setPointerCapture = () => {}
-      const fire = (type, x, y, extra = {}) =>
-        (type === 'pointerdown' ? canvas : window).dispatchEvent(new PointerEvent(type, {
-          bubbles: true, pointerId: 9, clientX: x, clientY: y, button: 0, buttons: 1, ...extra,
+      canvas.releasePointerCapture = () => {}
+      /* The spec's fine print, learned the hard way: a MOVING pointer
+         carries button -1, and TransformControls checks exactly that. */
+      const pointer = (type, x, y, extra = {}) =>
+        canvas.dispatchEvent(new PointerEvent(type, {
+          bubbles: true, pointerId: 9, clientX: x, clientY: y,
+          button: type === 'pointermove' ? -1 : 0, buttons: 1,
+          isPrimary: true, ...extra,
         }))
+      const clickAt = (x, y) =>
+        canvas.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }))
+      const planOf = async () =>
+        (await (await fetch('/api/v1/plan')).json()).fixtures.find(f => f.id === mover)
 
-      fire('pointerdown', at.x, at.y)
-      for (let i = 1; i <= 5; i++) { fire('pointermove', at.x + i * 18, at.y); await wait(30) }
-      fire('pointerup', at.x + 90, at.y)
-      await wait(800)
+      const editButton = stageBar().find(b => b.textContent.trim() === 'Editar')
+      if (!editButton) return 'no Editar toggle on the stage bar'
+      editButton.click()
+      await wait(600)
 
-      const movedPlan = (await (await fetch('/api/v1/plan')).json())
-        .fixtures.find(f => f.id === mover)
+      /* Choose the mover; the gizmo must say it holds it. */
+      const at = stage.screenOf(mover)
+      if (!at) return 'the stage cannot say where the mover sits on screen'
+      clickAt(at.x, at.y)
+      await wait(500)
+      if (stage.selectedId() !== mover) {
+        return 'the edit click did not select the mover (selected=' + stage.selectedId() + ')'
+      }
+
+      /* Grab the REAL X arrow and pull: the plan keeps the new spot with the
+         hang untouched. */
+      const handle = stage.gizmoHandleScreen('X')
+      if (!handle) return 'no X handle on the gizmo'
+      pointer('pointerdown', handle.x, handle.y)
+      for (let i = 1; i <= 6; i++) { pointer('pointermove', handle.x + i * 15, handle.y); await wait(30) }
+      pointer('pointerup', handle.x + 90, handle.y, { buttons: 0 })
+      await wait(900)
+
+      const movedPlan = await planOf()
       if (!movedPlan || movedPlan.x === stageW / 2) {
-        return 'the drag did not move the mover in the plan (x=' + movedPlan?.x + ')'
+        return 'the gizmo drag did not move the mover in the plan (x=' + movedPlan?.x + ')'
       }
       if (Math.round(movedPlan.z) !== 3000) {
-        return 'a flat drag changed the hang: z=' + movedPlan.z
+        return 'a gizmo move changed the hang: z=' + movedPlan.z
       }
 
-      const there = stage.screenOf(mover)
-      fire('pointerdown', there.x, there.y, { altKey: true })
-      for (let i = 1; i <= 4; i++) {
-        fire('pointermove', there.x + i * 20, there.y, { altKey: true })
-        await wait(30)
+      /* Ctrl+Z: the daemon's undo ring knows the move, and the scene follows
+         it without anybody clicking refresh. */
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }))
+      await wait(1500)
+      const undone = await planOf()
+      if (!undone || Math.round(undone.x) !== stageW / 2) {
+        return 'Ctrl+Z did not bring the mover back (x=' + undone?.x + ')'
       }
-      fire('pointerup', there.x + 80, there.y, { altKey: true })
-      await wait(800)
 
-      const turned = (await (await fetch('/api/v1/plan')).json())
-        .fixtures.find(f => f.id === mover)
-      if (!turned || Math.abs(turned.rotation ?? 0) < 5) {
-        return 'the Alt drag did not turn the mover (rotation=' + turned?.rotation + ')'
+      /* The tooltip says what the hand is over. */
+      const back = stage.screenOf(mover)
+      canvas.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true, pointerId: 11, clientX: back.x, clientY: back.y }))
+      await wait(500)
+      const tip = document.querySelector('.stage3d-tip')
+      if (!tip || !tip.textContent.includes('Mover3D')) {
+        return 'no tooltip naming the element (got ' + (tip ? tip.textContent : 'none') + ')'
       }
+
+      /* Supr takes it off the stage; the tray puts it back on. */
+      clickAt(back.x, back.y)
+      await wait(400)
+      if (stage.selectedId() !== mover) return 'could not re-select for removal'
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+      await wait(900)
+      const gone = await planOf()
+      if (gone && gone.x !== undefined) return 'Supr left the mover on the stage (x=' + gone.x + ')'
+
+      const tray = document.querySelector('.stage3d-add select')
+      if (!tray) return 'no tray to add the removed fixture back'
+      const setSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+      setSelect.call(tray, String(mover))
+      tray.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait(200)
+      const colocar = [...document.querySelectorAll('.stage3d-add button')]
+        .find(b => b.textContent.trim() === 'Colocar')
+      if (!colocar) return 'no Colocar button beside the tray'
+      colocar.click()
+      await wait(900)
+      const placed2 = await planOf()
+      if (!placed2 || placed2.x === undefined) return 'Colocar did not put the fixture back'
+
+      /* Out of edit mode: the door closes behind us. */
+      stageBar().find(b => b.textContent.trim() === 'Listo')?.click()
+      await wait(300)
 
       return 'ok'
     } finally {

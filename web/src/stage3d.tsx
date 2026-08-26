@@ -12,15 +12,21 @@
  * not in the plan payload; the fine calibration arrives when they are. The
  * inverted flags apply here exactly as on the plan's needles.
  *
- * Picking (F22b): a click on the floor aims the chosen moving heads at that
- * point -- the same generic model, inverted, written to the live desk.
+ * Two hands, told apart by a button. RUNNING the show: a tap chooses movers,
+ * a click on the floor aims them. EDITING the rig (the Editar toggle): a
+ * click selects one element, a Blender-style gizmo moves or turns it, Supr
+ * takes it off the stage, the tray puts fixtures on. Every edit goes through
+ * the daemon's plan routes, so the global undo (Ctrl+Z) already knows them
+ * -- an arrow that moved a lamp the file will not remember never moved it.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
 import { type FixtureState, type PlanFixture, type PlanState, api } from './api'
+import { t } from './i18n'
 import { aimOf, colourOf } from './plan'
 
 const MESH_BY_TYPE: Record<string, string> = {
@@ -41,11 +47,24 @@ interface Rigged {
   beamPivot: THREE.Group
 }
 
+/** The scene's handles, installed by the build effect for everyone else:
+ *  React state changes must reach a world that lives outside React. */
+interface StageOps {
+  select: (id: number | null) => void
+  setMode: (mode: 'translate' | 'rotate') => void
+  sync: (planState: PlanState) => void
+  place: (fixture: PlanFixture) => void
+}
+
 export function Stage3D({
   universes,
+  revision,
   onError,
 }: {
   universes: Record<number, Uint8Array>
+  /** Bumped by the feed when the project changed under us: an undo, another
+   *  client's edit. The scene follows without rebuilding (the camera stays). */
+  revision: number
   onError: (message: string | null) => void
 }) {
   const mount = useRef<HTMLDivElement | null>(null)
@@ -62,10 +81,30 @@ export function Stage3D({
   const chosenRef = useRef(chosen)
   chosenRef.current = chosen
 
+  /* The editing hand. Mirrored into refs because the pointer handlers live
+     inside the scene effect and must read the CURRENT mode, not the one the
+     closure was born with. */
+  const [editing, setEditing] = useState(false)
+  const editingRef = useRef(editing)
+  editingRef.current = editing
+  const [mode, setMode] = useState<'translate' | 'rotate'>('translate')
+  const [selected, setSelected] = useState<number | null>(null)
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  const [hover, setHover] = useState<{ id: number; name: string; x: number; y: number } | null>(
+    null,
+  )
+  /* The plan as last read, for the tray of fixtures not yet on the stage. */
+  const [planList, setPlanList] = useState<PlanFixture[]>([])
+  const [toPlace, setToPlace] = useState('')
+
+  const ops = useRef<StageOps | null>(null)
+
   useEffect(() => {
     Promise.all([api.plan(), api.fixtures()])
       .then(([planState, fixtureList]) => {
         setPlan(planState)
+        setPlanList(planState.fixtures)
         setFixtures(fixtureList)
       })
       .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
@@ -131,10 +170,6 @@ export function Stage3D({
     renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)]
     element.appendChild(renderer.domElement)
 
-    /* Placing, before orbiting: the drag handler registers FIRST, so a drag
-       that starts on a lamp claims the gesture (stopImmediatePropagation)
-       and the camera stays put. Plain drag moves the lamp on its own height
-       plane; Shift rides it up and down; Alt turns it. A tap still chooses. */
     const caster = new THREE.Raycaster()
     const pointAt = (event: PointerEvent | MouseEvent) => {
       const box = renderer.domElement.getBoundingClientRect()
@@ -153,114 +188,6 @@ export function Stage3D({
       if (node === null) return null
       return rig.current.get(Number(node.name.replace('fixture-', ''))) ?? null
     }
-
-    let drag: {
-      node: Rigged
-      mode: 'move' | 'height' | 'rotate'
-      moved: boolean
-      startClientX: number
-      startClientY: number
-      startPosition: THREE.Vector3
-      startRotation: number
-    } | null = null
-    let justDragged = false
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return
-      const node = lampAt(event)
-      if (node === null) return
-
-      event.stopImmediatePropagation()
-      renderer.domElement.setPointerCapture(event.pointerId)
-      drag = {
-        node,
-        mode: event.altKey ? 'rotate' : event.shiftKey ? 'height' : 'move',
-        moved: false,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startPosition: node.root.position.clone(),
-        startRotation: node.root.rotation.y,
-      }
-    }
-
-    const onPointerMove = (event: PointerEvent) => {
-      if (drag === null) return
-      const dx = event.clientX - drag.startClientX
-      const dy = event.clientY - drag.startClientY
-      if (!drag.moved && Math.hypot(dx, dy) < 5) return
-      drag.moved = true
-
-      if (drag.mode === 'rotate') {
-        /* Half a degree per pixel: a hand's sweep is a full turn. */
-        drag.node.root.rotation.y = drag.startRotation - (dx * Math.PI) / 360
-        return
-      }
-
-      caster.setFromCamera(pointAt(event), cam)
-      if (drag.mode === 'move') {
-        /* On the lamp's own height plane: placing must never change the
-           hang, or dragging across the stage would also drop the rig. */
-        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -drag.startPosition.y)
-        const hit = new THREE.Vector3()
-        if (caster.ray.intersectPlane(plane, hit) === null) return
-        drag.node.root.position.x = Math.max(-stageW / 2, Math.min(stageW / 2, hit.x))
-        drag.node.root.position.z = Math.max(-stageD / 2, Math.min(stageD / 2, hit.z))
-      } else {
-        /* Height rides a camera-facing wall through the lamp, so the hand
-           moves in screen-vertical and the lamp follows. */
-        const facing = new THREE.Vector3()
-        cam.getWorldDirection(facing)
-        facing.y = 0
-        if (facing.lengthSq() === 0) return
-        facing.normalize()
-        const plane = new THREE.Plane(facing, -facing.dot(drag.startPosition))
-        const hit = new THREE.Vector3()
-        if (caster.ray.intersectPlane(plane, hit) === null) return
-        drag.node.root.position.y = Math.max(0, Math.min(10, hit.y))
-      }
-    }
-
-    const onPointerUp = () => {
-      if (drag === null) return
-      const { node, moved, mode } = drag
-      drag = null
-
-      if (!moved) {
-        /* A tap: choosing, exactly as before. */
-        const id = node.fixture.id
-        setChosen((current) =>
-          current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
-        )
-        return
-      }
-
-      justDragged = true
-
-      /* Back to the file's units: plan x/y are stage millimetres, z is the
-         hang, rotation is the plan's clockwise degrees. */
-      const position = node.root.position
-      const patch: { x?: number; y?: number; z?: number; rotation?: number } =
-        mode === 'rotate'
-          ? { rotation: Math.round((((-node.root.rotation.y * 180) / Math.PI) % 360) * 10) / 10 }
-          : mode === 'height'
-            ? { z: Math.round(position.y * 1000) }
-            : {
-                x: Math.round((position.x + stageW / 2) * 1000),
-                y: Math.round((position.z + stageD / 2) * 1000),
-              }
-      api
-        .setPlanPosition(node.fixture.id, patch)
-        .then(() => {
-          if (patch.x !== undefined) node.fixture.x = patch.x
-          if (patch.y !== undefined) node.fixture.y = patch.y
-          if (patch.z !== undefined) node.fixture.z = patch.z
-        })
-        .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
-    }
-
-    renderer.domElement.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp)
 
     const controls = new OrbitControls(cam, renderer.domElement)
     /* Orbit around the middle of the AIR the rig lives in, not the floor's
@@ -306,21 +233,26 @@ export function Stage3D({
       return cached.then((object) => (object === null ? null : object.clone(true)))
     }
 
-    const placed = plan.fixtures.filter(
-      (f) => f.x !== undefined && f.y !== undefined && f.hidden !== true,
-    )
-    for (const fixture of placed) {
+    const applyPlacement = (node: Rigged) => {
+      const fixture = node.fixture
+      node.root.position.set(
+        (fixture.x ?? 0) / 1000 - stageW / 2,
+        (fixture.z ?? 0) / 1000,
+        (fixture.y ?? 0) / 1000 - stageD / 2,
+      )
+      node.root.rotation.set(
+        ((fixture.rotationX ?? 0) * Math.PI) / 180,
+        (-(fixture.rotation ?? 0) * Math.PI) / 180,
+        ((fixture.rotationZ ?? 0) * Math.PI) / 180,
+      )
+    }
+
+    const rigOne = (fixture: PlanFixture) => {
       const type = fixtures.find((x) => x.id === fixture.id)?.type
       const steerable = fixture.roles.pan !== undefined || fixture.roles.tilt !== undefined
 
       const root = new THREE.Group()
       root.name = `fixture-${fixture.id}`
-      root.position.set(
-        (fixture.x ?? 0) / 1000 - stageW / 2,
-        (fixture.z ?? 0) / 1000,
-        (fixture.y ?? 0) / 1000 - stageD / 2,
-      )
-      root.rotation.y = (-(fixture.rotation ?? 0) * Math.PI) / 180
 
       const body = new THREE.Mesh(
         new THREE.BoxGeometry(0.3, 0.25, 0.3),
@@ -333,13 +265,9 @@ export function Stage3D({
       void meshFor(type).then((mesh) => {
         if (mesh === null) return
         /* The .dae files declare <unit meter="1"/> and the loader honours
-           it: they arrive in metres already. The 0.001 that used to live here
-           shrank every body to a third of a millimetre -- a rig you could
-           prove existed (the picking worked) but never see. */
-        /* One body language for the whole rig: the .dae files arrive with
-           their own near-black materials, which on this stage made the mesh
-           an invisibility cloak -- the box it replaced could at least be
-           seen and clicked. */
+           it: they arrive in metres. One body language for the whole rig:
+           their own near-black materials made every mesh an invisibility
+           cloak on this stage. */
         mesh.traverse((part) => {
           if ((part as THREE.Mesh).isMesh) {
             ;(part as THREE.Mesh).material = new THREE.MeshStandardMaterial({
@@ -372,33 +300,161 @@ export function Stage3D({
           blending: THREE.AdditiveBlending,
         }),
       )
-      /* Cone apex at the fixture, spreading down. The old PI flip put the
-         BASE at the lamp: light leaving a lens six metres wide and landing in
-         a point is a projector running backwards. */
+      /* Cone apex at the fixture, spreading down. */
       beam.position.y = -length / 2
       beamPivot.add(beam)
       root.add(beamPivot)
 
+      const node: Rigged = { fixture, steerable, root, beam, beamPivot }
+      applyPlacement(node)
       scene.add(root)
-      rig.current.set(fixture.id, { fixture, steerable, root, beam, beamPivot })
+      rig.current.set(fixture.id, node)
+      return node
     }
 
-    /* Picking: a click on the floor aims the chosen movers there. Choosing a
-       lamp lives on pointerup now (a tap is a drag that never moved), and the
-       click that follows a real drag must not aim the rig at wherever the
-       hand happened to let go. */
+    for (const fixture of plan.fixtures) {
+      if (fixture.x !== undefined && fixture.y !== undefined && fixture.hidden !== true) {
+        rigOne(fixture)
+      }
+    }
+
+    /* The Blender hand: one gizmo, attached to whatever is selected while
+       the Editar toggle is on. Its drags never orbit the camera. */
+    const gizmo = new TransformControls(cam, renderer.domElement)
+    gizmo.setSize(0.9)
+    scene.add(gizmo.getHelper())
+    let transforming = false
+    gizmo.addEventListener('dragging-changed', (event) => {
+      transforming = event.value === true
+      controls.enabled = !transforming
+    })
+    /* The stage has edges and a floor; the file has no basement. Clamped
+       while dragging, so the gizmo never even shows an illegal spot. */
+    gizmo.addEventListener('objectChange', () => {
+      const object = gizmo.object
+      if (object === undefined) return
+      object.position.x = Math.max(-stageW / 2, Math.min(stageW / 2, object.position.x))
+      object.position.z = Math.max(-stageD / 2, Math.min(stageD / 2, object.position.z))
+      object.position.y = Math.max(0, Math.min(10, object.position.y))
+    })
+    /* Let go = written down. The daemon's plan is the truth every other
+       screen reads, and its undo ring is what Ctrl+Z talks to. */
+    gizmo.addEventListener('mouseUp', () => {
+      const id = selectedRef.current
+      const node = id === null ? undefined : rig.current.get(id)
+      if (node === undefined) return
+      const position = node.root.position
+      const rotation = node.root.rotation
+      const patch =
+        gizmo.mode === 'rotate'
+          ? {
+              rotation: Math.round(((-rotation.y * 180) / Math.PI) * 10) / 10,
+              rotationX: Math.round(((rotation.x * 180) / Math.PI) * 10) / 10,
+              rotationZ: Math.round(((rotation.z * 180) / Math.PI) * 10) / 10,
+            }
+          : {
+              x: Math.round((position.x + stageW / 2) * 1000),
+              y: Math.round((position.z + stageD / 2) * 1000),
+              z: Math.round(position.y * 1000),
+            }
+      api
+        .setPlanPosition(node.fixture.id, patch)
+        .then(() => {
+          Object.assign(node.fixture, patch)
+        })
+        .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
+    })
+
+    /* One hand or the other, decided by the toggle. Running: a tap chooses,
+       the floor aims. Editing: a click selects for the gizmo; empty space
+       lets go. Never right after a gizmo drag, and never on its handles. */
     const onClick = (event: MouseEvent) => {
-      if (justDragged) {
-        justDragged = false
+      if (transforming || gizmo.axis !== null) return
+
+      const lamp = lampAt(event)
+      if (editingRef.current) {
+        setSelected(lamp === null ? null : lamp.fixture.id)
         return
       }
-      if (lampAt(event) !== null) return
-
+      if (lamp !== null) {
+        const id = lamp.fixture.id
+        setChosen((current) =>
+          current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+        )
+        return
+      }
       caster.setFromCamera(pointAt(event), cam)
       const hit = caster.intersectObject(floor)[0]
       if (hit !== undefined) aimAt(hit.point.x, hit.point.z)
     }
     renderer.domElement.addEventListener('click', onClick)
+
+    /* Hover: the name of what the hand is over, read once per frame rather
+       than once per pointer event -- raycasting at pointer rate stutters. */
+    let hoverEvent: PointerEvent | null = null
+    const onPointerMove = (event: PointerEvent) => {
+      hoverEvent = event
+    }
+    renderer.domElement.addEventListener('pointermove', onPointerMove)
+    const onPointerLeave = () => {
+      hoverEvent = null
+      setHover(null)
+    }
+    renderer.domElement.addEventListener('pointerleave', onPointerLeave)
+
+    /* Everyone outside this closure edits the scene through these. */
+    ops.current = {
+      select: (id) => {
+        const node = id === null ? undefined : rig.current.get(id)
+        if (node === undefined) gizmo.detach()
+        else gizmo.attach(node.root)
+      },
+      setMode: (next) => gizmo.setMode(next),
+      sync: (planState) => {
+        /* Never while a hand is on the gizmo: our own last write echoing
+           back must not yank the object out of it. */
+        if (transforming) return
+        const seen = new Set<number>()
+        for (const fixture of planState.fixtures) {
+          if (fixture.x === undefined || fixture.y === undefined || fixture.hidden === true)
+            continue
+          seen.add(fixture.id)
+          const node = rig.current.get(fixture.id)
+          if (node === undefined) {
+            rigOne(fixture)
+          } else {
+            node.fixture = fixture
+            applyPlacement(node)
+          }
+        }
+        for (const [id, node] of [...rig.current]) {
+          if (seen.has(id)) continue
+          if (selectedRef.current === id) {
+            gizmo.detach()
+            setSelected(null)
+          }
+          scene.remove(node.root)
+          rig.current.delete(id)
+        }
+      },
+      place: (fixture) => {
+        /* Onto the middle of the stage at head height: visible, grabbable,
+           and obviously waiting to be put somewhere real. */
+        api
+          .setPlanPosition(fixture.id, {
+            x: Math.round((stageW / 2) * 1000),
+            y: Math.round((stageD / 2) * 1000),
+            z: 2000,
+          })
+          .then(() => api.plan())
+          .then((planState) => {
+            setPlanList(planState.fixtures)
+            ops.current?.sync(planState)
+            setSelected(fixture.id)
+          })
+          .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
+      },
+    }
 
     /* The render loop reads the LIVE frames every pass: the beams are the
        DMX, not a copy of it. */
@@ -419,9 +475,17 @@ export function Stage3D({
           node.beamPivot.rotation.y = (-aim.angle * Math.PI) / 180
           node.beamPivot.rotation.x = (aim.lean * 90 * Math.PI) / 180
         }
-        node.root.traverse((child) => {
-          if (child.name === 'chosen-ring')
-            child.visible = chosenRef.current.includes(node.fixture.id)
+      }
+      if (hoverEvent !== null && !transforming) {
+        const lamp = gizmo.axis === null ? lampAt(hoverEvent) : null
+        const box = element.getBoundingClientRect()
+        const x = (hoverEvent?.clientX ?? 0) - box.left
+        const y = (hoverEvent?.clientY ?? 0) - box.top
+        setHover((current) => {
+          if (lamp === null) return current === null ? current : null
+          const name = fixtures.find((f) => f.id === lamp.fixture.id)?.name ?? `#${lamp.fixture.id}`
+          if (current !== null && current.id === lamp.fixture.id && current.x === x) return current
+          return { id: lamp.fixture.id, name, x, y }
         })
       }
       controls.update()
@@ -458,36 +522,104 @@ export function Stage3D({
         const node = rig.current.get(id)
         return node === undefined ? null : node.root.position.toArray()
       },
+      selectedId: () => selectedRef.current,
+      gizmoAxis: () => gizmo.axis,
+      gizmoDragging: () => gizmo.dragging,
+      /** A live gizmo handle's place on screen, so the chapter can grab the
+       *  real arrow instead of teleporting the object behind the UI's back. */
+      gizmoHandleScreen: (axis: string) => {
+        if (gizmo.object === undefined) return null
+        let found: THREE.Object3D | null = null
+        gizmo.getHelper().traverse((child) => {
+          if (found === null && child.name === axis && child.visible) found = child
+        })
+        if (found === null) return null
+        const world = new THREE.Vector3()
+        ;(found as THREE.Object3D).getWorldPosition(world)
+        const projected = world.project(cam)
+        const box = renderer.domElement.getBoundingClientRect()
+        return {
+          x: box.left + ((projected.x + 1) / 2) * box.width,
+          y: box.top + ((1 - projected.y) / 2) * box.height,
+        }
+      },
     }
 
     return () => {
       alive = false
       renderer.domElement.removeEventListener('click', onClick)
-      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('pointermove', onPointerMove)
-      window.removeEventListener('pointerup', onPointerUp)
+      renderer.domElement.removeEventListener('pointermove', onPointerMove)
+      renderer.domElement.removeEventListener('pointerleave', onPointerLeave)
+      gizmo.detach()
+      gizmo.dispose()
       controls.dispose()
       renderer.dispose()
       element.removeChild(renderer.domElement)
       rig.current.clear()
+      ops.current = null
       ;(window as unknown as Record<string, unknown>).__orchidStage = undefined
     }
   }, [plan, fixtures, quality, aimAt, onError])
 
-  /* The four cameras of the reference. */
+  /* Selection and mode reach the gizmo; leaving edit mode lets go. */
   useEffect(() => {
-    const cam = cameraRef.current
-    const controls = controlsRef.current
-    if (cam === null || controls === null || plan === null) return
-    const stageD = plan.grid.units === 'feet' ? plan.grid.depth * 0.3048 : plan.grid.depth
-    const stageW = plan.grid.units === 'feet' ? plan.grid.width * 0.3048 : plan.grid.width
-    if (camera === 'top') cam.position.set(0, Math.max(stageW, stageD) * 1.4, 0.01)
-    else if (camera === 'front') cam.position.set(0, 1.7, stageD * 1.4)
-    else if (camera === 'lado') cam.position.set(stageW * 1.4, 1.7, 0)
-    else cam.position.set(0, stageD * 0.9, stageD * 1.2)
-    controls.target.set(0, 0, 0)
-    controls.update()
-  }, [camera, plan])
+    ops.current?.select(editing ? selected : null)
+  }, [selected, editing])
+  useEffect(() => {
+    ops.current?.setMode(mode)
+  }, [mode])
+
+  /* The project changed under us -- an undo, another client, our own edit
+     echoed back. Follow it without rebuilding: the camera must not jump. */
+  useEffect(() => {
+    if (revision === 0) return
+    api
+      .plan()
+      .then((planState) => {
+        setPlanList(planState.fixtures)
+        ops.current?.sync(planState)
+      })
+      .catch(() => undefined)
+  }, [revision])
+
+  const removeSelected = useCallback(() => {
+    if (selectedRef.current === null) return
+    const id = selectedRef.current
+    setSelected(null)
+    api
+      .clearPlanPosition(id)
+      .then(() => api.plan())
+      .then((planState) => {
+        setPlanList(planState.fixtures)
+        ops.current?.sync(planState)
+      })
+      .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
+  }, [onError])
+
+  /* The editing keyboard: Blender's letters, the desk's keys. Only while
+     the toggle is on, and never over a form control. Ctrl combinations pass
+     through untouched: Ctrl+Z belongs to the app's global undo. */
+  useEffect(() => {
+    if (!editing) return
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+      if (event.ctrlKey || event.metaKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'g') setMode('translate')
+      else if (key === 'r') setMode('rotate')
+      else if (key === 'escape') setSelected(null)
+      else if ((key === 'delete' || key === 'backspace') && selectedRef.current !== null) {
+        removeSelected()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editing, removeSelected])
+
+  const unplaced = planList.filter((f) => f.x === undefined || f.y === undefined)
+  const selectedName =
+    selected === null ? null : (fixtures.find((f) => f.id === selected)?.name ?? `#${selected}`)
 
   return (
     <div className="stage3d">
@@ -508,11 +640,85 @@ export function Stage3D({
                   : 'Lateral'}
           </button>
         ))}
+
+        <button
+          type="button"
+          className="stage3d-edit"
+          aria-pressed={editing}
+          onClick={() => {
+            setEditing((on) => !on)
+            setSelected(null)
+          }}
+        >
+          {editing ? t('Listo') : t('Editar')}
+        </button>
+
+        {editing && (
+          <>
+            <button
+              type="button"
+              aria-pressed={mode === 'translate'}
+              title={t('Mover el elemento elegido (G)')}
+              onClick={() => setMode('translate')}
+            >
+              {t('Mover')}
+            </button>
+            <button
+              type="button"
+              aria-pressed={mode === 'rotate'}
+              title={t('Girar el elemento elegido (R)')}
+              onClick={() => setMode('rotate')}
+            >
+              {t('Girar')}
+            </button>
+            <button
+              type="button"
+              className="danger"
+              disabled={selected === null}
+              title={t('Quitar del escenario (Supr) — la fixture sigue en el patch')}
+              onClick={removeSelected}
+            >
+              {t('Quitar')}
+            </button>
+            {unplaced.length > 0 && (
+              <span className="stage3d-add">
+                <select
+                  aria-label={t('Fixture que añadir al escenario')}
+                  value={toPlace}
+                  onChange={(e) => setToPlace(e.target.value)}
+                >
+                  <option value="">{t('Añadir…')}</option>
+                  {unplaced.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {fixtures.find((x) => x.id === f.id)?.name ?? `#${f.id}`}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={toPlace === ''}
+                  onClick={() => {
+                    const fixture = unplaced.find((f) => f.id === Number(toPlace))
+                    if (fixture !== undefined) ops.current?.place(fixture)
+                    setToPlace('')
+                  }}
+                >
+                  {t('Colocar')}
+                </button>
+              </span>
+            )}
+          </>
+        )}
+
         <span className="spacer" />
         <span className="hint">
-          {chosen.length > 0
-            ? `${chosen.length} elegidas: clic en el suelo para apuntarlas`
-            : 'Toca una lámpara para elegirla; arrastra para colocarla (Mayús: altura, Alt: giro)'}
+          {editing
+            ? selected === null
+              ? t('Clic en un elemento para elegirlo; Ctrl+Z deshace')
+              : `${selectedName} · ${mode === 'translate' ? t('moviendo (R: girar)') : t('girando (G: mover)')}`
+            : chosen.length > 0
+              ? `${chosen.length} elegidas: clic en el suelo para apuntarlas`
+              : t('Toca una lámpara para elegirla; en el suelo, apuntan todas las móviles')}
         </span>
         <label className="field">
           <span>Calidad</span>
@@ -528,7 +734,16 @@ export function Stage3D({
           </select>
         </label>
       </div>
-      <div ref={mount} className="stage3d-canvas" />
+      <div ref={mount} className="stage3d-canvas">
+        {hover !== null && (
+          <span
+            className="stage3d-tip"
+            style={{ left: `${hover.x + 14}px`, top: `${hover.y + 10}px` }}
+          >
+            {hover.name}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

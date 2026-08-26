@@ -3712,3 +3712,33 @@ button.primary:disabled {
   color: var(--text-dim);
   font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
 }
+
+/* The 3D stage's editing furniture. */
+
+.stage3d-canvas {
+  position: relative;
+}
+
+/* The name of what the hand is over: follows the pointer, never catches it. */
+.stage3d-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* The door into editing stands apart from the cameras beside it. */
+.stage3d-edit {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.stage3d-add {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
