@@ -211,8 +211,10 @@ export function Stage3D({
     }
     const lampAt = (event: PointerEvent | MouseEvent): Rigged | null => {
       caster.setFromCamera(pointAt(event), cam)
-      const lamps = [...rig.current.values()].map((n) => n.root)
-      const hit = caster.intersectObjects(lamps, true)[0]
+      const bodies = [...rig.current.values()]
+        .map((n) => n.root.getObjectByName('body'))
+        .filter((b): b is THREE.Object3D => b !== undefined)
+      const hit = caster.intersectObjects(bodies, true)[0]
       if (hit === undefined) return null
       let node: THREE.Object3D | null = hit.object
       while (node !== null && !node.name.startsWith('fixture-')) node = node.parent
@@ -366,8 +368,15 @@ export function Stage3D({
         bodyMaterials.push(material)
         return material
       }
+      /* The click's one honest target. The root also carries a six-metre
+         beam cone and a plumb line, and a raycast against the whole tree
+         let an invisible cone STEAL its neighbour's clicks -- the reported
+         "I click one lamp and another answers". */
+      const bodyGroup = new THREE.Group()
+      bodyGroup.name = 'body'
+      root.add(bodyGroup)
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.3), bodyMaterial())
-      root.add(body)
+      bodyGroup.add(body)
       void meshFor(type).then((mesh) => {
         if (mesh === null) return
         /* The .dae files declare <unit meter="1"/> and the loader honours
@@ -380,8 +389,8 @@ export function Stage3D({
             ;(part as THREE.Mesh).material = bodyMaterial()
           }
         })
-        root.remove(body)
-        root.add(mesh)
+        bodyGroup.remove(body)
+        bodyGroup.add(mesh)
       })
 
       /* The beam: a cone hanging from a pivot so pan spins and tilt leans
