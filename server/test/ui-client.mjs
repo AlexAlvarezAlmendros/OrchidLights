@@ -4244,6 +4244,47 @@ try {
           + ', the geometry demanded pan=' + expectPan + ' tilt=' + expectTilt
       }
 
+      /* Placing by hand: a drag on the lamp itself moves it on its own
+         height plane and the PLAN keeps the new spot -- a lamp that snaps
+         back on reload was never really moved. Alt turns it. */
+      const at = stage.screenOf(mover)
+      if (!at) return 'the stage cannot say where the mover sits on screen'
+      const canvas = document.querySelector('.stage3d-canvas canvas')
+      canvas.setPointerCapture = () => {}
+      const fire = (type, x, y, extra = {}) =>
+        (type === 'pointerdown' ? canvas : window).dispatchEvent(new PointerEvent(type, {
+          bubbles: true, pointerId: 9, clientX: x, clientY: y, button: 0, buttons: 1, ...extra,
+        }))
+
+      fire('pointerdown', at.x, at.y)
+      for (let i = 1; i <= 5; i++) { fire('pointermove', at.x + i * 18, at.y); await wait(30) }
+      fire('pointerup', at.x + 90, at.y)
+      await wait(800)
+
+      const movedPlan = (await (await fetch('/api/v1/plan')).json())
+        .fixtures.find(f => f.id === mover)
+      if (!movedPlan || movedPlan.x === stageW / 2) {
+        return 'the drag did not move the mover in the plan (x=' + movedPlan?.x + ')'
+      }
+      if (Math.round(movedPlan.z) !== 3000) {
+        return 'a flat drag changed the hang: z=' + movedPlan.z
+      }
+
+      const there = stage.screenOf(mover)
+      fire('pointerdown', there.x, there.y, { altKey: true })
+      for (let i = 1; i <= 4; i++) {
+        fire('pointermove', there.x + i * 20, there.y, { altKey: true })
+        await wait(30)
+      }
+      fire('pointerup', there.x + 80, there.y, { altKey: true })
+      await wait(800)
+
+      const turned = (await (await fetch('/api/v1/plan')).json())
+        .fixtures.find(f => f.id === mover)
+      if (!turned || Math.abs(turned.rotation ?? 0) < 5) {
+        return 'the Alt drag did not turn the mover (rotation=' + turned?.rotation + ')'
+      }
+
       return 'ok'
     } finally {
       await cleanup()

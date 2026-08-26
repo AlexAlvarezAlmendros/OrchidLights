@@ -131,6 +131,137 @@ export function Stage3D({
     renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)]
     element.appendChild(renderer.domElement)
 
+    /* Placing, before orbiting: the drag handler registers FIRST, so a drag
+       that starts on a lamp claims the gesture (stopImmediatePropagation)
+       and the camera stays put. Plain drag moves the lamp on its own height
+       plane; Shift rides it up and down; Alt turns it. A tap still chooses. */
+    const caster = new THREE.Raycaster()
+    const pointAt = (event: PointerEvent | MouseEvent) => {
+      const box = renderer.domElement.getBoundingClientRect()
+      return new THREE.Vector2(
+        ((event.clientX - box.left) / box.width) * 2 - 1,
+        -(((event.clientY - box.top) / box.height) * 2 - 1),
+      )
+    }
+    const lampAt = (event: PointerEvent | MouseEvent): Rigged | null => {
+      caster.setFromCamera(pointAt(event), cam)
+      const lamps = [...rig.current.values()].map((n) => n.root)
+      const hit = caster.intersectObjects(lamps, true)[0]
+      if (hit === undefined) return null
+      let node: THREE.Object3D | null = hit.object
+      while (node !== null && !node.name.startsWith('fixture-')) node = node.parent
+      if (node === null) return null
+      return rig.current.get(Number(node.name.replace('fixture-', ''))) ?? null
+    }
+
+    let drag: {
+      node: Rigged
+      mode: 'move' | 'height' | 'rotate'
+      moved: boolean
+      startClientX: number
+      startClientY: number
+      startPosition: THREE.Vector3
+      startRotation: number
+    } | null = null
+    let justDragged = false
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return
+      const node = lampAt(event)
+      if (node === null) return
+
+      event.stopImmediatePropagation()
+      renderer.domElement.setPointerCapture(event.pointerId)
+      drag = {
+        node,
+        mode: event.altKey ? 'rotate' : event.shiftKey ? 'height' : 'move',
+        moved: false,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startPosition: node.root.position.clone(),
+        startRotation: node.root.rotation.y,
+      }
+    }
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (drag === null) return
+      const dx = event.clientX - drag.startClientX
+      const dy = event.clientY - drag.startClientY
+      if (!drag.moved && Math.hypot(dx, dy) < 5) return
+      drag.moved = true
+
+      if (drag.mode === 'rotate') {
+        /* Half a degree per pixel: a hand's sweep is a full turn. */
+        drag.node.root.rotation.y = drag.startRotation - (dx * Math.PI) / 360
+        return
+      }
+
+      caster.setFromCamera(pointAt(event), cam)
+      if (drag.mode === 'move') {
+        /* On the lamp's own height plane: placing must never change the
+           hang, or dragging across the stage would also drop the rig. */
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -drag.startPosition.y)
+        const hit = new THREE.Vector3()
+        if (caster.ray.intersectPlane(plane, hit) === null) return
+        drag.node.root.position.x = Math.max(-stageW / 2, Math.min(stageW / 2, hit.x))
+        drag.node.root.position.z = Math.max(-stageD / 2, Math.min(stageD / 2, hit.z))
+      } else {
+        /* Height rides a camera-facing wall through the lamp, so the hand
+           moves in screen-vertical and the lamp follows. */
+        const facing = new THREE.Vector3()
+        cam.getWorldDirection(facing)
+        facing.y = 0
+        if (facing.lengthSq() === 0) return
+        facing.normalize()
+        const plane = new THREE.Plane(facing, -facing.dot(drag.startPosition))
+        const hit = new THREE.Vector3()
+        if (caster.ray.intersectPlane(plane, hit) === null) return
+        drag.node.root.position.y = Math.max(0, Math.min(10, hit.y))
+      }
+    }
+
+    const onPointerUp = () => {
+      if (drag === null) return
+      const { node, moved, mode } = drag
+      drag = null
+
+      if (!moved) {
+        /* A tap: choosing, exactly as before. */
+        const id = node.fixture.id
+        setChosen((current) =>
+          current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+        )
+        return
+      }
+
+      justDragged = true
+
+      /* Back to the file's units: plan x/y are stage millimetres, z is the
+         hang, rotation is the plan's clockwise degrees. */
+      const position = node.root.position
+      const patch: { x?: number; y?: number; z?: number; rotation?: number } =
+        mode === 'rotate'
+          ? { rotation: Math.round((((-node.root.rotation.y * 180) / Math.PI) % 360) * 10) / 10 }
+          : mode === 'height'
+            ? { z: Math.round(position.y * 1000) }
+            : {
+                x: Math.round((position.x + stageW / 2) * 1000),
+                y: Math.round((position.z + stageD / 2) * 1000),
+              }
+      api
+        .setPlanPosition(node.fixture.id, patch)
+        .then(() => {
+          if (patch.x !== undefined) node.fixture.x = patch.x
+          if (patch.y !== undefined) node.fixture.y = patch.y
+          if (patch.z !== undefined) node.fixture.z = patch.z
+        })
+        .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
+    }
+
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+
     const controls = new OrbitControls(cam, renderer.domElement)
     /* Orbit around the middle of the AIR the rig lives in, not the floor's
        origin -- orbiting the floor keeps pushing the lamps off-screen. */
@@ -234,6 +365,11 @@ export function Stage3D({
           opacity: 0,
           side: THREE.DoubleSide,
           depthWrite: false,
+          /* Light ADDS. Under normal blending a white beam was a milky grey
+             veil that turned DARK wherever a body sat behind it -- an
+             anti-light. Additive can only ever brighten, which is the one
+             physical truth a beam has. */
+          blending: THREE.AdditiveBlending,
         }),
       )
       /* Cone apex at the fixture, spreading down. The old PI flip put the
@@ -247,30 +383,18 @@ export function Stage3D({
       rig.current.set(fixture.id, { fixture, steerable, root, beam, beamPivot })
     }
 
-    /* Picking: a click on the floor aims the chosen movers there. */
-    const caster = new THREE.Raycaster()
+    /* Picking: a click on the floor aims the chosen movers there. Choosing a
+       lamp lives on pointerup now (a tap is a drag that never moved), and the
+       click that follows a real drag must not aim the rig at wherever the
+       hand happened to let go. */
     const onClick = (event: MouseEvent) => {
-      const box = renderer.domElement.getBoundingClientRect()
-      const at = new THREE.Vector2(
-        ((event.clientX - box.left) / box.width) * 2 - 1,
-        -(((event.clientY - box.top) / box.height) * 2 - 1),
-      )
-      caster.setFromCamera(at, cam)
-
-      const lamps = [...rig.current.values()].map((n) => n.root)
-      const hitLamp = caster.intersectObjects(lamps, true)[0]
-      if (hitLamp !== undefined) {
-        let node: THREE.Object3D | null = hitLamp.object
-        while (node !== null && !node.name.startsWith('fixture-')) node = node.parent
-        if (node !== null) {
-          const id = Number(node.name.replace('fixture-', ''))
-          setChosen((current) =>
-            current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
-          )
-          return
-        }
+      if (justDragged) {
+        justDragged = false
+        return
       }
+      if (lampAt(event) !== null) return
 
+      caster.setFromCamera(pointAt(event), cam)
       const hit = caster.intersectObject(floor)[0]
       if (hit !== undefined) aimAt(hit.point.x, hit.point.z)
     }
@@ -318,18 +442,37 @@ export function Stage3D({
       },
       aimAt,
       fixtures: () => [...rig.current.keys()],
+      /** Where a lamp sits on the canvas, in client pixels: the honest way
+       *  for the browser chapter to aim a synthetic pointer at it. */
+      screenOf: (id: number) => {
+        const node = rig.current.get(id)
+        if (node === undefined) return null
+        const projected = node.root.position.clone().project(cam)
+        const box = renderer.domElement.getBoundingClientRect()
+        return {
+          x: box.left + ((projected.x + 1) / 2) * box.width,
+          y: box.top + ((1 - projected.y) / 2) * box.height,
+        }
+      },
+      positionOf: (id: number) => {
+        const node = rig.current.get(id)
+        return node === undefined ? null : node.root.position.toArray()
+      },
     }
 
     return () => {
       alive = false
       renderer.domElement.removeEventListener('click', onClick)
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
       controls.dispose()
       renderer.dispose()
       element.removeChild(renderer.domElement)
       rig.current.clear()
       ;(window as unknown as Record<string, unknown>).__orchidStage = undefined
     }
-  }, [plan, fixtures, quality, aimAt])
+  }, [plan, fixtures, quality, aimAt, onError])
 
   /* The four cameras of the reference. */
   useEffect(() => {
@@ -369,7 +512,7 @@ export function Stage3D({
         <span className="hint">
           {chosen.length > 0
             ? `${chosen.length} elegidas: clic en el suelo para apuntarlas`
-            : 'Clic en una lámpara para elegirla; en el suelo, apuntan todas las móviles'}
+            : 'Toca una lámpara para elegirla; arrastra para colocarla (Mayús: altura, Alt: giro)'}
         </span>
         <label className="field">
           <span>Calidad</span>
