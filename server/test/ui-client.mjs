@@ -4339,7 +4339,11 @@ try {
         return 'F did not frame the selection (target=' + JSON.stringify(target) + ')'
       }
 
-      /* The tooltip says what the hand is over -- and where it hangs. */
+      /* The tooltip says what the hand is over -- and where it hangs. Not
+         over the SELECTED element (the hint already names it), so let go
+         first: Escape, then hover. */
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await wait(300)
       const back = stage.screenOf(mover)
       canvas.dispatchEvent(new PointerEvent('pointermove', {
         bubbles: true, pointerId: 11, clientX: back.x, clientY: back.y }))
