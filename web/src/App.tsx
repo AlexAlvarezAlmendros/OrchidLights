@@ -903,11 +903,15 @@ export function App() {
   /* Ctrl+Z / Ctrl+Shift+Z, anywhere somebody is not typing. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z') return
+      if (!(event.ctrlKey || event.metaKey)) return
+      const key = event.key.toLowerCase()
+      if (key !== 'z' && key !== 'y') return
       const target = event.target as HTMLElement
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
       event.preventDefault()
-      if (event.shiftKey) void redo()
+      /* Ctrl+Y is the other spelling of redo, and the one the 3D editor's
+         users reach for. */
+      if (key === 'y' || event.shiftKey) void redo()
       else void undo()
     }
     window.addEventListener('keydown', onKey)
@@ -1402,7 +1406,7 @@ export function App() {
         ) : view === 'stage3d' ? (
           <main className="console">
             <Suspense fallback={<p className="hint">Cargando el escenario…</p>}>
-              <Stage3D universes={frames} onError={setToast} />
+              <Stage3D universes={frames} revision={revision} onError={setToast} />
             </Suspense>
           </main>
         ) : view === 'remote' ? (
