@@ -4304,14 +4304,55 @@ try {
         return 'Ctrl+Z did not bring the mover back (x=' + undone?.x + ')'
       }
 
-      /* The tooltip says what the hand is over. */
+      /* Blender's Ctrl: the magnet. A drag with Control held lands on the
+         quarter-metre grid, and the plan says so in round numbers. */
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Control', bubbles: true }))
+      const snapHandle = stage.gizmoHandleScreen('X')
+      if (!snapHandle) return 'no X handle for the snap drag'
+      const beforeSnap = (await planOf()).x
+      pointer('pointerdown', snapHandle.x, snapHandle.y)
+      for (let i = 1; i <= 3; i++) { pointer('pointermove', snapHandle.x + i * 7, snapHandle.y); await wait(30) }
+      pointer('pointerup', snapHandle.x + 23, snapHandle.y, { buttons: 0 })
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Control', bubbles: true }))
+      await wait(900)
+      const snapped = await planOf()
+      /* Both halves, or it proves nothing: it must have MOVED (else a dead
+         drag passes on the old grid-aligned spot) and landed on the grid
+         (else it is just a drag). An odd pixel count makes an unsnapped
+         landing on a multiple of 250 mm astronomically unlucky. */
+      if (!snapped || snapped.x === beforeSnap) {
+        return 'the Ctrl drag did not move at all (x=' + snapped?.x + ')'
+      }
+      if (snapped.x <= 0 || snapped.x >= stageW) {
+        return 'the snap drag slammed into the stage edge (x=' + snapped.x + '): shorten it'
+      }
+      if (snapped.x % 250 !== 0) {
+        return 'the Ctrl drag did not land on the magnet grid (x=' + snapped.x + ')'
+      }
+
+      /* Blender's F: the orbit centre comes to the element. */
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true }))
+      await wait(400)
+      const target = stage.orbitTarget()
+      const position = stage.positionOf(mover)
+      if (Math.abs(target[0] - position[0]) > 0.05 || Math.abs(target[2] - position[2]) > 0.05) {
+        return 'F did not frame the selection (target=' + JSON.stringify(target) + ')'
+      }
+
+      /* The tooltip says what the hand is over -- and where it hangs. Not
+         over the SELECTED element (the hint already names it), so let go
+         first: Escape, then hover. */
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await wait(300)
       const back = stage.screenOf(mover)
       canvas.dispatchEvent(new PointerEvent('pointermove', {
         bubbles: true, pointerId: 11, clientX: back.x, clientY: back.y }))
       await wait(500)
       const tip = document.querySelector('.stage3d-tip')
-      if (!tip || !tip.textContent.includes('Mover3D')) {
-        return 'no tooltip naming the element (got ' + (tip ? tip.textContent : 'none') + ')'
+      if (!tip || !tip.textContent.includes('Mover3D') || !tip.textContent.includes('@')
+        || !tip.textContent.includes(' m')) {
+        return 'no tooltip naming the element with its patch and hang (got '
+          + (tip ? tip.textContent : 'none') + ')'
       }
 
       /* Supr takes it off the stage; the tray puts it back on. */

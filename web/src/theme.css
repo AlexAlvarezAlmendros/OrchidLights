@@ -3722,6 +3722,7 @@ button.primary:disabled {
 /* The name of what the hand is over: follows the pointer, never catches it. */
 .stage3d-tip {
   position: absolute;
+  transform: translate(6px, 8px);
   z-index: 5;
   pointer-events: none;
   padding: 0.25rem 0.55rem;
