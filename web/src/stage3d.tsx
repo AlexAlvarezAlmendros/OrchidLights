@@ -45,6 +45,14 @@ interface Rigged {
   root: THREE.Group
   beam: THREE.Mesh
   beamPivot: THREE.Group
+  /** Every material that paints the body, for live glow and selection. */
+  bodyMaterials: THREE.MeshStandardMaterial[]
+  /** The light landing on the floor, placed each frame from the beam. */
+  pool: THREE.Mesh
+  /** The run-mode mark under a fixture chosen for aiming. */
+  ring: THREE.Mesh
+  /** The edit-mode plumb line from the lamp to the floor. */
+  dropLine: THREE.Line
 }
 
 /** The scene's handles, installed by the build effect for everyone else:
@@ -54,6 +62,10 @@ interface StageOps {
   setMode: (mode: 'translate' | 'rotate') => void
   sync: (planState: PlanState) => void
   place: (fixture: PlanFixture) => void
+  /** Blender's Ctrl: snap the gizmo to honest increments while held. */
+  setSnap: (on: boolean) => void
+  /** Blender's F: bring the orbit centre to the selected element. */
+  frameSelected: () => void
 }
 
 export function Stage3D({
@@ -94,6 +106,8 @@ export function Stage3D({
   const [hover, setHover] = useState<{ id: number; name: string; x: number; y: number } | null>(
     null,
   )
+  /* The live numbers while a transform is in flight: precision spoken. */
+  const [readout, setReadout] = useState<string | null>(null)
   /* The plan as last read, for the tray of fixtures not yet on the stage. */
   const [planList, setPlanList] = useState<PlanFixture[]>([])
   const [toPlace, setToPlace] = useState('')
@@ -157,6 +171,9 @@ export function Stage3D({
 
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x0d0e11)
+    /* A breath of haze: depth cues for free. The beams and floor light are
+       exempted (fog: false) -- they ARE the haze catching light. */
+    scene.fog = new THREE.FogExp2(0x0d0e11, 0.022)
     const cam = new THREE.PerspectiveCamera(55, width / height, 0.1, 200)
     /* High enough that the rig (lamps hang at 1-4 m) is in frame, not just
        the floor: the first framing cut every fixture off the top edge. */
@@ -164,11 +181,25 @@ export function Stage3D({
     cameraRef.current = cam
 
     const renderer = new THREE.WebGLRenderer({ antialias: quality === 'high' })
+    /* Sharp on HiDPI glass; Ligera stays at 1 -- that is what it is for. */
+    renderer.setPixelRatio(quality === 'high' ? window.devicePixelRatio : 1)
     renderer.setSize(width, height)
     /* Nothing shines through the stage: a 6 m beam from a 3.5 m truss used
        to keep going below the floor as a spike out of the underworld. */
     renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)]
     element.appendChild(renderer.domElement)
+
+    /* The canvas follows its container: a resized window used to keep the
+       first frame's size forever. */
+    const resizer = new ResizeObserver(() => {
+      const w = element.clientWidth
+      const h = element.clientHeight
+      if (w === 0 || h === 0) return
+      cam.aspect = w / h
+      cam.updateProjectionMatrix()
+      renderer.setSize(w, h)
+    })
+    resizer.observe(element)
 
     const caster = new THREE.Raycaster()
     const pointAt = (event: PointerEvent | MouseEvent) => {
@@ -193,6 +224,11 @@ export function Stage3D({
     /* Orbit around the middle of the AIR the rig lives in, not the floor's
        origin -- orbiting the floor keeps pushing the lamps off-screen. */
     controls.target.set(0, 1.2, 0)
+    /* The camera stays in the venue: never under the stage (a black void
+       that reads as a crash), never inside a lamp, never lost in orbit. */
+    controls.maxPolarAngle = Math.PI * 0.495
+    controls.minDistance = 1.5
+    controls.maxDistance = Math.max(stageW, stageD) * 6
     controls.update()
     controlsRef.current = controls
 
@@ -208,9 +244,76 @@ export function Stage3D({
     floor.rotation.x = -Math.PI / 2
     floor.name = 'floor'
     scene.add(floor)
-    scene.add(
-      new THREE.GridHelper(Math.max(stageW, stageD), Math.max(stageW, stageD), 0x2a2f38, 0x22252c),
+    {
+      /* A metre grid the SIZE OF THE FLOOR: GridHelper only knows squares,
+         and on a rectangular stage its overhang read as a second, phantom
+         stage. */
+      const lines: number[] = []
+      for (let x = Math.ceil(-stageW / 2); x <= stageW / 2; x++) {
+        lines.push(x, 0, -stageD / 2, x, 0, stageD / 2)
+      }
+      for (let z = Math.ceil(-stageD / 2); z <= stageD / 2; z++) {
+        lines.push(-stageW / 2, 0, z, stageW / 2, 0, z)
+      }
+      const gridGeometry = new THREE.BufferGeometry()
+      gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3))
+      scene.add(
+        new THREE.LineSegments(
+          gridGeometry,
+          new THREE.LineBasicMaterial({ color: 0x2f3540, transparent: true, opacity: 0.9 }),
+        ),
+      )
+    }
+    /* The stage's own edge, drawn: where the floor ends stops being a
+       guess in the dark. */
+    const edge = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.PlaneGeometry(stageW, stageD)),
+      new THREE.LineBasicMaterial({ color: 0x4a5262, transparent: true, opacity: 0.9 }),
     )
+    edge.rotation.x = -Math.PI / 2
+    edge.position.y = 0.005
+    scene.add(edge)
+
+    /* A beam is brightest at the lens and dies in the air: a vertical
+       alpha gradient, painted once and worn by every cone. */
+    const fadeCanvas = document.createElement('canvas')
+    fadeCanvas.width = 1
+    fadeCanvas.height = 64
+    const fadeCtx = fadeCanvas.getContext('2d')
+    if (fadeCtx !== null) {
+      /* flipY: canvas y=0 lands on uv.y=1, which on a cone is the APEX --
+         the lens. Stop 0 is therefore the FLOOR end. Learned by shipping it
+         inverted: beams that grew brighter with distance. */
+      /* alphaMap reads the GREEN channel, not the alpha: painted as opaque
+         greyscale, or the fade silently does not exist (it shipped invisible
+         once as white-with-alpha -- green 255 everywhere). */
+      const gradient = fadeCtx.createLinearGradient(0, 0, 0, 64)
+      gradient.addColorStop(0, 'rgb(12,12,12)')
+      gradient.addColorStop(0.35, 'rgb(80,80,80)')
+      gradient.addColorStop(1, 'rgb(255,255,255)')
+      fadeCtx.fillStyle = gradient
+      fadeCtx.fillRect(0, 0, 1, 64)
+    }
+    const beamFade = new THREE.CanvasTexture(fadeCanvas)
+
+    /* The pool's soft heart: a radial falloff, so the light lands as light
+       and not as a grey dinner plate with a machined edge. */
+    const poolCanvas = document.createElement('canvas')
+    poolCanvas.width = 64
+    poolCanvas.height = 64
+    const poolCtx = poolCanvas.getContext('2d')
+    if (poolCtx !== null) {
+      poolCtx.fillStyle = 'rgb(0,0,0)'
+      poolCtx.fillRect(0, 0, 64, 64)
+      const radial = poolCtx.createRadialGradient(32, 32, 2, 32, 32, 32)
+      radial.addColorStop(0, 'rgb(255,255,255)')
+      radial.addColorStop(0.3, 'rgb(115,115,115)')
+      radial.addColorStop(0.7, 'rgb(30,30,30)')
+      radial.addColorStop(1, 'rgb(0,0,0)')
+      poolCtx.fillStyle = radial
+      poolCtx.fillRect(0, 0, 64, 64)
+    }
+    const poolFade = new THREE.CanvasTexture(poolCanvas)
 
     /* The rig. Meshes load async; a box stands in until each lands. */
     const loader = new ColladaLoader()
@@ -254,13 +357,16 @@ export function Stage3D({
       const root = new THREE.Group()
       root.name = `fixture-${fixture.id}`
 
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(0.3, 0.25, 0.3),
-        /* Bright enough to find and click on a dark stage: the point of the
-           bodies is being pickable, and 0x30343c on 0x0d0e11 was a rig you
-           could not see, let alone choose from. */
-        new THREE.MeshStandardMaterial({ color: 0x646c7a, emissive: 0x171a20 }),
-      )
+      const bodyMaterials: THREE.MeshStandardMaterial[] = []
+      const bodyMaterial = () => {
+        /* Bright enough to find and click on a dark stage; remembered so the
+           paint loop can make the head glow its live colour and the selection
+           wear the accent. */
+        const material = new THREE.MeshStandardMaterial({ color: 0x646c7a, emissive: 0x171a20 })
+        bodyMaterials.push(material)
+        return material
+      }
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.3), bodyMaterial())
       root.add(body)
       void meshFor(type).then((mesh) => {
         if (mesh === null) return
@@ -268,12 +374,10 @@ export function Stage3D({
            it: they arrive in metres. One body language for the whole rig:
            their own near-black materials made every mesh an invisibility
            cloak on this stage. */
+        bodyMaterials.length = 0
         mesh.traverse((part) => {
           if ((part as THREE.Mesh).isMesh) {
-            ;(part as THREE.Mesh).material = new THREE.MeshStandardMaterial({
-              color: 0x646c7a,
-              emissive: 0x171a20,
-            })
+            ;(part as THREE.Mesh).material = bodyMaterial()
           }
         })
         root.remove(body)
@@ -281,12 +385,16 @@ export function Stage3D({
       })
 
       /* The beam: a cone hanging from a pivot so pan spins and tilt leans
-         exactly like the generic model says. */
+         exactly like the generic model says. Its width speaks the fixture's
+         kind -- a blinder is a wall of light, not a needle -- and the smoke
+         machines get none: fog is not a beam. */
       const beamPivot = new THREE.Group()
       beamPivot.name = `beam-${fixture.id}`
       const length = 6
+      const narrow = type === 'Moving Head' || type === 'Scanner'
+      const beamless = type === 'Smoke' || type === 'Hazer'
       const beam = new THREE.Mesh(
-        new THREE.ConeGeometry(0.6, length, 24, 1, true),
+        new THREE.ConeGeometry(narrow ? 0.55 : 1.5, length, 24, 1, true),
         new THREE.MeshBasicMaterial({
           color: 0xffffff,
           transparent: true,
@@ -298,14 +406,98 @@ export function Stage3D({
              anti-light. Additive can only ever brighten, which is the one
              physical truth a beam has. */
           blending: THREE.AdditiveBlending,
+          /* Brightest at the lens, dying in the air; and exempt from the
+             fog -- a beam IS the haze catching light. */
+          alphaMap: beamFade,
+          fog: false,
+          /* No depth test: a body inside the volume used to punch a DARK
+             hole in the light (it hid the cone's back wall). Light glows
+             over what it bathes -- that is what previz beams do. */
+          depthTest: false,
         }),
       )
       /* Cone apex at the fixture, spreading down. */
       beam.position.y = -length / 2
+      beam.visible = !beamless
       beamPivot.add(beam)
+
+      /* The hot lens: light SOURCES, and the source must be the brightest
+         pixel on the head. */
+      const lens = new THREE.Mesh(
+        new THREE.SphereGeometry(0.09, 12, 12),
+        new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          fog: false,
+          depthTest: false,
+        }),
+      )
+      lens.name = 'lens'
+      beamPivot.add(lens)
       root.add(beamPivot)
 
-      const node: Rigged = { fixture, steerable, root, beam, beamPivot }
+      /* Where the light lands: a disc the paint loop drops on the floor at
+         the beam's intersection, sized by throw distance. */
+      const pool = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 32),
+        new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: false,
+          alphaMap: poolFade,
+        }),
+      )
+      pool.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)
+      pool.position.y = 0.01
+      scene.add(pool)
+
+      /* The run-mode mark: an accent ring on the floor under a fixture
+         chosen for aiming -- the hint used to COUNT them while the stage
+         showed nothing. */
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.28, 0.36, 32),
+        new THREE.MeshBasicMaterial({
+          color: 0x7c5cff,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          fog: false,
+        }),
+      )
+      ring.rotation.x = -Math.PI / 2
+      ring.position.y = 0.02
+      ring.visible = false
+      scene.add(ring)
+
+      /* The plumb line, for reading heights while editing: a lamp floating
+         in dark air gives no clue how high it hangs. */
+      const dropLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(0, -1, 0),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0x7f8aa3, transparent: true, opacity: 0.9 }),
+      )
+      dropLine.visible = false
+      root.add(dropLine)
+
+      const node: Rigged = {
+        fixture,
+        steerable,
+        root,
+        beam,
+        beamPivot,
+        bodyMaterials,
+        pool,
+        ring,
+        dropLine,
+      }
       applyPlacement(node)
       scene.add(root)
       rig.current.set(fixture.id, node)
@@ -336,10 +528,23 @@ export function Stage3D({
       object.position.x = Math.max(-stageW / 2, Math.min(stageW / 2, object.position.x))
       object.position.z = Math.max(-stageD / 2, Math.min(stageD / 2, object.position.z))
       object.position.y = Math.max(0, Math.min(10, object.position.y))
+      /* Say the numbers while the hand moves: rounded, so React only hears
+         about changes a human can read. */
+      if (gizmo.mode === 'rotate') {
+        const toDeg = (radians: number) => Math.round((radians * 180) / Math.PI)
+        setReadout(
+          `${toDeg(-object.rotation.y)}° · x ${toDeg(object.rotation.x)}° · z ${toDeg(object.rotation.z)}°`,
+        )
+      } else {
+        setReadout(
+          `x ${(object.position.x + stageW / 2).toFixed(2)} · y ${(object.position.z + stageD / 2).toFixed(2)} · alt ${object.position.y.toFixed(2)} m`,
+        )
+      }
     })
     /* Let go = written down. The daemon's plan is the truth every other
        screen reads, and its undo ring is what Ctrl+Z talks to. */
     gizmo.addEventListener('mouseUp', () => {
+      setReadout(null)
       const id = selectedRef.current
       const node = id === null ? undefined : rig.current.get(id)
       if (node === undefined) return
@@ -434,8 +639,27 @@ export function Stage3D({
             setSelected(null)
           }
           scene.remove(node.root)
+          scene.remove(node.pool)
+          scene.remove(node.ring)
           rig.current.delete(id)
         }
+      },
+      setSnap: (on) => {
+        gizmo.setTranslationSnap(on ? 0.25 : null)
+        gizmo.setRotationSnap(on ? THREE.MathUtils.degToRad(15) : null)
+      },
+      frameSelected: () => {
+        const id = selectedRef.current
+        const node = id === null ? undefined : rig.current.get(id)
+        if (node === undefined) return
+        /* Keep the eye where it is; bring the centre of the world to the
+           element. The camera slides in along its own line of sight. */
+        node.root.getWorldPosition(lampWorld)
+        const offset = cam.position.clone().sub(controls.target)
+        if (offset.length() > 6) offset.setLength(6)
+        controls.target.copy(lampWorld)
+        cam.position.copy(lampWorld).add(offset)
+        controls.update()
       },
       place: (fixture) => {
         /* Onto the middle of the stage at head height: visible, grabbable,
@@ -459,22 +683,101 @@ export function Stage3D({
     /* The render loop reads the LIVE frames every pass: the beams are the
        DMX, not a copy of it. */
     let alive = true
+    const down = new THREE.Vector3()
+    const lampWorld = new THREE.Vector3()
+    const beamQuat = new THREE.Quaternion()
+    const warmth = new THREE.Color(1, 0.93, 0.82)
+    const worldUp = new THREE.Vector3(0, 1, 0)
+    const poolQuatY = new THREE.Quaternion()
+    const poolQuatFlat = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(1, 0, 0),
+      -Math.PI / 2,
+    )
     const paint = () => {
       if (!alive) return
       for (const node of rig.current.values()) {
         const colour = colourOf(node.fixture, framesRef.current)
         const material = node.beam.material as THREE.MeshBasicMaterial
+        const poolMaterial = node.pool.material as THREE.MeshBasicMaterial
+        const lens = node.beamPivot.getObjectByName('lens') as THREE.Mesh | undefined
+        const lensMaterial = lens?.material as THREE.MeshBasicMaterial | undefined
         if (colour === null) {
           material.opacity = 0
+          poolMaterial.opacity = 0
+          if (lensMaterial !== undefined) lensMaterial.opacity = 0
         } else {
           material.color = new THREE.Color(colour)
-          material.opacity = 0.35
+          /* An intensity-only fixture is a halogen lamp, and halogen is not
+             studio white: a touch of warmth, like the planta's halo is not. */
+          const roles = node.fixture.roles
+          if (roles.red === undefined && roles.cyan === undefined && roles.white === undefined) {
+            material.color.multiply(warmth)
+          }
+          material.opacity = 0.5
+          if (lensMaterial !== undefined) {
+            lensMaterial.color = material.color
+            lensMaterial.opacity = 0.95
+          }
         }
         const aim = aimOf(node.fixture, framesRef.current)
         if (aim !== null) {
           node.beamPivot.rotation.y = (-aim.angle * Math.PI) / 180
           node.beamPivot.rotation.x = (aim.lean * 90 * Math.PI) / 180
         }
+
+        /* Where the light lands. The beam's own axis, intersected with the
+           floor: the pool sits there, stretched into an ellipse by an oblique
+           throw; and the CONE now ENDS at the floor -- clipped geometry seen
+           from above used to survive as phantom wedges on the boards. */
+        if (colour !== null && node.beam.visible) {
+          node.beamPivot.getWorldQuaternion(beamQuat)
+          down.set(0, -1, 0).applyQuaternion(beamQuat)
+          node.root.getWorldPosition(lampWorld)
+          if (down.y < -0.15 && lampWorld.y > 0.05) {
+            const throwLength = Math.min(14, lampWorld.y / -down.y)
+            const reach = Math.max(0.08, Math.min(1, throwLength / 6))
+            node.beam.scale.set(1, reach, 1)
+            node.beam.position.y = (-6 * reach) / 2
+            node.pool.position.set(
+              lampWorld.x + down.x * throwLength,
+              0.01,
+              lampWorld.z + down.z * throwLength,
+            )
+            const radius = Math.max(0.3, 0.1 * throwLength)
+            const stretch = Math.min(2.5, 1 / Math.max(0.3, -down.y))
+            node.pool.scale.set(radius, radius * stretch, 1)
+            poolQuatY.setFromAxisAngle(worldUp, Math.atan2(down.x, down.z))
+            node.pool.quaternion.copy(poolQuatY).multiply(poolQuatFlat)
+            poolMaterial.color = material.color
+            poolMaterial.opacity = Math.max(0.22, 0.5 - throwLength * 0.03)
+          } else {
+            node.beam.scale.set(1, 1, 1)
+            node.beam.position.y = -3
+            poolMaterial.opacity = 0
+          }
+        }
+
+        /* The head glows what it gives; the chosen wear the accent; the
+           selected element wears it brighter. All through emissive, so the
+           daylight shape stays readable underneath. */
+        const isSelected = editingRef.current && selectedRef.current === node.fixture.id
+        const isChosen = !editingRef.current && chosenRef.current.includes(node.fixture.id)
+        for (const bodyMaterial of node.bodyMaterials) {
+          if (isSelected || isChosen) {
+            bodyMaterial.emissive.setHex(0x4a3a99)
+          } else if (colour !== null) {
+            bodyMaterial.emissive.copy(material.color).multiplyScalar(0.35)
+          } else {
+            bodyMaterial.emissive.setHex(0x171a20)
+          }
+        }
+        node.ring.visible = isChosen
+        if (isChosen) {
+          node.root.getWorldPosition(lampWorld)
+          node.ring.position.set(lampWorld.x, 0.02, lampWorld.z)
+        }
+        node.dropLine.visible = editingRef.current
+        if (editingRef.current) node.dropLine.scale.y = Math.max(0.001, node.root.position.y)
       }
       if (hoverEvent !== null && !transforming) {
         const lamp = gizmo.axis === null ? lampAt(hoverEvent) : null
@@ -483,8 +786,21 @@ export function Stage3D({
         const y = (hoverEvent?.clientY ?? 0) - box.top
         setHover((current) => {
           if (lamp === null) return current === null ? current : null
-          const name = fixtures.find((f) => f.id === lamp.fixture.id)?.name ?? `#${lamp.fixture.id}`
-          if (current !== null && current.id === lamp.fixture.id && current.x === x) return current
+          /* The hint already names the selected element; a tip on top of its
+             own gizmo was furniture over the controls. */
+          if (editingRef.current && selectedRef.current === lamp.fixture.id) {
+            return current === null ? current : null
+          }
+          const base = fixtures.find((f) => f.id === lamp.fixture.id)?.name ?? `#${lamp.fixture.id}`
+          const name = `${base} · U${lamp.fixture.universe} @ ${lamp.fixture.address + 1} · ${lamp.root.position.y.toFixed(2)} m`
+          if (
+            current !== null &&
+            current.id === lamp.fixture.id &&
+            current.x === x &&
+            current.y === y
+          ) {
+            return current
+          }
           return { id: lamp.fixture.id, name, x, y }
         })
       }
@@ -523,25 +839,41 @@ export function Stage3D({
         return node === undefined ? null : node.root.position.toArray()
       },
       selectedId: () => selectedRef.current,
+      orbitTarget: () => controls.target.toArray(),
       gizmoAxis: () => gizmo.axis,
       gizmoDragging: () => gizmo.dragging,
       /** A live gizmo handle's place on screen, so the chapter can grab the
-       *  real arrow instead of teleporting the object behind the UI's back. */
+       *  real arrow instead of teleporting the object behind the UI's back.
+       *  Computed along the axis's projected direction: the named groups all
+       *  sit AT the gizmo's centre, which is the free-move handle -- exactly
+       *  the one an axis test must not grab. */
       gizmoHandleScreen: (axis: string) => {
-        if (gizmo.object === undefined) return null
-        let found: THREE.Object3D | null = null
-        gizmo.getHelper().traverse((child) => {
-          if (found === null && child.name === axis && child.visible) found = child
-        })
-        if (found === null) return null
-        const world = new THREE.Vector3()
-        ;(found as THREE.Object3D).getWorldPosition(world)
-        const projected = world.project(cam)
-        const box = renderer.domElement.getBoundingClientRect()
-        return {
-          x: box.left + ((projected.x + 1) / 2) * box.width,
-          y: box.top + ((1 - projected.y) / 2) * box.height,
+        const object = gizmo.object
+        if (object === undefined) return null
+        const axes: Record<string, THREE.Vector3> = {
+          X: new THREE.Vector3(1, 0, 0),
+          Y: new THREE.Vector3(0, 1, 0),
+          Z: new THREE.Vector3(0, 0, 1),
         }
+        const direction = axes[axis]
+        if (direction === undefined) return null
+        const box = renderer.domElement.getBoundingClientRect()
+        const toScreen = (world: THREE.Vector3) => {
+          const projected = world.clone().project(cam)
+          return {
+            x: box.left + ((projected.x + 1) / 2) * box.width,
+            y: box.top + ((1 - projected.y) / 2) * box.height,
+          }
+        }
+        const centre = new THREE.Vector3()
+        object.getWorldPosition(centre)
+        const origin = toScreen(centre)
+        const tip = toScreen(centre.clone().add(direction))
+        const dx = tip.x - origin.x
+        const dy = tip.y - origin.y
+        const length = Math.hypot(dx, dy)
+        if (length === 0) return null
+        return { x: origin.x + (dx / length) * 70, y: origin.y + (dy / length) * 70 }
       },
     }
 
@@ -550,6 +882,7 @@ export function Stage3D({
       renderer.domElement.removeEventListener('click', onClick)
       renderer.domElement.removeEventListener('pointermove', onPointerMove)
       renderer.domElement.removeEventListener('pointerleave', onPointerLeave)
+      resizer.disconnect()
       gizmo.detach()
       gizmo.dispose()
       controls.dispose()
@@ -568,6 +901,50 @@ export function Stage3D({
   useEffect(() => {
     ops.current?.setMode(mode)
   }, [mode])
+
+  /* The four cameras of the reference. Dropped in a rewrite once: buttons
+     that name views and move nothing are exactly the dishonesty this desk
+     is organized against. They keep the free view's orbit centre, so the
+     rig never walks off the top of the frame. */
+  useEffect(() => {
+    const cam = cameraRef.current
+    const controls = controlsRef.current
+    if (cam === null || controls === null || plan === null) return
+    const stageD = plan.grid.units === 'feet' ? plan.grid.depth * 0.3048 : plan.grid.depth
+    const stageW = plan.grid.units === 'feet' ? plan.grid.width * 0.3048 : plan.grid.width
+    /* Framed on the RIG, not on the venue's origin: a rig hung on one side
+       of the stage left the lateral view staring at empty boards. */
+    let cx = 0
+    let cz = 0
+    let count = 0
+    for (const node of rig.current.values()) {
+      cx += node.root.position.x
+      cz += node.root.position.z
+      count++
+    }
+    if (count > 0) {
+      cx /= count
+      cz /= count
+    }
+    if (camera === 'top') {
+      /* High enough that perspective stops lying about positions (at 1.4x
+         the blinders arrived as clipped giants), and centred on the STAGE:
+         a plan view answers "where on the boards", so the boards rule the
+         frame even when the rig hangs to one side. */
+      cam.position.set(0, Math.max(stageW, stageD) * 2.6, 0.01)
+      controls.target.set(0, 0, 0)
+    } else if (camera === 'front') {
+      cam.position.set(cx, 1.7, stageD * 1.4)
+      controls.target.set(cx, 1.2, cz)
+    } else if (camera === 'lado') {
+      cam.position.set(stageW * 1.4, 1.7, cz)
+      controls.target.set(cx, 1.2, cz)
+    } else {
+      cam.position.set(0, stageD * 1.05 + 1.5, stageD * 1.5)
+      controls.target.set(0, 1.2, 0)
+    }
+    controls.update()
+  }, [camera, plan])
 
   /* The project changed under us -- an undo, another client, our own edit
      echoed back. Follow it without rebuilding: the camera must not jump. */
@@ -604,17 +981,29 @@ export function Stage3D({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+      if (event.key === 'Control') {
+        ops.current?.setSnap(true)
+        return
+      }
       if (event.ctrlKey || event.metaKey) return
       const key = event.key.toLowerCase()
       if (key === 'g') setMode('translate')
       else if (key === 'r') setMode('rotate')
+      else if (key === 'f') ops.current?.frameSelected()
       else if (key === 'escape') setSelected(null)
       else if ((key === 'delete' || key === 'backspace') && selectedRef.current !== null) {
         removeSelected()
       }
     }
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Control') ops.current?.setSnap(false)
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKeyUp)
+    }
   }, [editing, removeSelected])
 
   const unplaced = planList.filter((f) => f.x === undefined || f.y === undefined)
@@ -643,7 +1032,7 @@ export function Stage3D({
 
         <button
           type="button"
-          className="stage3d-edit"
+          className={editing ? 'stage3d-edit primary' : 'stage3d-edit'}
           aria-pressed={editing}
           onClick={() => {
             setEditing((on) => !on)
@@ -713,9 +1102,11 @@ export function Stage3D({
         <span className="spacer" />
         <span className="hint">
           {editing
-            ? selected === null
-              ? t('Clic en un elemento para elegirlo; Ctrl+Z deshace')
-              : `${selectedName} · ${mode === 'translate' ? t('moviendo (R: girar)') : t('girando (G: mover)')}`
+            ? readout !== null
+              ? `${selectedName} · ${readout}`
+              : selected === null
+                ? t('Clic en un elemento para elegirlo; Ctrl+Z deshace · Ctrl: imán · F: encuadrar')
+                : `${selectedName} · ${mode === 'translate' ? t('moviendo (R: girar)') : t('girando (G: mover)')}`
             : chosen.length > 0
               ? `${chosen.length} elegidas: clic en el suelo para apuntarlas`
               : t('Toca una lámpara para elegirla; en el suelo, apuntan todas las móviles')}

@@ -40,8 +40,8 @@ const EN: Record<string, string> = {
   'Quitar del escenario (Supr) — la fixture sigue en el patch':
     'Remove from the stage (Del) — the fixture stays in the patch',
   'Fixture que añadir al escenario': 'Fixture to add to the stage',
-  'Clic en un elemento para elegirlo; Ctrl+Z deshace':
-    'Click an element to choose it; Ctrl+Z undoes',
+  'Clic en un elemento para elegirlo; Ctrl+Z deshace · Ctrl: imán · F: encuadrar':
+    'Click an element to choose it; Ctrl+Z undoes · Ctrl: snap · F: frame',
   'moviendo (R: girar)': 'moving (R: rotate)',
   'girando (G: mover)': 'rotating (G: move)',
   'Toca una lámpara para elegirla; en el suelo, apuntan todas las móviles':
