@@ -4355,6 +4355,23 @@ try {
           + (tip ? tip.textContent : 'none') + ')'
       }
 
+      /* A beam must not steal clicks. The mover's cone hangs lit below the
+         body; a click into that empty lit air used to select the CONE's
+         owner -- "I click one lamp and another answers". Nothing is there,
+         so nothing must answer. */
+      await fetch('/api/v1/live', { method: 'PUT', headers: json,
+        body: JSON.stringify({ values: [
+          { fixture: mover, channel: moverPlan.roles.intensity ?? 0, value: 255 },
+        ] }) })
+      await wait(600)
+      clickAt(back.x, back.y + 90)
+      await wait(400)
+      if (stage.selectedId() !== null) {
+        return 'the beam stole the click: empty lit air selected #' + stage.selectedId()
+      }
+      await fetch('/api/v1/live', { method: 'DELETE' })
+      await wait(300)
+
       /* Supr takes it off the stage; the tray puts it back on. */
       clickAt(back.x, back.y)
       await wait(400)
