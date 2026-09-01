@@ -34,6 +34,7 @@ PARAMETERISED = {
     "/api/v1/functions/{id}/usage": "/api/v1/functions/0/usage",
     "/api/v1/simpledesk/{universe}": "/api/v1/simpledesk/1",
     "/api/v1/library/{manufacturer}": "/api/v1/library/Generic",
+    "/api/v1/library/{manufacturer}/{model}": "/api/v1/library/Martin/MAC%20Aura",
 }
 
 # El contrato entero mide 170 KB y validarlo contra su propio esquema no dice
@@ -81,6 +82,14 @@ def check(spec, schema, value, where, problems, depth=0):
             got = "null" if value is None else type(value).__name__
             problems.append(f"{where}: el contrato dice {'/'.join(kinds)} y llegó {got}")
             return
+
+    # Un enum mal escrito no se ve en el tipo: los once tipos de widget salen en
+    # minúscula del daemon y el contrato los documentaba capitalizados, con dos
+    # nombres además que no existen. Todo eso es texto y todo pasa como texto.
+    allowed = schema.get("enum")
+    if allowed is not None and value not in allowed:
+        problems.append(f"{where}: {value!r} no está en el enum del contrato ({allowed})")
+        return
 
     if isinstance(value, dict):
         for name, subschema in (schema.get("properties") or {}).items():

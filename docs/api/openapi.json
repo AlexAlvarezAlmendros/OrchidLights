@@ -1973,14 +1973,13 @@
           "model": {
            "type": "string"
           },
-          "name": {
-           "type": "string"
-          },
           "type": {
-           "type": "string"
+           "type": "string",
+           "description": "Familia del perfil: Moving Head, LED Bar, Dimmer…"
           },
           "modes": {
            "type": "array",
+           "description": "Los modos, con cuántos canales ocupa cada uno. El nombre\ntiene que ir exacto al patchear, y el número de canales es\nlo que decide dónde cabe.\n",
            "items": {
             "type": "object",
             "properties": {
@@ -1991,13 +1990,6 @@
               "type": "integer"
              }
             }
-           }
-          },
-          "channels": {
-           "type": "array",
-           "items": {
-            "type": "object",
-            "additionalProperties": true
            }
           }
          }
@@ -4691,18 +4683,18 @@
         "properties": {
          "type": {
           "type": "string",
+          "description": "Los once tipos de QLC+. No distingue mayúsculas.",
           "enum": [
            "Frame",
            "SoloFrame",
            "Button",
            "Slider",
+           "Label",
+           "SpeedDial",
            "XYPad",
            "CueList",
-           "Label",
            "Clock",
            "AudioTriggers",
-           "Speeddial",
-           "Animation",
            "Matrix"
           ]
          },
@@ -5027,6 +5019,145 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/v1/vc/widgets/{id}/press": {
+   "post": {
+    "tags": [
+     "consola"
+    ],
+    "summary": "Pulsar un widget de la consola, con su semántica propia.",
+    "description": "Un widget es más que la función a la que apunta: un botón en modo flash\nse enciende mientras se sujeta y se apaga al soltar, uno dentro de un\nmarco solo mata a sus hermanos, y Blackout y Stop All no son funciones\nen absoluto.\n\nEsta ruta pasa por el mismo sitio que un ala MIDI, así que hace\nexactamente lo mismo que hacer clic. Arrancar la función a mano\n—`POST /functions/{id}/start`— es otra cosa: no sabe de flash, no sabe\nde marcos solo, y no es lo que hace ese botón.\n",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/widgetId"
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "on": {
+          "type": "boolean",
+          "default": true,
+          "description": "El flanco. Ausente es una pulsación. Un botón en flash\nnecesita también el `false` de soltar: quien solo sabe\npulsar deja el rig encendido.\n"
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "El estado en el que quedó — 1 encendido, 0 apagado, -1 nada pasó\n(una suelta que un toggle ignora). Es lo que hizo la pulsación, no\nlo que dice el motor: `start()` solo encola, así que preguntárselo\nun tick antes de tiempo contesta «apagado» sobre un botón que\nacaba de encenderse.\n",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer"
+          },
+          "state": {
+           "type": "integer",
+           "enum": [
+            -1,
+            0,
+            1
+           ]
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     }
+    }
+   }
+  },
+  "/api/v1/vc/widgets/{id}/level": {
+   "put": {
+    "tags": [
+     "consola"
+    ],
+    "summary": "Mover un fader de la consola.",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/widgetId"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "required": [
+         "value"
+        ],
+        "properties": {
+         "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Dónde quedó.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "integer"
+          },
+          "value": {
+           "type": "integer"
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "description": "Ese id no mueve nada — una etiqueta, un marco, o un fader que la\nfuente de niveles nunca aprendió. Se dice, en vez de tragárselo: un\nfader que contesta 200 y no hace nada es el peor control que hay.\n",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
      }
     }
    }
@@ -7316,24 +7447,37 @@
           },
           "valueMode": {
            "type": "string",
+           "description": "`Reduce` escala hacia abajo; `Limit` recorta por arriba.",
            "enum": [
-            "limit",
-            "reduce"
+            "Reduce",
+            "Limit"
            ]
           },
           "channelMode": {
            "type": "string",
+           "description": "`Intensity` solo toca los canales de intensidad; `All`, todos.",
            "enum": [
-            "intensity",
-            "all"
+            "Intensity",
+            "All"
            ]
           },
           "visible": {
            "type": "boolean"
           },
           "input": {
-           "type": "object",
-           "additionalProperties": true
+           "type": [
+            "object",
+            "null"
+           ],
+           "description": "El control externo atado al fader grande.",
+           "properties": {
+            "universe": {
+             "type": "integer"
+            },
+            "channel": {
+             "type": "integer"
+            }
+           }
           }
          }
         }
@@ -7367,19 +7511,34 @@
          "valueMode": {
           "type": "string",
           "enum": [
-           "limit",
-           "reduce"
+           "Reduce",
+           "Limit"
           ]
          },
          "channelMode": {
           "type": "string",
           "enum": [
-           "intensity",
-           "all"
+           "Intensity",
+           "All"
           ]
          },
          "visible": {
           "type": "boolean"
+         },
+         "input": {
+          "type": [
+           "object",
+           "null"
+          ],
+          "description": "`{universe, channel}` ata, `null` desata, ausente lo deja\ncomo está — el mismo contrato que el control externo de un\nwidget.\n",
+          "properties": {
+           "universe": {
+            "type": "integer"
+           },
+           "channel": {
+            "type": "integer"
+           }
+          }
          }
         }
        }
@@ -8055,19 +8214,19 @@
      },
      "type": {
       "type": "string",
+      "description": "En minúscula, que es como lo emite el daemon. Al crear se acepta de\ncualquier forma: `tagForType` no distingue mayúsculas.\n",
       "enum": [
-       "Frame",
-       "SoloFrame",
-       "Button",
-       "Slider",
-       "XYPad",
-       "CueList",
-       "Label",
-       "Clock",
-       "AudioTriggers",
-       "Speeddial",
-       "Animation",
-       "Matrix"
+       "frame",
+       "soloframe",
+       "button",
+       "slider",
+       "label",
+       "speeddial",
+       "xypad",
+       "cuelist",
+       "clock",
+       "audiotriggers",
+       "matrix"
       ]
      },
      "caption": {

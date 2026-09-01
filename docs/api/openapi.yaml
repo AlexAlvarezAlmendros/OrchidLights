@@ -978,16 +978,18 @@ paths:
                 properties:
                   manufacturer: {type: string}
                   model: {type: string}
-                  name: {type: string}
-                  type: {type: string}
+                  type: {type: string, description: "Familia del perfil: Moving Head, LED Bar, Dimmer…"}
                   modes:
                     type: array
+                    description: |
+                      Los modos, con cuántos canales ocupa cada uno. El nombre
+                      tiene que ir exacto al patchear, y el número de canales es
+                      lo que decide dónde cabe.
                     items:
                       type: object
                       properties:
                         name: {type: string}
                         channels: {type: integer}
-                  channels: {type: array, items: {type: object, additionalProperties: true}}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
 
@@ -2116,7 +2118,8 @@ paths:
               properties:
                 type:
                   type: string
-                  enum: [Frame, SoloFrame, Button, Slider, XYPad, CueList, Label, Clock, AudioTriggers, Speeddial, Animation, Matrix]
+                  description: Los once tipos de QLC+. No distingue mayúsculas.
+                  enum: [Frame, SoloFrame, Button, Slider, Label, SpeedDial, XYPad, CueList, Clock, AudioTriggers, Matrix]
                 parent: {type: integer, description: "El marco que lo contiene."}
       responses:
         "201":
@@ -2242,6 +2245,92 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/vc/widgets/{id}/press:
+    post:
+      tags: [consola]
+      summary: Pulsar un widget de la consola, con su semántica propia.
+      description: |
+        Un widget es más que la función a la que apunta: un botón en modo flash
+        se enciende mientras se sujeta y se apaga al soltar, uno dentro de un
+        marco solo mata a sus hermanos, y Blackout y Stop All no son funciones
+        en absoluto.
+
+        Esta ruta pasa por el mismo sitio que un ala MIDI, así que hace
+        exactamente lo mismo que hacer clic. Arrancar la función a mano
+        —`POST /functions/{id}/start`— es otra cosa: no sabe de flash, no sabe
+        de marcos solo, y no es lo que hace ese botón.
+      parameters: [{$ref: "#/components/parameters/widgetId"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                # Citado: en YAML 1.1 `on` sin comillas es el booleano true, y
+                # el campo acabó llamándose "true" en el JSON generado.
+                "on":
+                  type: boolean
+                  default: true
+                  description: |
+                    El flanco. Ausente es una pulsación. Un botón en flash
+                    necesita también el `false` de soltar: quien solo sabe
+                    pulsar deja el rig encendido.
+      responses:
+        "200":
+          description: |
+            El estado en el que quedó — 1 encendido, 0 apagado, -1 nada pasó
+            (una suelta que un toggle ignora). Es lo que hizo la pulsación, no
+            lo que dice el motor: `start()` solo encola, así que preguntárselo
+            un tick antes de tiempo contesta «apagado» sobre un botón que
+            acaba de encenderse.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: integer}
+                  state: {type: integer, enum: [-1, 0, 1]}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/vc/widgets/{id}/level:
+    put:
+      tags: [consola]
+      summary: Mover un fader de la consola.
+      parameters: [{$ref: "#/components/parameters/widgetId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: {type: integer, minimum: 0, maximum: 255}
+      responses:
+        "200":
+          description: Dónde quedó.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: integer}
+                  value: {type: integer}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: |
+            Ese id no mueve nada — una etiqueta, un marco, o un fader que la
+            fuente de niveles nunca aprendió. Se dice, en vez de tragárselo: un
+            fader que contesta 200 y no hace nada es el peor control que hay.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
   /api/v1/vc/widgets/ids:
     post:
@@ -3245,10 +3334,21 @@ paths:
                 type: object
                 properties:
                   value: {type: integer, minimum: 0, maximum: 255}
-                  valueMode: {type: string, enum: [limit, reduce]}
-                  channelMode: {type: string, enum: [intensity, all]}
+                  valueMode:
+                    type: string
+                    description: "`Reduce` escala hacia abajo; `Limit` recorta por arriba."
+                    enum: [Reduce, Limit]
+                  channelMode:
+                    type: string
+                    description: "`Intensity` solo toca los canales de intensidad; `All`, todos."
+                    enum: [Intensity, All]
                   visible: {type: boolean}
-                  input: {type: object, additionalProperties: true}
+                  input:
+                    type: [object, "null"]
+                    description: El control externo atado al fader grande.
+                    properties:
+                      universe: {type: integer}
+                      channel: {type: integer}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
     put:
@@ -3261,9 +3361,18 @@ paths:
               type: object
               properties:
                 value: {type: integer, minimum: 0, maximum: 255}
-                valueMode: {type: string, enum: [limit, reduce]}
-                channelMode: {type: string, enum: [intensity, all]}
+                valueMode: {type: string, enum: [Reduce, Limit]}
+                channelMode: {type: string, enum: [Intensity, All]}
                 visible: {type: boolean}
+                input:
+                  type: [object, "null"]
+                  description: |
+                    `{universe, channel}` ata, `null` desata, ausente lo deja
+                    como está — el mismo contrato que el control externo de un
+                    widget.
+                  properties:
+                    universe: {type: integer}
+                    channel: {type: integer}
       responses:
         "200":
           description: Cómo quedó.
@@ -3564,7 +3673,10 @@ components:
         id: {type: integer}
         type:
           type: string
-          enum: [Frame, SoloFrame, Button, Slider, XYPad, CueList, Label, Clock, AudioTriggers, Speeddial, Animation, Matrix]
+          description: |
+            En minúscula, que es como lo emite el daemon. Al crear se acepta de
+            cualquier forma: `tagForType` no distingue mayúsculas.
+          enum: [frame, soloframe, button, slider, label, speeddial, xypad, cuelist, clock, audiotriggers, matrix]
         caption: {type: string}
         x: {type: integer}
         y: {type: integer}

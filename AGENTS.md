@@ -122,12 +122,13 @@ dice es lo que el código lee.
 
 ```bash
 curl -s "$BASE/library?q=martin" | jq
-curl -s "$BASE/library/Martin/MAC%20500" | jq '.modes'
+curl -s "$BASE/library/Martin/MAC%20Aura" | jq '.modes'
 ```
 
-El nombre del modo tiene que ser exacto, y **el número de canales del modo es lo
-que decide el patch**. Patchear con el modo equivocado da un rig que se enciende
-y no obedece.
+El nombre del modelo y el del modo van **exactos**, tal y como los lista la
+librería: es `MAC500`, no `MAC 500`. Y **el número de canales del modo es lo que
+decide el patch**: patchear con el modo equivocado da un rig que se enciende y
+no obedece.
 
 ### 2. Mira dónde cabe
 
@@ -142,7 +143,7 @@ enciende la sala.
 
 ```bash
 curl -s -X POST "$BASE/fixtures" -H 'Content-Type: application/json' -d '{
-  "manufacturer": "Martin", "model": "MAC 500", "mode": "Mode 1",
+  "manufacturer": "Martin", "model": "MAC Aura", "mode": "Standard",
   "universe": 1, "address": 1, "quantity": 6, "gap": 0
 }'
 ```

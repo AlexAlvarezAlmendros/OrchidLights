@@ -37,6 +37,7 @@
 #include "jsonview.h"
 #include "livefeed.h"
 #include "virtualconsole.h"
+#include "widgetactions.h"
 #include "consolelayout.h"
 #include "audiotriggers.h"
 #include "audioplugincache.h"
@@ -802,6 +803,86 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
+    /* Working the console itself, and not the functions behind it.
+     *
+       A widget is more than the function it points at: a button in flash mode
+       lights while it is held and lets go, one in a solo frame kills its
+       siblings, and Blackout and Stop All are not functions at all.
+       WidgetActions::pressButton knows all of that -- it is what a MIDI wing
+       goes through -- but until now nothing but a MIDI wing could reach it.
+       The browser composes the same behaviour client-side out of the widget's
+       action, which works only because the browser has read /vc first.
+     *
+       A caller with a shell and curl had neither option, so a console built
+       through this API could not be operated through it. One call, and the
+       semantics live where they already lived. */
+    m_server->route("/api/v1/vc/widgets/<arg>/press", QHttpServerRequest::Method::Post,
+                    [this, denied, refused, maskForbidden](const QString &rawId,
+                                                           const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Widget id must be a number"));
+
+        VcWidget root;
+        if (VirtualConsole::parse(m_engine->preservedSections(), root) == false)
+            return jsonError(StatusCode::NotFound, QStringLiteral("This project has no Virtual Console"));
+
+        const VcWidget *widget = VirtualConsole::find(root, id);
+        if (widget == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No widget with id %1").arg(id));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        /* Absent means a press. A flash button needs the release too, and a
+           caller that can only press would leave the rig lit. */
+        const bool on = body.value("on").toBool(true);
+
+        const int state = WidgetActions::pressButton(m_engine, *widget, on);
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        /* What the press DID, not what isRunning() says: start() only
+           schedules, so reading the engine back a tick early reports "off"
+           for a button that just went on. */
+        response["state"] = state;
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/vc/widgets/<arg>/level", QHttpServerRequest::Method::Put,
+                    [this, denied, refused, maskForbidden](const QString &rawId,
+                                                           const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Widget id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const int value = body.value("value").toInt(-1);
+        if (value < 0 || value > 255)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("\"value\" is 0 to 255"));
+
+        /* False is "this id moves nothing" -- a label, a frame, or a slider
+           the level source was never taught. Said as a 404 rather than
+           swallowed, because a fader that answers 200 and does nothing is the
+           worst control there is. */
+        if (WidgetActions::setSliderLevel(m_engine, id, uchar(value)) == false)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("Widget %1 is not a fader that moves anything").arg(id));
+        }
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        response["value"] = value;
+        return QHttpServerResponse(response);
+    });
+
     /* What a universe can be patched to. Without this the operator would be
        guessing at plugin and line names, which the writer then refuses. */
     /* The fixture library. 1735 definitions is far too many to hand over in one
@@ -871,7 +952,10 @@ void ApiServer::registerRoutes()
         QJsonObject body;
         body["manufacturer"] = definition->manufacturer();
         body["model"] = definition->model();
-        body["type"] = definition->type();
+        /* The name, not the enum's number. GET /fixtures already answers
+           "Moving Head" here, and a client picking a lamp out of a library of
+           1735 cannot do anything with a 9. */
+        body["type"] = QLCFixtureDef::typeToString(definition->type());
         body["modes"] = modes;
         return QHttpServerResponse(body);
     });
