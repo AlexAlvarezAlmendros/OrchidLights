@@ -118,6 +118,11 @@ Ensaya siempre primero:
 node mcp/dist/cli.js diff show.yaml
 ```
 
+Hay un ejemplo completo y comprobado en
+[`docs/api/ejemplo-show.yaml`](docs/api/ejemplo-show.yaml): cuatro pares de LED
+colocados en el escenario, un dímer genérico, dos escenas y un chaser que las
+encadena, todo desde cero sobre una mesa vacía.
+
 > **Lo que el documento no lleva**, dicho aquí y no escondido: el cuerpo de un
 > Show. Una timeline son posiciones absolutas que no se reconcilian por nombre
 > sin inventarle una identidad a cada barra. Un Show se exporta como función,
