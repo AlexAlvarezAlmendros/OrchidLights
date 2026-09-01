@@ -2,10 +2,7 @@
   "mcpServers": {
     "orchidlights": {
       "command": "node",
-      "args": ["./mcp/dist/mcp.js"],
-      "env": {
-        "ORCHID_URL": "http://127.0.0.1:9998"
-      }
+      "args": ["./mcp/dist/mcp.js"]
     }
   }
 }
