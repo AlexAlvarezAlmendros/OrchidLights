@@ -2480,6 +2480,11 @@ paths:
     put:
       tags: [plano]
       summary: Las dimensiones del escenario.
+      description: |
+        En **unidades** —metros o pies—, no en milímetros: un escenario mide 12
+        de ancho, no 12000. Las posiciones de las fixtures sí van en milímetros
+        contra esta rejilla, y confundir las dos es el error natural. Un lado
+        mide entre 1 y 1000.
       requestBody:
         required: true
         content:
@@ -2487,9 +2492,9 @@ paths:
             schema:
               type: object
               properties:
-                width: {type: number}
+                width: {type: number, minimum: 1, maximum: 1000}
                 height: {type: number}
-                depth: {type: number}
+                depth: {type: number, minimum: 1, maximum: 1000}
                 units: {type: string, enum: [meters, feet]}
       responses:
         "200":

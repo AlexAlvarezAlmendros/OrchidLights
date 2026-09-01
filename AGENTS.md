@@ -61,7 +61,7 @@ ni el viejo ni el nuevo. Por eso hay un documento declarativo:
 ```yaml
 orchidlights: 1
 
-stage: {width: 12000, height: 6000, depth: 8000, units: meters}
+stage: {width: 12, height: 6, depth: 8, units: meters}   # unidades, no mm
 
 universes:
   - name: Universe 1
@@ -282,13 +282,15 @@ de vuelta.
 
 ```bash
 curl -s -X PUT "$BASE/plan/grid" -H 'Content-Type: application/json' \
-  -d '{"width": 12000, "height": 6000, "depth": 8000, "units": "meters"}'
+  -d '{"width": 12, "height": 6, "depth": 8, "units": "meters"}'
 
 curl -s -X PUT "$BASE/plan/fixtures/4" -H 'Content-Type: application/json' \
   -d '{"x": 2000, "y": 500, "z": 4000, "rotation": 180, "invertTilt": true}'
 ```
 
-Milímetros contra la rejilla, grados en las rotaciones. Un foco colgado boca
+**La rejilla va en unidades y las posiciones en milímetros contra ella**: un
+escenario mide 12 de ancho, no 12000, y un lado mide entre 1 y 1000. Grados en
+las rotaciones. Un foco colgado boca
 abajo se apunta invirtiendo un eje; ignorarlo lo manda al techo. Se guarda en el
 `<Monitor>` de QLC+, así que el plano abre igual en el escritorio.
 

@@ -324,6 +324,50 @@ describe('los canales se dicen por nombre cuando el nombre no miente', () => {
   })
 })
 
+describe('las diferencias fantasma no llegan al plan', () => {
+  it('la rejilla de un grupo no cambia por el orden de las claves', async () => {
+    // El daemon serializa alfabéticamente: {"height":1,"width":4}. El documento
+    // se escribe como se lee: {width: 4, height: 1}. Son la misma rejilla.
+    const { actions } = await planApply(
+      desk({
+        '/fixture-groups': [
+          { id: 0, name: 'Frontales', size: { height: 1, width: 4 }, fixtures: [0] },
+        ],
+      }),
+      {
+        ...base,
+        fixtureGroups: [
+          { name: 'Frontales', fixtures: ['Cabeza L'], size: { width: 4, height: 1 } },
+        ],
+      },
+    )
+    expect(actions).toEqual([])
+  })
+
+  it('pero el orden de los pasos de un chaser sí cuenta', async () => {
+    const two = {
+      '/functions': [
+        { id: 3, name: 'A', type: 'Scene' },
+        { id: 4, name: 'B', type: 'Scene' },
+        { id: 5, name: 'Ch', type: 'Chaser' },
+      ],
+      '/functions/5/body': {
+        steps: [
+          { function: 3, fadeIn: 0, hold: 0, fadeOut: 0 },
+          { function: 4, fadeIn: 0, hold: 0, fadeOut: 0 },
+        ],
+      },
+      '/functions/3/body': { values: [] },
+      '/functions/4/body': { values: [] },
+    }
+    const { actions } = await planApply(desk(two), {
+      ...base,
+      functions: [{ name: 'Ch', type: 'Chaser', steps: [{ function: 'B' }, { function: 'A' }] }],
+    })
+    expect(actions.map((a) => a.detail)).toContain('2 pasos')
+  })
+})
+
 describe('SpecError', () => {
   it('con un problema, lo dice tal cual', () => {
     expect(new SpecError(['una cosa']).message).toBe('una cosa')

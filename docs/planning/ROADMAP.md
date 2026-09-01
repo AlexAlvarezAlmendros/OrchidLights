@@ -472,8 +472,8 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
   > que `UndoRing` supiera de lotes de varios ámbitos, y eso es otro trabajo.
 
 - [x] **El servidor MCP.** Paquete `mcp/` en TypeScript con el SDK oficial,
-      hablando REST con el daemon. Stdio para Claude Code y OpenCode, `.mcp.json`
-      en el checkout, y sidecar en la carcasa Tauri.
+      hablando REST con el daemon. Stdio para Claude Code y OpenCode, y
+      `.mcp.json` en el checkout para que Claude Code lo encuentre solo.
   - **19 herramientas con forma de tarea, no 139 envoltorios de endpoint.** Un
     agente al que le das 139 herramientas gasta el contexto en elegir. Las que
     importan: describir el proyecto, exportar y aplicar el documento, buscar en
@@ -492,6 +492,9 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
       geometría que devolvía su `GET`, y la consola no se podía operar sin un
       WebSocket. Los tres arreglados; los tres invisibles desde la web, que ya
       sabía sortearlos.
+
+- [ ] **Sidecar en la carcasa Tauri**, para que instalar la app de escritorio
+      instale también el servidor MCP. Hoy hay que construir el paquete a mano.
 
 > **Decidido: acceso total, sin rails.** Un agente puede todo lo que puede la
 > web, el rig en directo incluido. La frontera es el token, no una jaula aparte:

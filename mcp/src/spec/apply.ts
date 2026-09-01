@@ -154,8 +154,37 @@ function duplicates(names: string[], section: string): string[] {
   return [...repeated].map((name) => `${section}: "${name}" aparece dos veces`)
 }
 
+/**
+ * Igualdad estructural, insensible al orden de las claves de un objeto.
+ *
+ * Un `JSON.stringify` a cada lado no vale: `QJsonObject` serializa las claves en
+ * orden alfabético, así que un `{width: 4, height: 1}` escrito a mano vuelve
+ * como `{"height":1,"width":4}` y la comparación dice que ha cambiado. El plan
+ * proponía entonces reescribir la rejilla de un grupo en cada pasada -- una
+ * diferencia fantasma, que es peor que ninguna comparación, porque hace dudar
+ * de las de verdad.
+ *
+ * El orden de un array SÍ cuenta: los pasos de un chaser son una secuencia.
+ */
 function same(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
+  if (a === b) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((entry, index) => same(entry, b[index]))
+  }
+
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+  for (const key of keys) {
+    // Ausente y `undefined` son lo mismo aquí: el daemon omite lo que no tiene
+    // y un documento escrito a mano tampoco lo escribe.
+    if (left[key] === undefined && right[key] === undefined) continue
+    if (!same(left[key], right[key])) return false
+  }
+  return true
 }
 
 /* ---- el plan ---------------------------------------------------------- */
@@ -198,6 +227,7 @@ export async function planApply(
     ),
   )
 
+  problems.push(...checkStage(spec))
   problems.push(...checkReferences(spec, current))
   problems.push(...(await checkPatchable(client, spec)))
   problems.push(...(await checkProfiles(client, spec, current)))
@@ -215,6 +245,36 @@ export async function planApply(
   if (spec.console) actions.push(...(await planConsole(client, spec.console.widgets ?? [])))
 
   return { actions, problems }
+}
+
+/**
+ * Un escenario de un tamaño que el motor no acepta.
+ *
+ * La rejilla va en UNIDADES —metros o pies—, no en milímetros: un escenario
+ * mide 12 de ancho, no 12000. Las posiciones de las fixtures sí van en
+ * milímetros contra ella, y confundir las dos es el error natural. Se
+ * comprueba aquí porque el documento suele empezar por el escenario, y sin
+ * esto el lote falla en su primera acción con veinte por delante -- que es
+ * exactamente lo que este módulo promete no hacer.
+ */
+function checkStage(spec: ShowSpec): string[] {
+  const stage = spec.stage
+  if (!stage) return []
+
+  const problems: string[] = []
+  for (const side of ['width', 'depth'] as const) {
+    const value = stage[side]
+    if (value === undefined) continue
+    if (value < 1 || value > 1000) {
+      problems.push(
+        [
+          `stage: ${side} es ${value}, y un escenario mide entre 1 y 1000 ${stage.units ?? 'unidades'} de lado.`,
+          'La rejilla va en unidades; los milímetros son para colocar las fixtures sobre ella.',
+        ].join(' '),
+      )
+    }
+  }
+  return problems
 }
 
 function checkReferences(spec: ShowSpec, current: Current): string[] {
