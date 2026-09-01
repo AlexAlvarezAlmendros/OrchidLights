@@ -172,5 +172,20 @@ assert body["active"] == [], body["active"]
 print("y soltar la mesa en vivo devuelve el universo a cero")
 PY
 
+# ---------------------------------------------------------------------------
+# Y lo que el daemon contesta tiene la forma que el contrato promete
+# ---------------------------------------------------------------------------
+#
+# Comprobar rutas coge una ruta inventada; comprobar nombres de campo coge un
+# cuerpo mal escrito. Ninguna de las dos coge un "undo" documentado como entero
+# que llega como booleano, y ese es el que hace que un cliente calcule con él y
+# le salga un número que parece razonable y no significa nada. Escribiendo este
+# contrato pasó siete veces.
+#
+# Contra el proyecto de muestra, que es el que tiene una fixture 0 y un
+# universo 1 con los que probar las rutas que llevan parámetros.
+ORCHID_TOKEN=$(cat "$HOME/.orchidlights/api-token" 2>/dev/null || true) \
+    python3 "$ROOT/server/test/openapi-responses.py" "http://127.0.0.1:$PORT" "$ROOT" || exit 1
+
 echo
 echo "PASS: el contrato y el código dicen lo mismo, y lo que se escribe se lee."

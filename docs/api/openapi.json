@@ -314,10 +314,11 @@
            "description": "Etiqueta de lo deshecho."
           },
           "undo": {
-           "type": "integer"
+           "type": "boolean",
+           "description": "Si queda algo más que deshacer."
           },
           "redo": {
-           "type": "integer"
+           "type": "boolean"
           }
          }
         }
@@ -351,10 +352,11 @@
            "type": "string"
           },
           "undo": {
-           "type": "integer"
+           "type": "boolean"
           },
           "redo": {
-           "type": "integer"
+           "type": "boolean",
+           "description": "Si queda algo más que rehacer."
           }
          }
         }
@@ -376,9 +378,10 @@
      "sistema"
     ],
     "summary": "El anillo de undo, para enseñárselo a alguien.",
+    "description": "El anillo guarda **200 entradas**. Un lote más largo que eso se come su\npropio principio, y entonces no se puede deshacer entero: lo que se\naplica en bloque conviene aplicarlo sobre un proyecto guardado, que es\nel punto al que siempre se puede volver.\n\n`undo` y `redo` son **booleanos** —si queda algo a cada lado—, no\ncontadores. `GET /vc/history` sí cuenta, porque la consola lleva su\npropio historial con profundidad.\n",
     "responses": {
      "200": {
-      "description": "Las entradas y cuántas quedan a cada lado.",
+      "description": "Las entradas, de la más antigua a la más reciente.",
       "content": {
        "application/json": {
         "schema": {
@@ -388,14 +391,27 @@
            "type": "array",
            "items": {
             "type": "object",
-            "additionalProperties": true
+            "properties": {
+             "label": {
+              "type": "string",
+              "description": "Qué operación fue."
+             },
+             "scope": {
+              "type": "integer",
+              "description": "Sobre qué clase de cosa."
+             },
+             "items": {
+              "type": "integer",
+              "description": "Cuántas entidades tocó."
+             }
+            }
            }
           },
           "undo": {
-           "type": "integer"
+           "type": "boolean"
           },
           "redo": {
-           "type": "integer"
+           "type": "boolean"
           }
          }
         }
@@ -735,9 +751,9 @@
           },
           "projects": {
            "type": "array",
+           "description": "Los nombres de fichero, sin ruta — que es lo que aceptan las rutas de proyecto.",
            "items": {
-            "type": "object",
-            "additionalProperties": true
+            "type": "string"
            }
           }
          }
@@ -757,6 +773,12 @@
      "proyecto"
     ],
     "summary": "Los últimos proyectos abiertos.",
+    "description": "Exige el token aunque la mesa escuche solo en loopback: son rutas de\ndisco de esta máquina, y «cualquier cosa en este ordenador puede usar la\nmesa» no debe crecer hasta «cualquier cosa que alcance este socket puede\nleer por dónde ando».\n",
+    "security": [
+     {
+      "bearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "Con una marca de si el fichero sigue estando.",
@@ -1308,7 +1330,8 @@
           "type": "string"
          },
          "mode": {
-          "type": "string"
+          "type": "string",
+          "description": "El nombre exacto del modo, de los que lista\n`GET /library/{fabricante}/{modelo}`.\n\nCon `manufacturer` y `model` a `Generic` se patchea un\ndímer genérico, que no es un fichero de la librería sino\nalgo que el motor sintetiza: ahí el modo dice cuántos\ncanales tiene, como \"6 Channel\".\n"
          },
          "name": {
           "type": "string",
@@ -1843,13 +1866,14 @@
          "type": "object",
          "properties": {
           "total": {
-           "type": "integer"
+           "type": "integer",
+           "description": "Cuántos perfiles tiene la librería entera."
           },
           "manufacturers": {
            "type": "array",
+           "description": "Los nombres, tal cual se pasan a `GET /library/{manufacturer}`.",
            "items": {
-            "type": "object",
-            "additionalProperties": true
+            "type": "string"
            }
           }
          }
@@ -2382,11 +2406,22 @@
         "properties": {
          "fixtures": {
           "type": "array",
-          "description": "EFX: las cabezas que dibujan la figura.",
+          "description": "\"EFX: qué fixtures dibujan la figura, por id. También el\njuego de fixtures contra el que una Scene resuelve sus\npalettes.\"\n",
           "items": {
-           "type": "object",
-           "additionalProperties": true
+           "type": "integer",
+           "minimum": 0
           }
+         },
+         "geometry": {
+          "type": "object",
+          "description": "\"EFX: la figura — width, height, xOffset, yOffset, rotation,\nstartOffset, xFrequency, yFrequency, xPhase, yPhase. Se\naceptan aquí dentro, que es como los devuelve el GET, y\ntambién sueltos en el nivel de arriba.\"\n",
+          "additionalProperties": {
+           "type": "integer"
+          }
+         },
+         "propagation": {
+          "type": "string",
+          "description": "EFX: en qué orden recorren las cabezas la figura."
          },
          "algorithm": {
           "type": "string",
@@ -3154,9 +3189,9 @@
          "properties": {
           "algorithms": {
            "type": "array",
+           "description": "Los nombres, tal cual se ponen en el cuerpo de una matriz.",
            "items": {
-            "type": "object",
-            "additionalProperties": true
+            "type": "string"
            }
           }
          }
@@ -6752,16 +6787,15 @@
          "properties": {
           "inputs": {
            "type": "array",
+           "description": "Nombres de dispositivo.",
            "items": {
-            "type": "object",
-            "additionalProperties": true
+            "type": "string"
            }
           },
           "outputs": {
            "type": "array",
            "items": {
-            "type": "object",
-            "additionalProperties": true
+            "type": "string"
            }
           },
           "selected": {
@@ -6989,10 +7023,12 @@
            "type": "integer"
           },
           "held": {
-           "type": "array",
-           "items": {
-            "type": "object",
-            "additionalProperties": true
+           "type": "object",
+           "description": "Indexado por canal del universo, 1-based, igual que el PUT.",
+           "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
            }
           }
          }
@@ -7114,10 +7150,12 @@
            "type": "integer"
           },
           "held": {
-           "type": "array",
-           "items": {
-            "type": "object",
-            "additionalProperties": true
+           "type": "object",
+           "description": "Indexado por canal del universo, 1-based, igual que el PUT.",
+           "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
            }
           }
          }
@@ -7496,14 +7534,12 @@
          "type": "object",
          "properties": {
           "count": {
-           "type": "integer"
+           "type": "integer",
+           "description": "Cuántos canales se llevaría en total."
           },
           "bare": {
-           "type": "array",
-           "items": {
-            "type": "object",
-            "additionalProperties": true
-           }
+           "type": "integer",
+           "description": "Cuántos de ellos no caen en ningún grupo de canales."
           },
           "groups": {
            "type": "array",

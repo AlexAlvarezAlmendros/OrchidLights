@@ -205,8 +205,8 @@ paths:
                 type: object
                 properties:
                   undone: {type: string, description: "Etiqueta de lo deshecho."}
-                  undo: {type: integer}
-                  redo: {type: integer}
+                  undo: {type: boolean, description: "Si queda algo más que deshacer."}
+                  redo: {type: boolean}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
@@ -223,8 +223,8 @@ paths:
                 type: object
                 properties:
                   redone: {type: string}
-                  undo: {type: integer}
-                  redo: {type: integer}
+                  undo: {type: boolean}
+                  redo: {type: boolean, description: "Si queda algo más que rehacer."}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
@@ -232,17 +232,33 @@ paths:
     get:
       tags: [sistema]
       summary: El anillo de undo, para enseñárselo a alguien.
+      description: |
+        El anillo guarda **200 entradas**. Un lote más largo que eso se come su
+        propio principio, y entonces no se puede deshacer entero: lo que se
+        aplica en bloque conviene aplicarlo sobre un proyecto guardado, que es
+        el punto al que siempre se puede volver.
+
+        `undo` y `redo` son **booleanos** —si queda algo a cada lado—, no
+        contadores. `GET /vc/history` sí cuenta, porque la consola lleva su
+        propio historial con profundidad.
       responses:
         "200":
-          description: Las entradas y cuántas quedan a cada lado.
+          description: Las entradas, de la más antigua a la más reciente.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  entries: {type: array, items: {type: object, additionalProperties: true}}
-                  undo: {type: integer}
-                  redo: {type: integer}
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: {type: string, description: "Qué operación fue."}
+                        scope: {type: integer, description: "Sobre qué clase de cosa."}
+                        items: {type: integer, description: "Cuántas entidades tocó."}
+                  undo: {type: boolean}
+                  redo: {type: boolean}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/access:
@@ -397,13 +413,23 @@ paths:
                 type: object
                 properties:
                   directory: {type: string}
-                  projects: {type: array, items: {type: object, additionalProperties: true}}
+                  projects:
+                    type: array
+                    description: Los nombres de fichero, sin ruta — que es lo que aceptan las rutas de proyecto.
+                    items: {type: string}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/project/recents:
     get:
       tags: [proyecto]
       summary: Los últimos proyectos abiertos.
+      description: |
+        Exige el token aunque la mesa escuche solo en loopback: son rutas de
+        disco de esta máquina, y «cualquier cosa en este ordenador puede usar la
+        mesa» no debe crecer hasta «cualquier cosa que alcance este socket puede
+        leer por dónde ando».
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: Con una marca de si el fichero sigue estando.
@@ -661,7 +687,16 @@ paths:
               properties:
                 manufacturer: {type: string}
                 model: {type: string}
-                mode: {type: string}
+                mode:
+                  type: string
+                  description: |
+                    El nombre exacto del modo, de los que lista
+                    `GET /library/{fabricante}/{modelo}`.
+
+                    Con `manufacturer` y `model` a `Generic` se patchea un
+                    dímer genérico, que no es un fichero de la librería sino
+                    algo que el motor sintetiza: ahí el modo dice cuántos
+                    canales tiene, como "6 Channel".
                 name: {type: string, description: "Si falta, se usa el modelo."}
                 universe: {type: integer, minimum: 1, default: 1}
                 address: {type: integer, minimum: 1, description: "Primer canal, contado desde 1."}
@@ -887,8 +922,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  total: {type: integer}
-                  manufacturers: {type: array, items: {type: object, additionalProperties: true}}
+                  total: {type: integer, description: Cuántos perfiles tiene la librería entera.}
+                  manufacturers:
+                    type: array
+                    description: Los nombres, tal cual se pasan a `GET /library/{manufacturer}`.
+                    items: {type: string}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/library/{manufacturer}:
@@ -1112,7 +1150,22 @@ paths:
             schema:
               type: object
               properties:
-                fixtures: {type: array, description: "EFX: las cabezas que dibujan la figura.", items: {type: object, additionalProperties: true}}
+                fixtures:
+                  type: array
+                  description: |
+                    "EFX: qué fixtures dibujan la figura, por id. También el
+                    juego de fixtures contra el que una Scene resuelve sus
+                    palettes."
+                  items: {type: integer, minimum: 0}
+                geometry:
+                  type: object
+                  description: |
+                    "EFX: la figura — width, height, xOffset, yOffset, rotation,
+                    startOffset, xFrequency, yFrequency, xPhase, yPhase. Se
+                    aceptan aquí dentro, que es como los devuelve el GET, y
+                    también sueltos en el nivel de arriba."
+                  additionalProperties: {type: integer}
+                propagation: {type: string, description: "EFX: en qué orden recorren las cabezas la figura."}
                 algorithm: {type: string, description: "EFX o RGBMatrix."}
                 fixtureGroup: {type: integer, description: "RGBMatrix: el grupo sobre el que corre."}
                 colors: {type: array, description: "RGBMatrix: hasta cinco huecos de color.", items: {type: [string, "null"]}}
@@ -1426,7 +1479,13 @@ paths:
           description: Los nombres, con sus propiedades.
           content:
             application/json:
-              schema: {type: object, properties: {algorithms: {type: array, items: {type: object, additionalProperties: true}}}}
+              schema:
+                type: object
+                properties:
+                  algorithms:
+                    type: array
+                    description: Los nombres, tal cual se ponen en el cuerpo de una matriz.
+                    items: {type: string}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/script/check:
@@ -2956,8 +3015,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  inputs: {type: array, items: {type: object, additionalProperties: true}}
-                  outputs: {type: array, items: {type: object, additionalProperties: true}}
+                  inputs: {type: array, description: Nombres de dispositivo., items: {type: string}}
+                  outputs: {type: array, items: {type: string}}
                   selected: {type: string}
                   capturing: {type: boolean}
                   canPlay: {type: boolean}
@@ -3051,7 +3110,14 @@ paths:
           description: Los canales sujetos.
           content:
             application/json:
-              schema: {type: object, properties: {universe: {type: integer}, held: {type: array, items: {type: object, additionalProperties: true}}}}
+              schema:
+                type: object
+                properties:
+                  universe: {type: integer}
+                  held:
+                    type: object
+                    description: Indexado por canal del universo, 1-based, igual que el PUT.
+                    additionalProperties: {type: integer, minimum: 0, maximum: 255}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -3104,7 +3170,14 @@ paths:
           description: Los canales sujetos.
           content:
             application/json:
-              schema: {type: object, properties: {universe: {type: integer}, held: {type: array, items: {type: object, additionalProperties: true}}}}
+              schema:
+                type: object
+                properties:
+                  universe: {type: integer}
+                  held:
+                    type: object
+                    description: Indexado por canal del universo, 1-based, igual que el PUT.
+                    additionalProperties: {type: integer, minimum: 0, maximum: 255}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -3257,8 +3330,8 @@ paths:
               schema:
                 type: object
                 properties:
-                  count: {type: integer}
-                  bare: {type: array, items: {type: object, additionalProperties: true}}
+                  count: {type: integer, description: Cuántos canales se llevaría en total.}
+                  bare: {type: integer, description: Cuántos de ellos no caen en ningún grupo de canales.}
                   groups: {type: array, items: {type: object, additionalProperties: true}}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}

@@ -2046,7 +2046,24 @@ void ApiServer::registerRoutes()
                 }
             }
 
-            result = DocWriter::setEfx(doc, id, body.value("algorithm").toString(), body,
+            /* setEfx reads width, height, xOffset and the rest off the top
+               level, but GET returns them nested under "geometry" -- so the
+               write did not accept what the read emitted, and a client that
+               fed one into the other silently changed nothing. Flattened here
+               rather than in every caller: symmetry between read and write is
+               what lets anything round-trip a project through this API.
+
+               A key written both ways keeps the outer one, because that is
+               the one the caller wrote most deliberately. */
+            QJsonObject efxBody = body;
+            const QJsonObject geometry = body.value("geometry").toObject();
+            for (auto it = geometry.constBegin(); it != geometry.constEnd(); ++it)
+            {
+                if (efxBody.contains(it.key()) == false)
+                    efxBody.insert(it.key(), it.value());
+            }
+
+            result = DocWriter::setEfx(doc, id, efxBody.value("algorithm").toString(), efxBody,
                                        hasFixtures ? &fixtures : nullptr);
             break;
         }
