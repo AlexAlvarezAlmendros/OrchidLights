@@ -285,6 +285,85 @@ aparece igualmente, en su sitio geométrico. Un botón añadido en QLC+ después
 guardar el orden seguiría siendo visible — esconderlo sería el peor fallo
 posible, porque el operador ni siquiera sabría qué le falta.
 
+## Agentes
+
+Un agente de Claude Code o de OpenCode puede montar un proyecto entero —patch,
+salida DMX, entrada MIDI, el rig colocado en el escenario 3D, escenas, chasers y
+la consola— y también manejarlo en directo. `AGENTS.md` es lo que lee antes de
+tocar nada: las reglas que no se ven, el camino dorado y cómo comprobar el
+trabajo.
+
+```bash
+cd mcp && pnpm install && pnpm build
+claude mcp add orchidlights -- node "$PWD/dist/mcp.js"
+```
+
+**Diecinueve herramientas, no ciento treinta y nueve.** Una operación por cosa
+que se puede hacer es lo correcto para un API y lo peor posible para un agente:
+con ciento treinta y nueve herramientas delante, el contexto se gasta en elegir.
+Aquí hay una por *tarea*, más `orchid_request` para las otras ciento veinte, con
+el índice de rutas como recurso para encontrarlas.
+
+**Y un CLI**, porque un agente vive en una shell y ya sabe usarla:
+
+```bash
+orchidctl export -o show.yaml     # el proyecto, como documento
+orchidctl diff show.yaml          # qué haría, sin hacerlo
+orchidctl apply show.yaml --save
+orchidctl dmx 1                   # ¿ha llegado la luz?
+```
+
+### El proyecto como un archivo de texto
+
+Montar un show llamada a llamada son doscientas peticiones en orden, y un fallo
+a mitad deja el proyecto en un estado que no es ni el viejo ni el nuevo. El
+documento declarativo lo convierte en una operación:
+
+```yaml
+orchidlights: 1
+universes:
+  - name: Universe 1
+    output: {plugin: ArtNet, line: eth0}
+    input:  {plugin: MIDI, line: BCF2000, profile: Behringer BCF2000}
+fixtures:
+  - name: Cabeza L
+    manufacturer: Martin
+    model: MAC Aura
+    mode: Standard
+    universe: 1
+    address: 1
+    stage: {x: 2000, y: 500, z: 4000, rotation: 180, invertTilt: true}
+functions:
+  - name: Azul frontal
+    type: Scene
+    values:
+      - {fixture: Cabeza L, channel: Dimmer, value: 255}
+```
+
+**Se direcciona por nombre, nunca por id**, canales incluidos: los ids los
+reparte el motor, así que un documento que hablara de ellos solo se podría
+aplicar sobre el proyecto del que salió. `channel: Dimmer` además sobrevive a un
+cambio de modo, que es donde `channel: 6` deja de significar lo que decía. (Si
+el perfil tiene dos canales llamados igual, el exportador escribe el número:
+ahí el nombre mentiría.)
+
+**Se valida entero antes de tocar nada** —nombres repetidos, referencias a lo
+que no existe, plugins que esta máquina no tiene, modos que ese perfil no
+tiene—, **aplicarlo dos veces no hace nada la segunda**, y **lo que no menciona
+no se borra**: un documento parcial es lo normal, y leer el silencio como «borra
+el resto» es perder un show por omisión.
+
+`export → apply → export` es **punto fijo**, comprobado en CI sobre el
+`Sample.qxw` que distribuye QLC+: 13 fixtures, 114 funciones, **96 escenas valor
+a valor y 13 chasers paso a paso**. Sin eso, exportar y volver a aplicar sería
+una forma elaborada de corromper un show.
+
+Escribir un cliente que usara el API en serio destapó, de paso, tres huecos que
+desde la web no se veían porque la web ya sabía sortearlos: no se podía parchear
+un dímer genérico —la fixture más común que existe—, el `PUT` de un EFX no
+aceptaba la geometría que devolvía su propio `GET`, y la consola no se podía
+operar sin sostener un WebSocket.
+
 ## Latencia
 
 El compromiso de F2 es **≤ 50 ms de *tap* a DMX**. Medido con

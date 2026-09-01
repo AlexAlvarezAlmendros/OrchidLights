@@ -429,41 +429,69 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
     Cursor: cómo levantar el daemon headless, dónde está el token, y el camino
     dorado para construir un show.
 
-- [ ] **El spec: exportar.** `GET /api/v1/spec` devuelve el `.qxw` cargado como
-      un documento declarativo, versionado, con esquema en
-      `docs/api/showspec.schema.json`: universos con su patch de entrada y
-      salida, fixtures con dirección y sitio en el escenario, grupos, funciones
-      de los diez tipos, palettes y la consola entera con su disposición.
+> **Dónde acabó viviendo, y por qué no en el daemon.** El plan decía
+> `GET /api/v1/spec` y `POST /api/v1/spec/apply` en C++. El aplicador iba a ser,
+> en cualquier caso, una composición de llamadas a `DocWriter`, cada una con su
+> propia entrada en el anillo de undo — así que ponerlo dentro del proceso no
+> compraba ni atomicidad ni un undo único, que eran las dos razones para
+> ponerlo ahí. Vive en `mcp/`, en TypeScript, sobre el REST que ya estaba
+> completo, y desde ahí lo usan las tres superficies: el MCP, el CLI y quien
+> importe el paquete. Lo que sí se paga: un cliente que no sea Node no tiene el
+> documento; tiene las 139 operaciones.
+
+- [x] **El spec: exportar.** El `.qxw` cargado como un documento declarativo
+      versionado: universos con su patch de entrada y salida, fixtures con
+      dirección y sitio en el escenario, grupos, funciones de los diez tipos y la
+      consola entera.
   - **Todo direccionado por nombre**, no por id. Es la única forma de que un
     archivo escrito a mano se pueda aplicar dos veces.
 
-- [ ] **El spec: aplicar.** `POST /api/v1/spec/apply` calcula el diff contra el
-      proyecto cargado y lo aplica.
-  - **`?dryRun=1` devuelve el plan sin tocar nada.** Un agente que no puede
-    ensayar es un agente que aprende rompiendo.
-  - **Idempotente**: aplicar dos veces el mismo archivo no crea nada la segunda.
-  - **Una sola entrada de undo para el lote entero**, no doscientas. Un operador
-    tiene que poder deshacer «lo que hizo el agente» con un `Ctrl+Z`, no con
-    doscientos.
+- [x] **El spec: aplicar.** Calcula el diff contra el proyecto cargado y lo
+      aplica, sección por sección, con las llamadas del REST que ya existían.
+  - **`dryRun` devuelve el plan sin tocar nada.** Un agente que no puede ensayar
+    es un agente que aprende rompiendo.
+  - **Idempotente**: aplicar dos veces el mismo archivo no hace nada la segunda.
+  - **Se valida entero antes de tocar nada**, y se dicen todos los problemas de
+    golpe: nombres repetidos, referencias a lo que no existe, plugins que esta
+    máquina no tiene, perfiles que no están en la librería, modos que ese perfil
+    no tiene. Aplicar la mitad de un show deja un proyecto del que nadie sabe
+    qué mitad está mirando.
   - **No borra lo que el archivo no menciona** salvo que se pida `prune`. Un
     spec parcial es lo normal; interpretarlo como «borra el resto» es perder un
     show por omisión.
-  - `export → apply → export` es **punto fijo** sobre los `.qxw` de
-    `server/test/data`, comprobado en CI. Sin eso, exportar y volver a aplicar
-    es una forma elaborada de corromper un proyecto.
+  - `export → apply → export` es **punto fijo**, comprobado en CI sobre el
+    `Sample.qxw` de QLC+: 13 fixtures, 114 funciones, 96 escenas valor a valor y
+    13 chasers paso a paso. Sin eso, exportar y volver a aplicar es una forma
+    elaborada de corromper un proyecto.
 
-- [ ] **El servidor MCP.** Paquete `mcp/` en TypeScript con el SDK oficial,
+  > **Sobre el undo, lo que no se cumplió.** El plan pedía una sola entrada para
+  > el lote entero. No la hay: cada llamada deja la suya, y un lote de 355 se
+  > come el anillo, que guarda 200. Un lote grande no se deshace entero, así que
+  > se aplica sobre un proyecto guardado — que es el punto al que siempre se
+  > puede volver — y eso es lo que dice el informe. Una entrada única exigiría
+  > que `UndoRing` supiera de lotes de varios ámbitos, y eso es otro trabajo.
+
+- [x] **El servidor MCP.** Paquete `mcp/` en TypeScript con el SDK oficial,
       hablando REST con el daemon. Stdio para Claude Code y OpenCode, `.mcp.json`
       en el checkout, y sidecar en la carcasa Tauri.
-  - **~15 herramientas con forma de tarea, no 134 envoltorios de endpoint.** Un
-    agente al que le das 134 herramientas gasta el contexto en elegir. Las que
-    importan: describir el proyecto, exportar y aplicar el spec, buscar en la
-    librería de 1.735 perfiles, disparar y parar funciones, **leer el universo
-    de vuelta** —el bucle de verificación—, y guardar.
+  - **19 herramientas con forma de tarea, no 139 envoltorios de endpoint.** Un
+    agente al que le das 139 herramientas gasta el contexto en elegir. Las que
+    importan: describir el proyecto, exportar y aplicar el documento, buscar en
+    la librería de 1.735 perfiles, disparar y parar funciones, pulsar la
+    consola, **leer el universo de vuelta** —el bucle de verificación—, y
+    guardar. Más `orchid_request`, que es la salida de emergencia para las otras
+    120: el índice de rutas viaja como recurso, así que se encuentran y se
+    llaman sin que nadie las envuelva antes.
 
-- [ ] **El CLI.** `orchidctl`, porque un agente de Claude Code o de OpenCode vive
-      en una shell y ya sabe usarla: `orchidctl export > show.yaml`,
-      `orchidctl apply --dry-run show.yaml`, `orchidctl dmx 1`, `orchidctl run`.
+- [x] **El CLI.** `orchidctl`, porque un agente de Claude Code o de OpenCode vive
+      en una shell y ya sabe usarla: `orchidctl export -o show.yaml`,
+      `orchidctl diff show.yaml`, `orchidctl dmx 1`, `orchidctl run "Azul"`.
+
+- [x] **Y tres huecos del daemon que solo salieron al usarlo desde fuera**: no
+      se podía parchear un dímer genérico, el `PUT` de un EFX no aceptaba la
+      geometría que devolvía su `GET`, y la consola no se podía operar sin un
+      WebSocket. Los tres arreglados; los tres invisibles desde la web, que ya
+      sabía sortearlos.
 
 > **Decidido: acceso total, sin rails.** Un agente puede todo lo que puede la
 > web, el rig en directo incluido. La frontera es el token, no una jaula aparte:

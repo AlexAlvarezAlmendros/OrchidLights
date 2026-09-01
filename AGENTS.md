@@ -14,6 +14,117 @@ Este documento es para las dos cosas que puede querer un agente aquí:
 
 ---
 
+## Tres formas de entrar, y cuál usar
+
+**MCP**, si tu cliente lo habla. Diecinueve herramientas con forma de tarea, no
+ciento treinta y nueve envoltorios de endpoint: con ciento treinta y nueve
+herramientas delante el contexto se gasta en elegir.
+
+```bash
+cd mcp && pnpm install && pnpm build
+
+# Claude Code, en este checkout: .mcp.json ya lo declara.
+# En cualquier otro sitio:
+claude mcp add orchidlights -- node /ruta/a/OrchidLights/mcp/dist/mcp.js
+
+# OpenCode, en opencode.json:
+#   { "mcp": { "orchidlights": { "type": "local",
+#     "command": ["node", "/ruta/a/OrchidLights/mcp/dist/mcp.js"] } } }
+```
+
+Trae tres recursos que conviene leer antes de construir nada: `orchid://guide`
+(esto mismo), `orchid://routes` (las 139 operaciones en una línea cada una) y
+`orchid://project` (el proyecto cargado, como documento).
+
+**El CLI**, si vives en una shell — que es donde vive un agente de Claude Code o
+de OpenCode:
+
+```bash
+node mcp/dist/cli.js status
+node mcp/dist/cli.js export -o show.yaml
+node mcp/dist/cli.js diff show.yaml        # qué haría, sin hacerlo
+node mcp/dist/cli.js apply show.yaml --save
+node mcp/dist/cli.js dmx 1                 # ¿ha llegado la luz?
+```
+
+**REST a pelo**, con `curl`, para lo que no cubran los dos anteriores. El
+contrato completo está en `GET /api/v1/openapi.json`.
+
+---
+
+## El proyecto como un archivo de texto
+
+Montar un show llamada a llamada son doscientas peticiones en orden, cada una
+con su fallo posible, y un fallo a mitad deja el proyecto en un estado que no es
+ni el viejo ni el nuevo. Por eso hay un documento declarativo:
+
+```yaml
+orchidlights: 1
+
+stage: {width: 12000, height: 6000, depth: 8000, units: meters}
+
+universes:
+  - name: Universe 1
+    output: {plugin: ArtNet, line: eth0}
+    input:  {plugin: MIDI, line: BCF2000, profile: Behringer BCF2000}
+    feedback: {plugin: MIDI, line: BCF2000}
+
+fixtures:
+  - name: Cabeza L
+    manufacturer: Martin
+    model: MAC Aura
+    mode: Standard
+    universe: 1
+    address: 1
+    stage: {x: 2000, y: 500, z: 4000, rotation: 180, invertTilt: true}
+
+functions:
+  - name: Azul frontal
+    type: Scene
+    values:
+      - {fixture: Cabeza L, channel: Dimmer, value: 255}
+      - {fixture: Cabeza L, channel: Blue, value: 255}
+
+  - name: Persecución
+    type: Chaser
+    steps:
+      - {function: Azul frontal, fadeIn: 500, hold: 2000, fadeOut: 500}
+```
+
+Cuatro cosas que hay que saber de él, y de las cuatro cuelga todo lo demás:
+
+**Se direcciona por nombre, nunca por id.** Los ids los reparte el motor, así
+que un documento que hablase de ellos solo se podría aplicar sobre el proyecto
+del que salió. Los canales, igual: `channel: Dimmer` sobrevive a un cambio de
+modo y se lee; `channel: 6` no sobrevive a nada. (Si el perfil tiene dos canales
+con el mismo nombre, el exportador escribe el número, porque ahí el nombre
+mentiría.)
+
+**Se valida entero antes de tocar nada.** Un documento que nombra una fixture
+que no existe, una función repetida o un plugin que esta máquina no tiene se
+rechaza completo, diciendo los problemas todos de golpe. Aplicar la mitad de un
+show deja un proyecto del que nadie sabe qué mitad está mirando.
+
+**Aplicarlo dos veces no hace nada la segunda.** Cada sección se compara con lo
+que hay y solo se escribe la diferencia.
+
+**Lo que no menciona no se borra.** Un documento parcial es lo normal —describes
+las escenas y no el patch—, e interpretar el silencio como «borra el resto» es
+perder un show por omisión. `--prune` pide explícitamente lo contrario.
+
+Ensaya siempre primero:
+
+```bash
+node mcp/dist/cli.js diff show.yaml
+```
+
+> **Lo que el documento no lleva**, dicho aquí y no escondido: el cuerpo de un
+> Show. Una timeline son posiciones absolutas que no se reconcilian por nombre
+> sin inventarle una identidad a cada barra. Un Show se exporta como función,
+> con sus tiempos, y sus pistas se quedan donde están — se editan por REST.
+
+---
+
 ## Levantar la mesa
 
 ```bash
@@ -262,6 +373,7 @@ resources/  1.735 perfiles de fixture heredados — no se toca
 server/     el daemon: API REST, WebSocket, escritura del documento
 web/        SPA React 19 + Vite + TypeScript (three.js para la 3D)
 desktop/    carcasa Tauri
+mcp/        el servidor MCP, el CLI y el motor del documento declarativo
 docs/api/   el contrato OpenAPI
 ```
 
@@ -271,8 +383,11 @@ cmake -S . -B build -G Ninja -Dserver=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
 cd web && pnpm install && pnpm verify    # biome + vitest + tsc + build
+cd mcp && pnpm install && pnpm verify
+
 server/test/api-smoke.sh build/server/src/orchidlightsd
 server/test/openapi-smoke.sh build/server/src/orchidlightsd
+server/test/spec-smoke.sh build/server/src/orchidlightsd
 ```
 
 Lo que hay que saber antes de tocar el daemon:
@@ -282,7 +397,15 @@ Lo que hay que saber antes de tocar el daemon:
   comprueba.
 - **Toda ruta nueva se documenta en `docs/api/openapi.yaml`** y se regenera con
   `python3 docs/api/generate.py`. Si no, `openapi-smoke.sh` rompe el build — a
-  propósito: una spec que miente es peor que ninguna.
+  propósito: una spec que miente es peor que ninguna. Y no basta con acertar la
+  ruta: el test compara **campo a campo** los cuerpos documentados con los que
+  el handler lee, y **tipo a tipo** las respuestas de un daemon de verdad contra
+  lo que la spec promete, valores de enum incluidos.
+- **Lo que lee una ruta tiene que ser lo que escribe la contraria.** Si `GET`
+  devuelve la geometría anidada, el `PUT` la acepta anidada; si `GET` emite
+  `default`, el `PATCH` lo admite o el `GET` no lo emite. Sin esa simetría un
+  cliente no puede hacer ida y vuelta con un proyecto, que es de lo que cuelga
+  todo `mcp/`.
 - **Cada handler repite su comprobación de autorización**, no hay middleware en
   el QHttpServer de Qt 6.4. Un `grep` los encuentra todos; una ruta que se
   olvida es un fallo que solo aparece cuando hay alguien más en la red.

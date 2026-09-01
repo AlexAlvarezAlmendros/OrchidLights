@@ -35,12 +35,28 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          # Los dos lockfiles: este job construye la web y el paquete de
+          # agentes, y una caché indexada solo por el primero se reutiliza
+          # cuando el segundo ha cambiado.
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            mcp/pnpm-lock.yaml
 
       # Before CMake: the install rule picks up web/dist if it is there, and the
       # daemon serves its own interface only when it has been built.
       - name: Build the web interface
         working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm test
+          pnpm build
+
+      # El paquete de agentes: el CLI, el servidor MCP y el motor del documento
+      # declarativo. Se construye antes que el daemon porque spec-smoke.sh lo
+      # necesita compilado, y sus tests no necesitan un daemon en absoluto.
+      - name: Build the agent package
+        working-directory: mcp
         run: |
           pnpm install --frozen-lockfile
           pnpm check
@@ -195,6 +211,9 @@ jobs:
       # se lee de un vistazo, y no hay por qué esperar a los treinta de abajo.
       - name: OpenAPI smoke test (el contrato contra las rutas, campo a campo)
         run: ./server/test/openapi-smoke.sh orchidlightsd
+
+      - name: Spec smoke test (un show entero, exportado y vuelto a aplicar)
+        run: ./server/test/spec-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
       - name: Shutdown smoke test (signals, token-gated route, last frame on the wire)
         run: ./server/test/shutdown-smoke.sh orchidlightsd

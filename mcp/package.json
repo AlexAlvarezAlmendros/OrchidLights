@@ -1,0 +1,35 @@
+{
+  "name": "@orchidlights/mcp",
+  "version": "0.1.0",
+  "description": "Servidor MCP y CLI para manejar una mesa OrchidLights desde un agente.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "orchidlights-mcp": "./dist/mcp.js",
+    "orchidctl": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": ["dist"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "check": "biome check .",
+    "check:write": "biome check --write .",
+    "verify": "biome check . && vitest run && tsc -b"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.0",
+    "typescript": "~5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
