@@ -80,6 +80,11 @@ planta en otro, una superficie de vídeo a pantalla completa en el proyector) y
 los flags `--kiosk` / `--operate`, que cierran la máscara de acceso **en el
 daemon** para que los móviles de la misma mesa obedezcan la misma jaula.
 
+Dentro del paquete viaja todo lo que la mesa necesita —el daemon, sus plugins,
+la librería de fixtures, la interfaz— y también **el servidor MCP y `orchidctl`**,
+un fichero de un megabyte cada uno, para que instalar la app deje lista la mesa
+y el agente que la maneja.
+
 ```bash
 cd desktop/src-tauri && cargo tauri dev    # desarrollo
 # CI empaqueta deb + AppImage en cada push a main
@@ -293,10 +298,30 @@ la consola— y también manejarlo en directo. `AGENTS.md` es lo que lee antes d
 tocar nada: las reglas que no se ven, el camino dorado y cómo comprobar el
 trabajo.
 
+**Si instalaste el `.deb` de escritorio, ya lo tienes**: el servidor MCP y
+`orchidctl` viajan dentro del paquete y quedan en el PATH.
+
+```bash
+claude mcp add orchidlights -- orchidlights-mcp
+```
+
+Sin puerto, y no es un descuido: la carcasa pide el 9998 y coge cualquier puerto
+libre si ese está ocupado, así que un registro con el puerto escrito funcionaría
+hasta el día que no —y ese día hablaría con la mesa de otro—. La carcasa deja
+dicho dónde acabó y las dos herramientas lo leen: se registra una vez y vale
+para siempre.
+
+Desde el repositorio, sin instalar nada:
+
 ```bash
 cd mcp && pnpm install && pnpm build
 claude mcp add orchidlights -- node "$PWD/dist/mcp.js"
 ```
+
+**Node no viaja en el paquete.** El servidor entero cabe en un fichero de 1 MB;
+el runtime son 119 MB y doblaría el peso del bundle por algo que muchos no van a
+usar. El `.deb` recomienda `nodejs`, así que un `apt install` normal lo trae, y
+si falta, el lanzador lo dice en una frase en vez de fallar de forma críptica.
 
 **Diecinueve herramientas, no ciento treinta y nueve.** Una operación por cosa
 que se puede hacer es lo correcto para un API y lo peor posible para un agente:
@@ -312,6 +337,9 @@ orchidctl diff show.yaml          # qué haría, sin hacerlo
 orchidctl apply show.yaml --save
 orchidctl dmx 1                   # ¿ha llegado la luz?
 ```
+
+Con el AppImage los ficheros viajan dentro pero nada del PATH apunta a ellos:
+extráelo y apunta `ORCHID_MCP_DIR`, o instala el `.deb`.
 
 ### El proyecto como un archivo de texto
 

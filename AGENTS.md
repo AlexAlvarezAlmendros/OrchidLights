@@ -20,31 +20,57 @@ Este documento es para las dos cosas que puede querer un agente aquí:
 ciento treinta y nueve envoltorios de endpoint: con ciento treinta y nueve
 herramientas delante el contexto se gasta en elegir.
 
-```bash
-cd mcp && pnpm install && pnpm build
+**Si instalaste el `.deb` de escritorio ya lo tienes**: el servidor MCP y el CLI
+viajan dentro del paquete y quedan en el PATH.
 
-# Claude Code, en este checkout: .mcp.json ya lo declara.
-# En cualquier otro sitio:
-claude mcp add orchidlights -- node /ruta/a/OrchidLights/mcp/dist/mcp.js
+```bash
+claude mcp add orchidlights -- orchidlights-mcp
 
 # OpenCode, en opencode.json:
 #   { "mcp": { "orchidlights": { "type": "local",
-#     "command": ["node", "/ruta/a/OrchidLights/mcp/dist/mcp.js"] } } }
+#     "command": ["orchidlights-mcp"] } } }
 ```
 
-Trae tres recursos que conviene leer antes de construir nada: `orchid://guide`
-(esto mismo), `orchid://routes` (las 139 operaciones en una línea cada una) y
-`orchid://project` (el proyecto cargado, como documento).
+**Fíjate en que no hay puerto en ninguna parte.** No es un descuido: la carcasa
+pide el 9998 y se conforma con cualquier puerto libre si ese está ocupado, así
+que un registro con el puerto escrito funcionaría hasta el día que no, y ese día
+hablaría con la mesa de otro. La carcasa deja dicho dónde acabó en
+`~/.orchidlights/desktop-url`, y tanto el servidor MCP como `orchidctl` lo leen:
+se registra una vez y vale para siempre.
 
-**El CLI**, si vives en una shell — que es donde vive un agente de Claude Code o
-de OpenCode:
+Desde el repositorio, sin instalar nada:
 
 ```bash
-node mcp/dist/cli.js status
-node mcp/dist/cli.js export -o show.yaml
-node mcp/dist/cli.js diff show.yaml        # qué haría, sin hacerlo
-node mcp/dist/cli.js apply show.yaml --save
-node mcp/dist/cli.js dmx 1                 # ¿ha llegado la luz?
+cd mcp && pnpm install && pnpm build
+claude mcp add orchidlights -- node /ruta/a/OrchidLights/mcp/dist/mcp.js
+```
+
+Con el AppImage los ficheros viajan dentro pero no hay nada en el PATH que
+apunte a ellos: extráelo (`--appimage-extract`) y apunta `ORCHID_MCP_DIR` a
+`squashfs-root/usr/lib/*/sidecar/share/orchidlights/mcp`, o instala el `.deb`.
+
+> **Node no viaja en el paquete.** El servidor MCP entero cabe en un fichero de
+> 1 MB, pero el runtime son 119 MB y doblarían el peso del bundle por algo que
+> muchos no usarán. El `.deb` recomienda `nodejs`, así que un `apt install`
+> normal lo trae; y si falta, el lanzador lo dice en una frase con qué instalar
+> en vez de fallar de forma críptica. Vale con Node 18, que es el que trae
+> Ubuntu 24.04.
+
+Trae tres recursos que conviene leer antes de construir nada: `orchid://guide`
+(esto mismo, que viaja dentro del paquete), `orchid://routes` (las 139
+operaciones en una línea cada una) y `orchid://project` (el proyecto cargado,
+como documento).
+
+**El CLI**, si vives en una shell — que es donde vive un agente de Claude Code o
+de OpenCode. Con el `.deb` se llama `orchidctl`; desde el repositorio,
+`node mcp/dist/cli.js`:
+
+```bash
+orchidctl status
+orchidctl export -o show.yaml
+orchidctl diff show.yaml        # qué haría, sin hacerlo
+orchidctl apply show.yaml --save
+orchidctl dmx 1                 # ¿ha llegado la luz?
 ```
 
 **REST a pelo**, con `curl`, para lo que no cubran los dos anteriores. El
@@ -381,6 +407,8 @@ server/     el daemon: API REST, WebSocket, escritura del documento
 web/        SPA React 19 + Vite + TypeScript (three.js para la 3D)
 desktop/    carcasa Tauri
 mcp/        el servidor MCP, el CLI y el motor del documento declarativo
+            (`pnpm bundle` los deja en un fichero cada uno, que es como viajan
+            dentro del paquete de escritorio)
 docs/api/   el contrato OpenAPI
 ```
 

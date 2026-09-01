@@ -434,6 +434,11 @@ fn boot(
                     }
                 }
 
+                // Dónde acabó esta mesa, para quien la busque sin saber el
+                // puerto: el servidor MCP y orchidctl leen este fichero, y así
+                // el comando que se registra una vez sirve para siempre.
+                sidecar.publish(&user_dir);
+
                 watch(handle.clone(), sidecar.clone());
                 arm_signals(sidecar.clone(), token.clone());
                 arm_panic_shortcut(handle, sidecar.base_url().to_string(), token.clone());

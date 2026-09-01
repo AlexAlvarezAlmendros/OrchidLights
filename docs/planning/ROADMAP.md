@@ -493,8 +493,32 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
       WebSocket. Los tres arreglados; los tres invisibles desde la web, que ya
       sabía sortearlos.
 
-- [ ] **Sidecar en la carcasa Tauri**, para que instalar la app de escritorio
-      instale también el servidor MCP. Hoy hay que construir el paquete a mano.
+- [x] **Sidecar en la carcasa Tauri.** El servidor MCP y `orchidctl` viajan
+      dentro del paquete —un fichero de un megabyte cada uno, empaquetados con
+      esbuild— y el `.deb` los deja en el PATH.
+  - **El registro no lleva puerto.** La carcasa pide el 9998 y coge cualquier
+    puerto libre si ese está ocupado, así que `ORCHID_URL=…:9998` en la
+    configuración de un agente funcionaría hasta el día que no, y ese día
+    hablaría con la mesa de otro. La carcasa publica dónde acabó en
+    `~/.orchidlights/desktop-url` y se lo lleva al cerrar —un fichero que nombra
+    un puerto muerto convierte «no está arrancada» en «está arrancada y rota»—,
+    y las dos herramientas lo leen. `claude mcp add orchidlights --
+    orchidlights-mcp`, una vez, para siempre.
+  - **Node no viaja.** El servidor cabe en 1 MB y el runtime pesa 119: doblar el
+    bundle por una función que muchos no usarán es un mal cambio. El `.deb`
+    recomienda `nodejs` —que `apt install` trae por defecto— y el lanzador, si
+    no lo encuentra, lo dice en una frase con qué instalar. Vale con Node 18,
+    que es el que trae Ubuntu 24.04: pedir 20 habría dejado fuera a quien lo
+    instaló de la forma más normal que hay.
+  - `shell-smoke.sh` comprueba que la carcasa publica la URL, que un lanzador
+    sin puerto por ninguna parte llega a esa mesa, y que al cerrar no deja el
+    fichero mintiendo. El smoke del `.deb` comprueba que los comandos quedan en
+    el PATH, con su bit de ejecución, y que hablan con la mesa correcta.
+
+- [ ] **Lo mismo para el AppImage.** Los ficheros viajan dentro, pero nada del
+      PATH apunta a ellos: hay que extraerlo y apuntar `ORCHID_MCP_DIR`. Un
+      `orchidlights-desktop --mcp` que cediera el proceso al lanzador lo
+      arreglaría con una ruta estable.
 
 > **Decidido: acceso total, sin rails.** Un agente puede todo lo que puede la
 > web, el rig en directo incluido. La frontera es el token, no una jaula aparte:

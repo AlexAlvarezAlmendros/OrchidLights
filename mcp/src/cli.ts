@@ -11,10 +11,9 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { OrchidClient, OrchidError } from './client.js'
+import { deskOptions } from './config.js'
 import { SpecError, applySpec } from './spec/apply.js'
 import { exportSpec } from './spec/export.js'
 import type { ShowSpec } from './spec/types.js'
@@ -36,7 +35,9 @@ const USAGE = `orchidctl — la mesa OrchidLights desde una shell
 
 Opciones
 
-  --url <url>       dónde escucha la mesa (o $ORCHID_URL)
+  --url <url>       dónde escucha la mesa. Sin esto: $ORCHID_URL, lo que dejó
+                    escrito la carcasa en ~/.orchidlights/desktop-url, y si no
+                    http://127.0.0.1:9998
   --token <token>   el token (o $ORCHID_TOKEN, o ~/.orchidlights/api-token)
   --console         incluir la Virtual Console en export
   --prune           en apply, borrar lo que el documento no menciona
@@ -102,27 +103,15 @@ function parseArgs(argv: string[]): { command: string; rest: string[]; flags: Fl
 }
 
 /**
- * El token, sin que haya que teclearlo.
+ * A qué mesa se habla.
  *
- * En loopback no hace falta ninguno, así que leer el fichero y no encontrarlo
- * no es un problema: es el caso normal.
+ * Las banderas ganan a lo que resuelva `deskOptions`, que ya mira el entorno,
+ * lo que dejó escrito la carcasa de escritorio y el sitio por defecto.
  */
-function findToken(explicit: string | undefined): string | undefined {
-  if (explicit) return explicit
-  if (process.env.ORCHID_TOKEN) return process.env.ORCHID_TOKEN
-  try {
-    return readFileSync(join(homedir(), '.orchidlights', 'api-token'), 'utf8').trim()
-  } catch {
-    return undefined
-  }
-}
-
 function connect(flags: Flags): OrchidClient {
-  const options: { baseUrl?: string; token?: string } = {}
-  const url = flags.url ?? process.env.ORCHID_URL
-  if (url) options.baseUrl = url
-  const token = findToken(flags.token)
-  if (token) options.token = token
+  const options = deskOptions()
+  if (flags.url) options.baseUrl = flags.url
+  if (flags.token) options.token = flags.token
   return new OrchidClient(options)
 }
 

@@ -15,7 +15,6 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -23,26 +22,14 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { stringify as stringifyYaml } from 'yaml'
 import { z } from 'zod'
 import { OrchidClient, OrchidError } from './client.js'
+import { deskOptions } from './config.js'
 import { SpecError, applySpec } from './spec/apply.js'
 import { exportSpec } from './spec/export.js'
 import type { ShowSpec } from './spec/types.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-function findToken(): string | undefined {
-  if (process.env.ORCHID_TOKEN) return process.env.ORCHID_TOKEN
-  try {
-    return readFileSync(join(homedir(), '.orchidlights', 'api-token'), 'utf8').trim()
-  } catch {
-    return undefined
-  }
-}
-
-const clientOptions: { baseUrl?: string; token?: string } = {}
-if (process.env.ORCHID_URL) clientOptions.baseUrl = process.env.ORCHID_URL
-const token = findToken()
-if (token) clientOptions.token = token
-const client = new OrchidClient(clientOptions)
+const client = new OrchidClient(deskOptions())
 
 type Content = { content: { type: 'text'; text: string }[]; isError?: boolean }
 

@@ -8,7 +8,7 @@
  * el proyecto a medias y tampoco lo da.
  */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { OrchidClient } from '../src/client.js'
 import { SpecError, planApply } from '../src/spec/apply.js'
 import { ChannelNames } from '../src/spec/channels.js'
@@ -377,5 +377,28 @@ describe('SpecError', () => {
     const error = new SpecError(['una', 'otra'])
     expect(error.message).toContain('2 problemas')
     expect(error.message).toContain('· una')
+  })
+})
+
+describe('dónde está la mesa', () => {
+  const saved = { url: process.env.ORCHID_URL, home: process.env.HOME }
+  afterEach(() => {
+    process.env.ORCHID_URL = saved.url
+    process.env.HOME = saved.home
+  })
+
+  it('una variable vacía es una variable ausente', async () => {
+    // `ORCHID_URL=` es como se pide "usa el de siempre" desde un shell, y con
+    // `??` se colaba como URL base: las peticiones salían a "/api/v1" tal cual.
+    process.env.ORCHID_URL = ''
+    process.env.HOME = '/tmp/orchid-test-no-home'
+    const { deskUrl, DEFAULT_URL } = await import('../src/config.js')
+    expect(deskUrl()).toBe(DEFAULT_URL)
+  })
+
+  it('y una con valor gana a todo lo demás', async () => {
+    process.env.ORCHID_URL = 'http://mesa.local:1234'
+    const { deskUrl } = await import('../src/config.js')
+    expect(deskUrl()).toBe('http://mesa.local:1234')
   })
 })

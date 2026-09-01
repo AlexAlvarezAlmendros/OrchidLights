@@ -528,13 +528,24 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            mcp/pnpm-lock.yaml
 
       - name: Build the web interface
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+
+      # shell-smoke comprueba que la URL que publica la carcasa la usa de
+      # verdad el lanzador que viaja en el paquete, y para eso necesita el
+      # bundle construido.
+      - name: Bundle the agent package
+        working-directory: mcp
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm bundle
 
       - name: Build the daemon
         run: |
@@ -587,7 +598,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            mcp/pnpm-lock.yaml
 
       - name: Build the web interface
         working-directory: web
@@ -595,7 +608,15 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Stage the sidecar (daemon + plugins + fixtures + web)
+      # El servidor MCP y el CLI viajan dentro del paquete, un fichero cada uno.
+      # collect-sidecar.sh se niega a seguir si no están.
+      - name: Bundle the agent package
+        working-directory: mcp
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm bundle
+
+      - name: Stage the sidecar (daemon + plugins + fixtures + web + agentes)
         run: ./desktop/scripts/collect-sidecar.sh
 
       - name: Build the bundles
@@ -638,6 +659,18 @@ jobs:
           assert len(body[\"outputPlugins\"]) >= 10, body
           assert len(body[\"audioFormats\"]) >= 5, body
           "
+            # Y el paquete de agentes: los dos comandos quedan en el PATH, y
+            # encuentran esta mesa SIN que el puerto aparezca en ningún sitio
+            # -- la carcasa lo dejó escrito al arrancar, que es lo que hace que
+            # un registro de MCP valga para siempre.
+            command -v orchidlights-mcp > /dev/null \
+              || { echo "orchidlights-mcp no quedó en el PATH"; exit 1; }
+            [ -x /usr/bin/orchidctl ] \
+              || { echo "orchidctl quedó sin bit de ejecución"; exit 1; }
+            OUT=$(orchidctl status) || { echo "orchidctl falló: $OUT"; exit 1; }
+            echo "$OUT"
+            echo "$OUT" | grep -q "127.0.0.1:$PORT" \
+              || { echo "orchidctl habló con otra mesa"; exit 1; }
             kill -TERM $SHELL_PID
             for _ in $(seq 1 40); do
               kill -0 "$DP" 2>/dev/null || exit 0
