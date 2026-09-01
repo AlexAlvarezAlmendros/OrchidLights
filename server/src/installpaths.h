@@ -80,6 +80,16 @@ public:
     static QString webRoot();
 
     /**
+     * The OpenAPI contract, served at GET /api/v1/openapi.json. Empty when
+     * this installation does not carry it.
+     *
+     * A client should be able to read the contract off the desk in front of
+     * it rather than off a repository that may be on another version, which
+     * is the whole reason this is a file the daemon ships rather than a link.
+     */
+    static QString apiContract();
+
+    /**
      * The matching directory inside the legacy QLC+ user tree, or empty when
      * absent. `subdir` is the leaf as QLC+ names it on this platform, e.g.
      * "fixtures" or "inputprofiles".

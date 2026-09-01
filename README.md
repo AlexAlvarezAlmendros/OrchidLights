@@ -160,6 +160,24 @@ orchidlightsd --check tonight.qxw          # carga, informa y sale
 orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
 ```
 
+**El contrato completo está escrito**: 137 operaciones en OpenAPI 3.1, en
+[`docs/api/openapi.yaml`](docs/api/openapi.yaml) y servidas por el propio daemon
+en `GET /api/v1/openapi.json`, para que un cliente lo lea de la mesa que tiene
+delante y no de un repositorio que puede ir por otra versión.
+`GET /api/v1` contesta, sin token, qué es esta mesa y dónde está todo lo demás.
+
+Que siga siendo verdad no es cuestión de disciplina: `openapi-smoke.sh` compara
+la spec con la tabla de rutas real **en los dos sentidos** —una ruta nueva sin
+documentar rompe el build, y una documentada que ya no existe, también— y además
+comprueba **campo a campo** que los nombres de cada cuerpo son los que el handler
+lee. Escribiendo la spec eso cazó tres mentiras (`universe` donde iba `fixture`,
+`backgroundColor` donde iba `background`, un `scene` inventado), y ninguna de las
+tres daba error en ninguna parte: un cuerpo con un campo mal nombrado se parsea,
+no encuentra la clave, y sigue.
+
+Para manejar la mesa desde un agente —OpenCode, Claude Code, un script—, el
+camino dorado y las trampas están en [`AGENTS.md`](AGENTS.md).
+
 | | |
 |---|---|
 | `GET /api/v1/status` | versión, librería, plugins cargados, recuentos, funciones en marcha |
@@ -170,6 +188,7 @@ orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
 | `POST /api/v1/functions/{id}/stop` | encola la parada |
 | `POST /api/v1/blackout` | para todo y activa blackout |
 | `DELETE /api/v1/blackout` | lo desactiva |
+| `GET /api/v1/universes/{n}/dmx` | lo que sale ahora mismo por el universo, con los canales activos nombrados |
 | `GET /api/v1/project` | proyecto cargado y si tiene cambios sin guardar |
 | `GET /api/v1/projects` | proyectos disponibles en el directorio permitido |
 | `POST /api/v1/project/load/{nombre}` | carga otro proyecto |

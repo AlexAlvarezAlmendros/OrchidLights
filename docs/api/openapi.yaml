@@ -1,0 +1,3518 @@
+# OrchidLights — contrato de la API HTTP.
+#
+# Esta es la descripción legible por máquinas de las 134 operaciones que el
+# daemon expone. Está escrita a mano, y por eso mismo `server/test/openapi-smoke.sh`
+# la compara en CI contra la tabla de rutas real de `server/src/apiserver.cpp`:
+# una ruta nueva sin documentar rompe el build, y una documentada que ya no
+# existe, también. Una spec que miente es peor que no tener ninguna, porque el
+# cliente que la lee se la cree.
+#
+# Convenciones que valen para todo el documento:
+#
+#   · Universos y direcciones DMX son 1-based, como lo que va impreso en el
+#     fixture y lo que teclea un operador. El motor los cuenta desde 0 por
+#     dentro; la conversión ocurre en JsonView y solo ahí.
+#   · Los tiempos van en milisegundos.
+#   · Los identificadores los asigna el motor (el hueco libre más bajo), así
+#     que un cliente los descubre, no los elige. Para escribir un proyecto
+#     entero de una vez, direccionado por nombre, está /api/v1/spec.
+#   · Toda edición es en memoria hasta POST /api/v1/project/save.
+
+openapi: 3.1.0
+
+info:
+  title: OrchidLights
+  version: "1"
+  summary: Control de iluminación DMX — motor QLC+ con API HTTP y WebSocket.
+  description: |
+    El API vive en el mismo proceso que el motor de tiempo real, así que una
+    escritura llega al `MasterTimer` sin cruzar un socket ni un proceso.
+
+    **Autenticación.** En loopback no se pide nada: el sistema operativo ya es
+    la frontera. `--listen-all` abre el daemon a la red y activa el token
+    automáticamente, que se guarda en `~/.orchidlights/api-token` con permisos
+    600. Las rutas que llegan al disco o matan el proceso exigen el token
+    siempre, incluso en loopback.
+
+    **Tiempo real.** El WebSocket de `/ws` emite frames DMX agrupados por
+    universo a 25 Hz y el estado de las funciones, los widgets y el cabezal de
+    los shows. Un cliente que necesite ver el efecto de lo que escribe debe
+    escuchar ahí, no sondear.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: OrchidLights
+    url: https://github.com/AlexAlvarezAlmendros/OrchidLights
+
+servers:
+  - url: http://127.0.0.1:9998
+    description: El daemon en la máquina local, que es donde escucha por defecto.
+  - url: http://{host}:{port}
+    description: Una mesa alcanzable en la red, arrancada con --listen-all.
+    variables:
+      host: {default: mesa.local}
+      port: {default: "9998"}
+
+security:
+  - bearerAuth: []
+  - {}
+
+tags:
+  - name: descubrimiento
+    description: Qué es esta mesa y qué sabe hacer.
+  - name: proyecto
+    description: Abrir, guardar y describir el `.qxw` cargado.
+  - name: spec
+    description: |
+      El proyecto entero como un documento declarativo, direccionado por nombre.
+      Es la vía pensada para agentes y para tener un show en control de versiones.
+  - name: fixtures
+    description: El patch — qué lámparas hay, en qué universo y en qué dirección.
+  - name: librería
+    description: Los 1.735 perfiles de fixture que trae el proyecto.
+  - name: grupos
+    description: Grupos de fixtures y grupos de canales.
+  - name: funciones
+    description: Escenas, chasers, EFX, matrices RGB, colecciones, scripts, audio, vídeo y shows.
+  - name: consola
+    description: La Virtual Console — sus widgets, su disposición y su historial.
+  - name: plano
+    description: Dónde está cada lámpara en el escenario, en 2D y en 3D.
+  - name: io
+    description: Universos, patch de entrada y salida, perfiles de entrada, MIDI.
+  - name: directo
+    description: Lo que ocurre ahora mismo en el rig y no es una edición.
+  - name: mesa
+    description: Simple Desk, grand master, blackout y volcado a escena.
+  - name: sistema
+    description: Undo global, acceso, clientes remotos y apagado.
+
+paths:
+  /api/v1:
+    get:
+      tags: [descubrimiento]
+      summary: Qué es esta mesa y qué sabe hacer.
+      description: |
+        El punto de entrada para un cliente que no sabe nada todavía: versión,
+        dónde está el contrato completo, si hace falta token y qué áreas están
+        abiertas. Un cliente que empieza aquí no tiene que adivinar nada.
+
+        Contesta **sin token a propósito**: un cliente que tiene que
+        autenticarse para enterarse de que tiene que autenticarse es un cliente
+        que adivina. El bloque `project` es la excepción — su nombre y su ruta
+        dicen algo del sitio, así que solo sale para quien presentó el token.
+      security: [{}]
+      responses:
+        "200":
+          description: El documento de descubrimiento.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: {type: string}
+                  version: {type: string, description: "Versión del programa."}
+                  apiVersion: {type: integer}
+                  openapi: {type: string, description: "Ruta del contrato completo."}
+                  websocket: {type: string}
+                  authRequired: {type: boolean}
+                  access:
+                    type: object
+                    description: Las áreas que la máscara de esta mesa deja abiertas.
+                    additionalProperties: {type: boolean}
+                  project:
+                    type: object
+                    properties:
+                      path: {type: string}
+                      name: {type: string}
+                      modified: {type: boolean}
+
+  /api/v1/openapi.json:
+    get:
+      tags: [descubrimiento]
+      summary: Este mismo contrato, en JSON.
+      description: |
+        Servido por el daemon para que un cliente lo lea de la mesa que tiene
+        delante en vez de de un repositorio que puede ir por otra versión.
+      security: [{}]
+      responses:
+        "200":
+          description: El documento OpenAPI.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "404":
+          description: Esta instalación no trae el contrato.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/v1/status:
+    get:
+      tags: [descubrimiento]
+      summary: El estado de la mesa en una sola llamada.
+      responses:
+        "200":
+          description: Cuántas fixtures y funciones hay, cuántas corren, y si está en blackout.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: {type: string}
+                  version: {type: string}
+                  apiVersion: {type: integer}
+                  fixtureLibrary: {type: string}
+                  manufacturers: {type: integer}
+                  fixtures: {type: integer}
+                  functions: {type: integer}
+                  universes: {type: integer}
+                  runningFunctions: {type: integer}
+                  blackout: {type: boolean}
+                  outputPlugins: {type: array, items: {type: string}}
+                  audioFormats: {type: array, items: {type: string}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/shutdown:
+    post:
+      tags: [sistema]
+      summary: Apagar el daemon limpiamente.
+      description: Exige token aunque la mesa escuche solo en loopback.
+      responses:
+        "200":
+          description: Se apaga.
+          content:
+            application/json:
+              schema: {type: object, properties: {shuttingDown: {type: boolean}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/undo:
+    post:
+      tags: [sistema]
+      summary: Deshacer la última edición.
+      description: |
+        Undo global por instantáneas — cada ruta que muta guarda el XML de lo
+        que toca, antes y después, en un anillo de ~200. Fuera del anillo quedan
+        la mesa en vivo y el estado de ejecución: parar un chaser no es una edición.
+      responses:
+        "200":
+          description: Qué se deshizo y qué queda.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  undone: {type: string, description: "Etiqueta de lo deshecho."}
+                  undo: {type: integer}
+                  redo: {type: integer}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/redo:
+    post:
+      tags: [sistema]
+      summary: Rehacer lo último deshecho.
+      responses:
+        "200":
+          description: Qué se rehízo y qué queda.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  redone: {type: string}
+                  undo: {type: integer}
+                  redo: {type: integer}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/history:
+    get:
+      tags: [sistema]
+      summary: El anillo de undo, para enseñárselo a alguien.
+      responses:
+        "200":
+          description: Las entradas y cuántas quedan a cada lado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries: {type: array, items: {type: object, additionalProperties: true}}
+                  undo: {type: integer}
+                  redo: {type: integer}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/access:
+    get:
+      tags: [sistema]
+      summary: Qué áreas de esta mesa están abiertas.
+      responses:
+        "200":
+          description: La máscara, área por área.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fixtures: {type: boolean}
+                  functions: {type: boolean}
+                  vcControl: {type: boolean}
+                  vcEditing: {type: boolean}
+                  simpleDesk: {type: boolean}
+                  show: {type: boolean}
+                  io: {type: boolean}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    put:
+      tags: [sistema]
+      summary: Cerrar o abrir áreas — el modo kiosko del móvil que se presta.
+      description: |
+        La máscara vive en el daemon, no en el navegador: cerrarla solo en un
+        cliente es no cerrarla. Exige token siempre.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                preset:
+                  type: string
+                  enum: [all, operate, kiosk]
+                  description: "`operate` deja consola y mesa; `kiosk` solo la consola."
+                fixtures: {type: boolean}
+                functions: {type: boolean}
+                vcControl: {type: boolean}
+                vcEditing: {type: boolean}
+                simpleDesk: {type: boolean}
+                show: {type: boolean}
+                io: {type: boolean}
+      responses:
+        "200":
+          description: La máscara resultante.
+          content:
+            application/json:
+              schema: {type: object, properties: {mask: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/remote:
+    get:
+      tags: [sistema]
+      summary: Dónde se alcanza esta mesa y quién está conectado.
+      description: |
+        Las URLs de acceso llevan el token **solo** si quien pregunta lo presentó.
+      responses:
+        "200":
+          description: Direcciones, puerto y clientes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  port: {type: integer}
+                  listenAll: {type: boolean}
+                  authRequired: {type: boolean}
+                  localUrl: {type: string}
+                  addresses: {type: array, items: {type: object, additionalProperties: true}}
+                  clients: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/remote/clients/{id}:
+    delete:
+      tags: [sistema]
+      summary: Echar a un cliente de la mesa.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Cerrado.
+          content:
+            application/json:
+              schema: {type: object, properties: {closed: {type: boolean}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/project:
+    get:
+      tags: [proyecto]
+      summary: Qué proyecto está cargado.
+      responses:
+        "200":
+          description: Ruta, nombre, si tiene cambios sin guardar y si hay un autoguardado que le sobrevive.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: {type: string}
+                  name: {type: string}
+                  directory: {type: string}
+                  modified: {type: boolean}
+                  startupFunction: {type: integer, description: "-1 si no hay."}
+                  autosave:
+                    type: object
+                    description: |
+                      Una copia de recuperación más nueva que el proyecto al que
+                      sombrea. Se informa, nunca se carga sola: el operador
+                      decide si los últimos treinta segundos del cuelgue valen
+                      más que lo que dice el fichero.
+                    properties:
+                      name: {type: string}
+                      savedAt: {type: string, format: date-time}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    patch:
+      tags: [proyecto]
+      summary: Ajustes del proyecto — la función con la que abre el show.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                startupFunction: {type: integer, description: "-1 para ninguna."}
+      responses:
+        "200":
+          description: El ajuste resultante.
+          content:
+            application/json:
+              schema: {type: object, properties: {startupFunction: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/projects:
+    get:
+      tags: [proyecto]
+      summary: Los proyectos del directorio de trabajo.
+      responses:
+        "200":
+          description: El directorio y lo que hay dentro.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  directory: {type: string}
+                  projects: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/project/recents:
+    get:
+      tags: [proyecto]
+      summary: Los últimos proyectos abiertos.
+      responses:
+        "200":
+          description: Con una marca de si el fichero sigue estando.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path: {type: string}
+                        name: {type: string}
+                        exists: {type: boolean}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/project/new:
+    post:
+      tags: [proyecto]
+      summary: Empezar un proyecto vacío.
+      description: Descarta lo cargado. Exige token.
+      responses:
+        "200":
+          description: El proyecto nuevo.
+          content:
+            application/json:
+              schema: {type: object, properties: {path: {type: string}, modified: {type: boolean}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/project/open:
+    post:
+      tags: [proyecto]
+      summary: Abrir un `.qxw` por ruta absoluta.
+      description: Exige token — es una ruta que llega al disco.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: {type: string}
+      responses:
+        "200":
+          description: |
+            Abierto. `unresolved` nombra las fixtures cuyo perfil no está en la
+            librería de esta instalación: el show carga, pero esas lámparas
+            ocupan canales que nadie sabe leer.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: {type: string}
+                  unresolved: {type: array, items: {type: object, additionalProperties: true}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/project/load/{name}:
+    post:
+      tags: [proyecto]
+      summary: Abrir un proyecto del directorio de trabajo, por nombre.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Abierto.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: {type: string}
+                  unresolved: {type: array, items: {type: object, additionalProperties: true}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/project/save:
+    post:
+      tags: [proyecto]
+      summary: Guardar el proyecto donde estaba.
+      description: |
+        Toda edición vive en memoria hasta aquí. Un cliente que construye un
+        show y no llama a esto no ha construido nada que sobreviva al daemon.
+      responses:
+        "200":
+          description: Escrito.
+          content:
+            application/json:
+              schema: {type: object, properties: {path: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/project/save/{name}:
+    post:
+      tags: [proyecto]
+      summary: Guardar con un nombre dentro del directorio de trabajo.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Escrito.
+          content:
+            application/json:
+              schema: {type: object, properties: {path: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/project/save-as:
+    post:
+      tags: [proyecto]
+      summary: Guardar en una ruta absoluta.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties: {path: {type: string}}
+      responses:
+        "200":
+          description: Escrito.
+          content:
+            application/json:
+              schema: {type: object, properties: {path: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/project/recover:
+    post:
+      tags: [proyecto]
+      summary: Cargar la copia de recuperación que sombrea al proyecto.
+      responses:
+        "200":
+          description: Recuperado.
+          content:
+            application/json:
+              schema: {type: object, properties: {path: {type: string}, modified: {type: boolean}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/project/import/preview:
+    post:
+      tags: [proyecto]
+      summary: Qué traería importar otro proyecto, sin traerlo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties: {path: {type: string}}
+      responses:
+        "200":
+          description: Lo que hay en el otro fichero, para elegir.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/project/import:
+    post:
+      tags: [proyecto]
+      summary: Traerse fixtures y funciones de otro proyecto.
+      description: |
+        Fuera del anillo de undo: deshacerlo necesitaría recargar el documento
+        entero, y eso corta toda función que esté corriendo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: {type: string}
+                fixtures: {type: array, items: {type: integer}}
+                functions: {type: array, items: {type: integer}}
+      responses:
+        "200":
+          description: Qué se trajo.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/assets:
+    post:
+      tags: [proyecto]
+      summary: Subir un fichero al directorio del proyecto.
+      description: Imágenes de fondo del plano, audio, vídeo.
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: Nombre con el que guardarlo.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "201":
+          description: Escrito.
+          content:
+            application/json:
+              schema: {type: object, properties: {path: {type: string}, size: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/fixtures:
+    get:
+      tags: [fixtures]
+      summary: El patch entero.
+      responses:
+        "200":
+          description: Todas las lámparas, sin nombrar sus canales.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/Fixture"}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [fixtures]
+      summary: Patchear una o varias lámparas iguales.
+      description: |
+        `quantity` con `gap` patchea una tira entera de una vez, que es como se
+        patchea un rig de verdad. La dirección se comprueba contra lo que ya
+        hay: dos fixtures en el mismo canal es un fallo que no se ve hasta que
+        se enciende la sala.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manufacturer, model, mode]
+              properties:
+                manufacturer: {type: string}
+                model: {type: string}
+                mode: {type: string}
+                name: {type: string, description: "Si falta, se usa el modelo."}
+                universe: {type: integer, minimum: 1, default: 1}
+                address: {type: integer, minimum: 1, description: "Primer canal, contado desde 1."}
+                quantity: {type: integer, minimum: 1, default: 1}
+                gap: {type: integer, minimum: 0, default: 0, description: "Canales libres entre una y la siguiente."}
+      responses:
+        "201":
+          description: Las creadas.
+          content:
+            application/json:
+              schema: {type: object, properties: {created: {type: array, items: {type: integer}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/fixtures/{id}:
+    get:
+      tags: [fixtures]
+      summary: Una lámpara, con sus canales nombrados.
+      description: |
+        "Dimmer" es el canal 6 en un modo y el 8 en otro, y nadie debería
+        recordarlo a oscuras. Aquí van nombrados; en la lista no, porque un rig
+        de 30 cabezas son mil nombres que nadie pidió.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      responses:
+        "200":
+          description: La lámpara.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Fixture"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [fixtures]
+      summary: Renombrar o mover de dirección.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                universe: {type: integer, minimum: 1}
+                address: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: La lámpara ya cambiada.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Fixture"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [fixtures]
+      summary: Despatchear una lámpara.
+      description: |
+        Se la lleva también de la Virtual Console. `Doc` reparte el id libre más
+        bajo, así que dejar las referencias atrás significa que la siguiente
+        fixture que se patchee hereda los sliders y el XY pad de esta.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      responses:
+        "200":
+          description: Quitada, y cuántas referencias de consola se fueron con ella.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: {type: integer}
+                  consoleReferencesRemoved: {type: integer}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/fixtures/{id}/clone:
+    post:
+      tags: [fixtures]
+      summary: Duplicar una lámpara N veces a continuación.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity: {type: integer, minimum: 1, default: 1}
+                gap: {type: integer, minimum: 0, default: 0}
+      responses:
+        "201":
+          description: Las creadas.
+          content:
+            application/json:
+              schema: {type: object, properties: {created: {type: array, items: {type: integer}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/fixtures/{id}/remap:
+    post:
+      tags: [fixtures]
+      summary: Cambiar el perfil de una lámpara conservando lo que se pueda.
+      description: |
+        Cambiar de modelo o de modo cambia qué significa cada canal, así que
+        `remap` traslada los valores que tienen equivalente y dice cuántos se
+        quedaron por el camino.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manufacturer: {type: string}
+                model: {type: string}
+                mode: {type: string}
+                name: {type: string}
+                universe: {type: integer, minimum: 1}
+                address: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: Qué se conservó y qué sliders quedaron tocados.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: integer}
+                  fixture: {type: string}
+                  channel: {type: integer}
+                  channelsCarried: {type: integer}
+                  slidersTouched: {type: integer}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/fixtures/rgbpanel:
+    post:
+      tags: [fixtures]
+      summary: Patchear un panel de LED entero como una matriz.
+      description: |
+        Un panel son cientos de píxeles: patchearlos de uno en uno no es una
+        tarea, es una tarde. Se describe la rejilla y el daemon crea las
+        fixtures y el grupo que las ordena.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows, columns]
+              properties:
+                name: {type: string}
+                rows: {type: integer, minimum: 1}
+                columns: {type: integer, minimum: 1}
+                universe: {type: integer, minimum: 1}
+                address: {type: integer, minimum: 1}
+                components: {type: string, enum: [RGB, BGR, RGBW], description: "Orden de los componentes."}
+                direction: {type: string, description: "Cómo serpentea el cableado por la rejilla."}
+                startCorner: {type: string}
+                displacement: {type: string}
+                sixteenBit: {type: boolean}
+                physicalWidth: {type: integer}
+                physicalHeight: {type: integer}
+      responses:
+        "201":
+          description: Las fixtures creadas y el grupo que las agrupa.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created: {type: array, items: {type: integer}}
+                  group: {type: integer}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/fixtures/{id}/modifiers:
+    put:
+      tags: [fixtures]
+      summary: Curvas de respuesta por canal.
+      description: Para dímeres que no responden lineales.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                modifiers:
+                  type: object
+                  description: Índice de canal a nombre de plantilla; null quita la curva.
+                  additionalProperties: {type: [string, "null"]}
+      responses:
+        "200":
+          description: Las curvas resultantes.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}, modifiers: {type: object, additionalProperties: true}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/library:
+    get:
+      tags: [librería]
+      summary: Buscar en los 1.735 perfiles de fixture.
+      parameters:
+        - name: q
+          in: query
+          description: Filtro por fabricante o modelo. Sin él, la lista de fabricantes.
+          schema: {type: string}
+      responses:
+        "200":
+          description: Fabricantes que encajan, y cuántos hay.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: {type: integer}
+                  manufacturers: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/library/{manufacturer}:
+    get:
+      tags: [librería]
+      summary: Los modelos de un fabricante.
+      parameters:
+        - name: manufacturer
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: El catálogo del fabricante.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  manufacturer: {type: string}
+                  models: {type: array, items: {type: string}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/library/{manufacturer}/{model}:
+    get:
+      tags: [librería]
+      summary: Un perfil, con sus modos y lo que hace cada canal.
+      description: |
+        Lo que hay que leer antes de patchear: el nombre exacto del modo y
+        cuántos canales ocupa. Patchear con un modo que no existe falla, y
+        patchear con el modo equivocado da un rig que se enciende y no obedece.
+      parameters:
+        - name: manufacturer
+          in: path
+          required: true
+          schema: {type: string}
+        - name: model
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: El perfil.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  manufacturer: {type: string}
+                  model: {type: string}
+                  name: {type: string}
+                  type: {type: string}
+                  modes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        channels: {type: integer}
+                  channels: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions:
+    get:
+      tags: [funciones]
+      summary: Todas las funciones del proyecto.
+      responses:
+        "200":
+          description: Sin sus cuerpos — para eso está `/functions/{id}/body`.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/Function"}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [funciones]
+      summary: Crear una función vacía.
+      description: Nace sin cuerpo; se le pone con `/values`, `/steps` o `/body` según el tipo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, name]
+              properties:
+                type:
+                  type: string
+                  enum: [Scene, Chaser, EFX, RGBMatrix, Collection, Script, Audio, Video, Show, Sequence]
+                name: {type: string}
+      responses:
+        "201":
+          description: La función creada.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Function"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}:
+    patch:
+      tags: [funciones]
+      summary: Nombre, tiempos, sentido de marcha y carpeta.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                fadeIn: {type: integer, description: "Milisegundos."}
+                fadeOut: {type: integer, description: "Milisegundos."}
+                duration: {type: integer, description: "Milisegundos."}
+                runOrder: {type: string, enum: [loop, singleshot, pingpong, random]}
+                direction: {type: string, enum: [forward, backward]}
+                tempoType: {type: string, enum: [original, time, beats]}
+                path: {type: string, description: "Carpeta. Presente y vacía mueve a la raíz, que es una petición de verdad y no un no-op."}
+                fadeInMode: {type: string, enum: [default, common, perstep], description: "Solo chasers."}
+                fadeOutMode: {type: string, enum: [default, common, perstep], description: "Solo chasers."}
+                durationMode: {type: string, enum: [default, common, perstep], description: "Solo chasers."}
+                timeDivision: {type: string, description: "Solo shows."}
+                bpm: {type: integer, description: "Solo shows."}
+      responses:
+        "200":
+          description: La función ya cambiada.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Function"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [funciones]
+      summary: Borrar una función.
+      description: |
+        Se niega con 409 si otra cosa la usa —un chaser, una colección, un
+        botón—, nombrando qué. `force=true` la borra igualmente.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: force
+          in: query
+          schema: {type: string, enum: ["true", "false"]}
+      responses:
+        "200":
+          description: Borrada.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /api/v1/functions/{id}/start:
+    post:
+      tags: [funciones]
+      summary: Arrancar una función.
+      description: |
+        No es una edición: queda fuera del anillo de undo. El cambio de estado
+        se anuncia por el WebSocket a todos los clientes.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      responses:
+        "200":
+          description: Arrancando.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions/{id}/stop:
+    post:
+      tags: [funciones]
+      summary: Parar una función.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      responses:
+        "200":
+          description: Parando.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions/{id}/body:
+    get:
+      tags: [funciones]
+      summary: De qué está hecha una función.
+      description: |
+        Los pasos de un chaser, los valores de una escena, los miembros de una
+        colección, la geometría de un EFX, el algoritmo de una matriz, las
+        pistas de un show — con nombres. Sin esto un cliente cambia un cuerpo
+        que no puede ver, y eso no es editar, es adivinar.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      responses:
+        "200":
+          description: El cuerpo, con la forma que corresponda al tipo.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      tags: [funciones]
+      summary: Escribir el cuerpo de un EFX, una matriz, un script o un audio.
+      description: |
+        Los campos que se aceptan dependen del tipo de la función. Escenas y
+        chasers tienen sus propias rutas, más finas.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fixtures: {type: array, description: "EFX: las cabezas que dibujan la figura.", items: {type: object, additionalProperties: true}}
+                algorithm: {type: string, description: "EFX o RGBMatrix."}
+                fixtureGroup: {type: integer, description: "RGBMatrix: el grupo sobre el que corre."}
+                colors: {type: array, description: "RGBMatrix: hasta cinco huecos de color.", items: {type: [string, "null"]}}
+                data: {type: string, description: "Script: el texto del script."}
+                source: {type: string, description: "Audio o Video: el fichero."}
+                volume: {type: number, description: "Audio."}
+                device: {type: string, description: "Audio: la salida por la que suena."}
+                scene: {type: integer, description: "Sequence: la escena de la que cuelga."}
+                palettes: {type: array, description: "Scene: las palettes aplicadas.", items: {type: integer}}
+      responses:
+        "200":
+          description: El cuerpo resultante.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions/{id}/values:
+    post:
+      tags: [funciones]
+      summary: Un canal de una fixture dentro de una escena.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fixture, channel, value]
+              properties:
+                fixture: {type: integer}
+                channel: {type: integer, description: "Índice dentro de la fixture, desde 0."}
+                value: {type: integer, minimum: -1, maximum: 255, description: "-1 lo quita de la escena."}
+      responses:
+        "200":
+          description: La escena ya cambiada.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions/{id}/members:
+    put:
+      tags: [funciones]
+      summary: Los miembros de una colección.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [functions]
+              properties:
+                functions: {type: array, items: {type: integer}}
+      responses:
+        "200":
+          description: La colección.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/steps:
+    post:
+      tags: [funciones]
+      summary: Añadir un paso a un chaser.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [function]
+              properties:
+                function: {type: integer, description: "La función que dispara el paso."}
+                index: {type: integer, description: "Dónde insertarlo; al final si falta."}
+                fadeIn: {type: integer}
+                hold: {type: integer}
+                fadeOut: {type: integer}
+      responses:
+        "200":
+          description: El chaser ya cambiado.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/steps/{index}:
+    patch:
+      tags: [funciones]
+      summary: Cambiar un paso de un chaser.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: index
+          in: path
+          required: true
+          schema: {type: integer, minimum: 0}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                function: {type: integer}
+                fadeIn: {type: integer}
+                hold: {type: integer}
+                fadeOut: {type: integer}
+                duration: {type: integer}
+                note: {type: string, description: "La etiqueta del cue."}
+      responses:
+        "200":
+          description: El chaser ya cambiado.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [funciones]
+      summary: Quitar un paso de un chaser.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: index
+          in: path
+          required: true
+          schema: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: El chaser ya cambiado.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/steps/order:
+    put:
+      tags: [funciones]
+      summary: Reordenar los pasos de un chaser.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order]
+              properties:
+                order: {type: array, description: "Los índices actuales, en el orden nuevo.", items: {type: integer}}
+      responses:
+        "200":
+          description: El chaser ya reordenado.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/steps/{index}/values:
+    put:
+      tags: [funciones]
+      summary: Los valores DMX de un paso de una secuencia.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: index
+          in: path
+          required: true
+          schema: {type: integer, minimum: 0}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [values]
+              properties:
+                values:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      fixture: {type: integer}
+                      channel: {type: integer}
+                      value: {type: integer, minimum: 0, maximum: 255}
+      responses:
+        "200":
+          description: La secuencia ya cambiada.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/clone:
+    post:
+      tags: [funciones]
+      summary: Duplicar una función con su cuerpo.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      responses:
+        "201":
+          description: La copia.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/usage:
+    get:
+      tags: [funciones]
+      summary: Quién usa esta función.
+      description: |
+        Qué chasers, colecciones y botones dependen de ella, y si es la función
+        de arranque del show. Lo que hay que mirar antes de borrar.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      responses:
+        "200":
+          description: Las dependencias.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: integer}
+                  name: {type: string}
+                  type: {type: string}
+                  startup: {type: boolean}
+                  functions: {type: array, items: {type: object, additionalProperties: true}}
+                  widgets: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions/{id}/media:
+    get:
+      tags: [funciones]
+      summary: El fichero de un audio o un vídeo, para servirlo al navegador.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      responses:
+        "200":
+          description: El medio.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions/{id}/waveform:
+    get:
+      tags: [funciones]
+      summary: La forma de onda de un audio, para dibujarla.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: points
+          in: query
+          description: Cuántos puntos devolver.
+          schema: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: Los picos y la duración.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  duration: {type: integer}
+                  points: {type: array, items: {type: number}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/functions/{id}/bake:
+    post:
+      tags: [funciones]
+      summary: Congelar una matriz RGB en una secuencia de pasos.
+      description: Convierte un algoritmo en pasos concretos que se pueden editar uno a uno.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      responses:
+        "201":
+          description: La escena y la secuencia creadas.
+          content:
+            application/json:
+              schema: {type: object, properties: {scene: {type: integer}, sequence: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/algorithms:
+    get:
+      tags: [funciones]
+      summary: Los algoritmos disponibles para una matriz RGB.
+      responses:
+        "200":
+          description: Los nombres, con sus propiedades.
+          content:
+            application/json:
+              schema: {type: object, properties: {algorithms: {type: array, items: {type: object, additionalProperties: true}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/script/check:
+    post:
+      tags: [funciones]
+      summary: Comprobar un script sin guardarlo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {data: {type: string}}
+      responses:
+        "200":
+          description: Los errores, por línea. Vacío si está bien.
+          content:
+            application/json:
+              schema: {type: object, properties: {errors: {type: array, items: {type: object, additionalProperties: true}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/functions/{id}/tracks:
+    post:
+      tags: [funciones]
+      summary: Añadir una pista a un show.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                scene: {type: integer, description: "La escena de la que cuelga la pista."}
+      responses:
+        "201":
+          description: La pista creada.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/tracks/{trackId}:
+    patch:
+      tags: [funciones]
+      summary: Renombrar o silenciar una pista.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: trackId
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                mute: {type: boolean}
+                scene: {type: integer}
+      responses:
+        "200":
+          description: La pista.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [funciones]
+      summary: Quitar una pista de un show.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: trackId
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Quitada.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/tracks/{trackId}/solo:
+    post:
+      tags: [funciones]
+      summary: Dejar sonando una sola pista.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: trackId
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {solo: {type: boolean}}}
+      responses:
+        "200":
+          description: El estado resultante.
+          content:
+            application/json:
+              schema: {type: object, properties: {track: {type: integer}, solo: {type: boolean}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/tracks/{trackId}/items:
+    post:
+      tags: [funciones]
+      summary: Colocar una función en la línea de tiempo.
+      description: |
+        Se niega un solape en la misma pista, nombrando con qué choca: dos cosas
+        a la vez en una pista suenan las dos y lo que hace el rig es lo que
+        escribiera la última, que no es algo que se pueda leer de una timeline
+        que las dibuja apiladas. Un script o una colección no caben — no tienen
+        duración, así que no hay barra que dibujar ni final en el que pararlos.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: trackId
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [function, start]
+              properties:
+                function: {type: integer}
+                start: {type: integer, description: "Milisegundos desde el comienzo del show."}
+                duration: {type: integer}
+      responses:
+        "201":
+          description: El elemento colocado.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /api/v1/functions/{id}/items/{itemId}:
+    patch:
+      tags: [funciones]
+      summary: Mover, estirar, bloquear o colorear un elemento de la timeline.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: itemId
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start: {type: integer}
+                duration: {type: integer}
+                locked: {type: boolean}
+                color: {type: string}
+      responses:
+        "200":
+          description: El elemento.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      tags: [funciones]
+      summary: Quitar un elemento de la timeline.
+      parameters:
+        - {$ref: "#/components/parameters/functionId"}
+        - name: itemId
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Quitado.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/functions/{id}/time:
+    post:
+      tags: [funciones]
+      summary: Insertar o quitar tiempo en un show, corriendo lo que venga después.
+      parameters: [{$ref: "#/components/parameters/functionId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, at, amount]
+              properties:
+                action: {type: string, enum: [insert, cut]}
+                at: {type: integer, description: "Milisegundos."}
+                amount: {type: integer, description: "Milisegundos."}
+      responses:
+        "200":
+          description: Cuántos elementos se movieron.
+          content:
+            application/json:
+              schema: {type: object, properties: {moved: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/fixture-groups:
+    get:
+      tags: [grupos]
+      summary: Los grupos de fixtures, con su rejilla.
+      responses:
+        "200":
+          description: Los grupos.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: integer}
+                    name: {type: string}
+                    size: {type: object, properties: {width: {type: integer}, height: {type: integer}}}
+                    fixtures: {type: array, items: {type: integer}}
+                    cells: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [grupos]
+      summary: Crear un grupo de fixtures.
+      description: La rejilla importa — es el lienzo sobre el que corren las matrices RGB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string}
+                fixtures: {type: array, items: {type: integer}}
+      responses:
+        "201":
+          description: El grupo creado.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/fixture-groups/{id}:
+    patch:
+      tags: [grupos]
+      summary: Renombrar, cambiar miembros o recolocar la rejilla.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                fixtures: {type: array, items: {type: integer}}
+                size: {type: object, properties: {width: {type: integer}, height: {type: integer}}}
+                cells:
+                  type: array
+                  description: Qué fixture y qué cabeza va en cada celda.
+                  items:
+                    type: object
+                    properties:
+                      x: {type: integer}
+                      y: {type: integer}
+                      fixture: {type: integer}
+                      head: {type: integer}
+      responses:
+        "200":
+          description: El grupo.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [grupos]
+      summary: Borrar un grupo.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Borrado.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/fixture-groups/{id}/transform:
+    post:
+      tags: [grupos]
+      summary: Girar o voltear la rejilla de un grupo.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [op]
+              properties:
+                op: {type: string, enum: [rotate90, rotate180, rotate270, flip, flipv]}
+      responses:
+        "200":
+          description: El grupo transformado.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}, op: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/channel-groups:
+    get:
+      tags: [grupos]
+      summary: Los grupos de canales, con cada canal nombrado.
+      description: |
+        Los nombres son el punto. Un grupo guardado como «fixture 2, canal 5» es
+        ilegible e incomprobable; «Cabeza L · Gobo» es un grupo que un operador
+        ve que es el que quería.
+      responses:
+        "200":
+          description: Los grupos.
+          content:
+            application/json:
+              schema: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [grupos]
+      summary: Crear un grupo de canales.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, channels]
+              properties:
+                name: {type: string}
+                channels:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      fixture: {type: integer}
+                      channel: {type: integer}
+      responses:
+        "201":
+          description: El grupo creado.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/channel-groups/{id}:
+    patch:
+      tags: [grupos]
+      summary: Renombrar o cambiar los canales de un grupo.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                channels: {type: array, items: {type: object, additionalProperties: true}}
+      responses:
+        "200":
+          description: El grupo.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [grupos]
+      summary: Borrar un grupo de canales.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Borrado.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/palettes:
+    get:
+      tags: [grupos]
+      summary: Las palettes del proyecto.
+      responses:
+        "200":
+          description: Colores, dimmer, posiciones y demás, con su fanning.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [grupos]
+      summary: Crear una palette.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: {type: string}
+                type: {type: string, enum: [Dimmer, Color, Position, Shutter, Gobo, Beam, Undefined]}
+      responses:
+        "201":
+          description: La palette creada.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/palettes/{id}:
+    patch:
+      tags: [grupos]
+      summary: Cambiar los valores o el fanning de una palette.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        "200":
+          description: La palette.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [grupos]
+      summary: Borrar una palette.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Borrada.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/palettes/{id}/apply:
+    post:
+      tags: [grupos]
+      summary: Aplicar una palette a unas fixtures o a una escena.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer}
+      description: |
+        Aterriza en la **mesa en vivo**, no en una escena ni en el documento:
+        los valores que la palette resuelve para esas fixtures se clavan como
+        si vinieran de `PUT /api/v1/live`. Para convertirlo en escena, después
+        `POST /api/v1/dump`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fixtures]
+              properties:
+                fixtures:
+                  type: array
+                  description: Sobre qué lámparas. Vacío se rechaza.
+                  items: {type: integer}
+      responses:
+        "200":
+          description: A cuántos canales llegó.
+          content:
+            application/json:
+              schema: {type: object, properties: {applied: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/colorfilters:
+    get:
+      tags: [grupos]
+      summary: Los catálogos de gelatinas — Lee, Rosco y demás.
+      responses:
+        "200":
+          description: Los filtros.
+          content:
+            application/json:
+              schema: {type: object, properties: {filters: {type: array, items: {type: object, additionalProperties: true}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/modifiers:
+    get:
+      tags: [fixtures]
+      summary: Las plantillas de curva de respuesta disponibles.
+      responses:
+        "200":
+          description: Los nombres.
+          content:
+            application/json:
+              schema: {type: object, properties: {modifiers: {type: array, items: {type: string}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/modifiers/{name}:
+    get:
+      tags: [fixtures]
+      summary: Una curva, punto a punto, para dibujarla.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: La curva.
+          content:
+            application/json:
+              schema: {type: object, properties: {name: {type: string}, curve: {type: array, items: {type: integer}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/vc:
+    get:
+      tags: [consola]
+      summary: La Virtual Console entera, con su geometría.
+      description: |
+        El árbol de widgets tal y como lo guarda el proyecto, coordenadas
+        incluidas. La interfaz las lee como intención —lo que el diseñador puso
+        en paralelo es una fila— y refluye; no escala el lienzo.
+      responses:
+        "200":
+          description: El árbol.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/vc/widgets:
+    post:
+      tags: [consola]
+      summary: Añadir un widget a la consola.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, parent]
+              properties:
+                type:
+                  type: string
+                  enum: [Frame, SoloFrame, Button, Slider, XYPad, CueList, Label, Clock, AudioTriggers, Speeddial, Animation, Matrix]
+                parent: {type: integer, description: "El marco que lo contiene."}
+      responses:
+        "201":
+          description: El widget creado.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}, type: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/vc/widgets/{id}:
+    patch:
+      tags: [consola]
+      summary: Cambiar un widget — nombre, función, modo, colores, control externo.
+      description: |
+        Lo que se acepta depende del tipo: una etiqueta tiene nombre y nada más;
+        un botón, función y acción; un fader, modo y canales. Un `null` en un
+        color o una fuente lo devuelve al **Default** de la mesa, que no es lo
+        mismo que elegir un gris parecido.
+      parameters: [{$ref: "#/components/parameters/widgetId"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                caption: {type: string}
+                functionId: {type: integer, description: "Botón, slider de playback, animación: qué función dispara."}
+                chaserId: {type: integer, description: "Cue list: el chaser que corre."}
+                action: {type: string, enum: [toggle, flash], description: "Botón: pulsar y quedarse, o mientras se sujeta."}
+                key: {type: [string, "null"], description: "Botón: atajo de teclado."}
+                flashOverride: {type: integer, description: "Botón en flash: intensidad forzada."}
+                flashForceLTP: {type: boolean}
+                startupIntensity: {type: number, description: "Con qué intensidad arranca lo que dispara."}
+                sliderMode:
+                  type: string
+                  enum: [level, playback, submaster, adjust]
+                  description: |
+                    Qué es este fader. `level` sujeta canales a UN valor;
+                    `playback` no escribe canales —a cero para su función, por
+                    encima la arranca y le mantiene la intensidad—; `submaster`
+                    escala todo lo que cuelga de su marco; `adjust` mueve un
+                    atributo de una función.
+                levelChannels:
+                  type: array
+                  description: "Slider en modo nivel: qué canales sujeta."
+                  items:
+                    type: object
+                    required: [fixture, channel]
+                    properties:
+                      fixture: {type: integer}
+                      channel: {type: integer, description: "Índice dentro de la fixture, desde 0."}
+                sliderStyle: {type: string}
+                sideFaderMode: {type: string, description: "Cue list: qué hace el fader lateral de crossfade."}
+                attribute: {type: string, description: "Slider en modo adjust: qué atributo mueve."}
+                adjust: {type: object, additionalProperties: true}
+                padHeads: {type: array, description: "XY pad: las cabezas que apunta, con sus límites y ejes invertidos.", items: {type: object, additionalProperties: true}}
+                padPresets: {type: array, items: {type: object, additionalProperties: true}}
+                geometry:
+                  type: object
+                  description: Posición y tamaño en el lienzo original del show.
+                  properties:
+                    x: {type: integer}
+                    y: {type: integer}
+                    width: {type: integer}
+                    height: {type: integer}
+                page: {type: integer, description: "En qué página del marco que lo contiene vive."}
+                pages: {type: integer, description: "Marco: cuántas páginas tiene."}
+                pagesLoop: {type: boolean}
+                pageShortcuts: {type: array, items: {type: object, additionalProperties: true}}
+                pageInputs: {type: array, items: {type: object, additionalProperties: true}}
+                frameStyle: {type: string}
+                clockType: {type: string, enum: [clock, stopwatch, countdown]}
+                clockTime: {type: integer}
+                schedules: {type: array, description: "Reloj: la agenda semanal, que suena aunque no haya navegador abierto.", items: {type: object, additionalProperties: true}}
+                background:
+                  type: [string, "null"]
+                  description: |
+                    Color de fondo, "#rrggbb". `null` lo devuelve al **Default**
+                    de la mesa, que no es lo mismo que elegir un gris que se le
+                    parezca: QLC+ escribe «Default» y cada tema lo pinta a su
+                    manera.
+                foreground: {type: [string, "null"], description: "Color del texto, con la misma regla para null."}
+                font:
+                  type: [string, "null"]
+                  description: |
+                    `QFont::toString()` — dieciséis campos separados por comas.
+                    Mandar la familia a secas sería una fuente sin tamaño, sin
+                    peso y sin estilo: algo que no eligió nadie.
+                input:
+                  type: [object, "null"]
+                  description: |
+                    Control externo. Se aprende pulsándolo: mueve el fader
+                    físico y lee `GET /api/v1/input/last`.
+
+                    `null` **borra** el elemento en vez de vaciarlo: un
+                    `<Input>` sin atributos lo lee QLC+ como universo 0, canal 0
+                    — una asignación a algo real, y a lo que no es.
+                  properties:
+                    universe: {type: integer}
+                    channel: {type: integer}
+      responses:
+        "200":
+          description: El widget ya cambiado.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [consola]
+      summary: Borrar un widget y lo que cuelgue de él.
+      parameters: [{$ref: "#/components/parameters/widgetId"}]
+      responses:
+        "200":
+          description: Borrado.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/vc/widgets/ids:
+    post:
+      tags: [consola]
+      summary: Ponerle identificadores a una consola de QLC+ 4.
+      description: |
+        Aquella versión no escribía `ID` en ningún widget, y toda edición
+        direcciona por id: esos proyectos no son *parcialmente* editables, no lo
+        son en absoluto. Esto se los asigna sin tocar nada más.
+      responses:
+        "200":
+          description: Cuántos se asignaron.
+          content:
+            application/json:
+              schema: {type: object, properties: {assigned: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/vc/undo:
+    post:
+      tags: [consola]
+      summary: Deshacer la última edición de la consola.
+      responses:
+        "200":
+          description: Lo que queda a cada lado.
+          content:
+            application/json:
+              schema: {type: object, properties: {undo: {type: integer}, redo: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/vc/redo:
+    post:
+      tags: [consola]
+      summary: Rehacer la última edición deshecha de la consola.
+      responses:
+        "200":
+          description: Lo que queda a cada lado.
+          content:
+            application/json:
+              schema: {type: object, properties: {undo: {type: integer}, redo: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/vc/history:
+    get:
+      tags: [consola]
+      summary: Cuánto historial de consola queda a cada lado.
+      responses:
+        "200":
+          description: Los contadores.
+          content:
+            application/json:
+              schema: {type: object, properties: {undo: {type: integer}, redo: {type: integer}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/layout:
+    get:
+      tags: [consola]
+      summary: El orden en que se apilan los widgets en pantalla.
+      description: |
+        Vive en una sección propia del `.qxw` (`<OrchidLightsLayout>`), no en el
+        `<VirtualConsole>` de QLC+. Cuidado: QLC+ no conserva las secciones que
+        no entiende, así que guardar el proyecto *desde QLC+* pierde esto y la
+        consola vuelve a ordenarse por su geometría. No se pierde nada más.
+      responses:
+        "200":
+          description: Las páginas y sus filas.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      tags: [consola]
+      summary: Reordenar la consola.
+      description: |
+        Un layout guardado nunca oculta un widget que no menciona: lo que no
+        conozca sale igual, en su sitio geométrico. Esconderlo sería el peor
+        fallo posible, porque el operador ni siquiera sabría qué le falta.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: {type: integer}
+                      rows:
+                        type: array
+                        items: {type: array, items: {type: integer}}
+      responses:
+        "200":
+          description: El layout guardado en memoria, no en disco.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  saved: {type: boolean}
+                  note: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/plan:
+    get:
+      tags: [plano]
+      summary: El rig como plano — dónde está cada lámpara y qué canales la colorean.
+      description: |
+        Los roles de canal son el punto: la interfaz ya recibe todos los frames
+        DMX, así que en cuanto sabe que el rojo de la fixture 4 es el canal 0 y
+        su dímer el 6, pinta el plano entero en cada frame sin preguntar nada.
+        Mandar colores desde aquí sería un viaje de ida y vuelta por frame, y un
+        plano que va con retraso es peor que ninguno, porque uno se lo cree.
+      responses:
+        "200":
+          description: La rejilla del escenario y las fixtures colocadas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  grid:
+                    type: object
+                    properties:
+                      width: {type: number}
+                      height: {type: number}
+                      depth: {type: number}
+                      units: {type: string, enum: [meters, feet]}
+                  background: {type: boolean}
+                  pointOfView: {type: string, enum: [top, front, rightside, leftside]}
+                  fixtures: {type: array, items: {$ref: "#/components/schemas/PlanFixture"}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/plan/grid:
+    put:
+      tags: [plano]
+      summary: Las dimensiones del escenario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                width: {type: number}
+                height: {type: number}
+                depth: {type: number}
+                units: {type: string, enum: [meters, feet]}
+      responses:
+        "200":
+          description: La rejilla resultante.
+          content:
+            application/json:
+              schema: {type: object, properties: {width: {type: number}, height: {type: number}, depth: {type: number}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/plan/fixtures/{id}:
+    put:
+      tags: [plano]
+      summary: Colocar una lámpara en el escenario.
+      description: |
+        Posiciones en milímetros contra el `grid`, rotaciones en grados. Se
+        guarda en el `<Monitor>` de QLC+, así que el plano abre igual en el
+        escritorio.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                x: {type: number}
+                y: {type: number}
+                z: {type: number}
+                rotation: {type: number, description: "Giro sobre el eje vertical."}
+                rotationX: {type: number}
+                rotationZ: {type: number}
+                gel: {type: string, description: 'Color del filtro, "#rrggbb".'}
+                zoom: {type: integer}
+                hidden: {type: boolean}
+                locked: {type: boolean}
+                invertPan: {type: boolean, description: "Un foco colgado boca abajo se apunta invirtiendo un eje."}
+                invertTilt: {type: boolean}
+                head: {type: integer, description: "Para colocar una cabeza suelta de una barra."}
+                linked: {type: integer, description: "Para colocar una copia dibujada de la misma lámpara."}
+      responses:
+        "200":
+          description: Colocada.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [plano]
+      summary: Quitar una lámpara del plano, sin despatchearla.
+      description: Vuelve a la bandeja de las que están sin colocar.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      responses:
+        "200":
+          description: Quitada del plano.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/plan/fixtures/{id}/linked:
+    post:
+      tags: [plano]
+      summary: Dibujar otra vez la misma lámpara en otro sitio del plano.
+      description: Solo en el plano y en el fichero; el DMX no se toca.
+      parameters: [{$ref: "#/components/parameters/fixtureId"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                head: {type: integer}
+                name: {type: string}
+                x: {type: number}
+                y: {type: number}
+      responses:
+        "201":
+          description: La copia creada.
+          content:
+            application/json:
+              schema: {type: object, properties: {id: {type: integer}, linked: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/plan/fixtures/{id}/linked/{linkedIndex}:
+    delete:
+      tags: [plano]
+      summary: Quitar una copia dibujada.
+      parameters:
+        - {$ref: "#/components/parameters/fixtureId"}
+        - name: linkedIndex
+          in: path
+          required: true
+          schema: {type: integer}
+        - name: head
+          in: query
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Quitada.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/plan/background:
+    get:
+      tags: [plano]
+      summary: La imagen de fondo del plano.
+      responses:
+        "200":
+          description: La imagen.
+          content:
+            image/*:
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      tags: [plano]
+      summary: Poner una imagen de fondo, ya subida como asset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset]
+              properties: {asset: {type: string}}
+      responses:
+        "200":
+          description: Puesta.
+          content:
+            application/json:
+              schema: {type: object, properties: {background: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [plano]
+      summary: Quitar la imagen de fondo.
+      responses:
+        "200":
+          description: Quitada.
+          content:
+            application/json:
+              schema: {type: object, properties: {background: {type: [string, "null"]}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/meshes/{group}/{name}:
+    get:
+      tags: [plano]
+      summary: Un modelo 3D de la librería, para dibujar la lámpara en el escenario.
+      parameters:
+        - name: group
+          in: path
+          required: true
+          schema: {type: string}
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: El modelo.
+          content:
+            model/obj:
+              schema: {type: string, format: binary}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/io:
+    get:
+      tags: [io]
+      summary: Qué plugins de entrada y salida tiene esta máquina, y con qué líneas.
+      description: |
+        Lo primero que hay que leer para patchear: los nombres de plugin y de
+        línea que acepta `PATCH /universes/{index}` son exactamente los que
+        salen aquí. Inventárselos es patchear a una salida que no existe, y eso
+        no da error hasta que no sale luz.
+      responses:
+        "200":
+          description: Plugins, sus líneas, y los perfiles de entrada instalados.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outputPlugins:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string, examples: [ArtNet, E1.31, DMX USB, MIDI, OSC, Loopback]}
+                        lines: {type: array, items: {type: string}}
+                  inputPlugins:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        lines: {type: array, items: {type: string}}
+                  inputProfiles: {type: array, items: {type: string}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/universes:
+    get:
+      tags: [io]
+      summary: Los universos y por dónde entra y sale cada uno.
+      responses:
+        "200":
+          description: Los universos.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/Universe"}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [io]
+      summary: Añadir un universo.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {name: {type: string}}
+      responses:
+        "201":
+          description: Los universos resultantes.
+          content:
+            application/json:
+              schema: {type: object, properties: {universes: {type: array, items: {$ref: "#/components/schemas/Universe"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/universes/{index}:
+    patch:
+      tags: [io]
+      summary: Patchear un universo — su salida DMX, su entrada MIDI y su feedback.
+      description: |
+        Aquí se configura la entrada y la salida de una mesa entera. Un `plugin`
+        vacío desconecta. El `profile` de la entrada es lo que le da sentido a
+        las notas y los CC de un ala MIDI; sin él llegan números sin nombre.
+
+        Fuera del anillo de undo, como en la referencia: el patch de I/O
+        describe la máquina, no el show.
+      parameters: [{$ref: "#/components/parameters/universeIndex"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                passthrough: {type: boolean, description: "Reenvía a la salida lo que entra, sin pasar por el motor."}
+                output:
+                  type: object
+                  description: Por dónde sale el DMX de este universo.
+                  properties:
+                    plugin: {type: string, description: "Un nombre de GET /io — ArtNet, E1.31, DMX USB, MIDI, OSC."}
+                    line: {type: string, description: "La línea concreta de ese plugin."}
+                    index: {type: integer, description: "Para plugins con varias salidas por línea."}
+                input:
+                  type: object
+                  description: Por dónde entra el control — un ala MIDI, OSC, un HID.
+                  properties:
+                    plugin: {type: string}
+                    line: {type: string}
+                    profile: {type: string, description: "Perfil de entrada, de los que lista GET /io."}
+                feedback:
+                  type: object
+                  description: Adónde vuelven los faders motorizados y los LEDs de la superficie.
+                  properties:
+                    plugin: {type: string}
+                    line: {type: string}
+      responses:
+        "200":
+          description: Todos los universos, ya patcheados.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/Universe"}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [io]
+      summary: Quitar un universo.
+      parameters: [{$ref: "#/components/parameters/universeIndex"}]
+      responses:
+        "200":
+          description: Quitado.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/universes/{index}/parameters:
+    put:
+      tags: [io]
+      summary: Los ajustes finos de un patch — los knobs que expone el plugin.
+      parameters: [{$ref: "#/components/parameters/universeIndex"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target: {type: string, enum: [input, output, feedback]}
+                index: {type: integer}
+                parameters: {type: object, additionalProperties: true}
+      responses:
+        "200":
+          description: El universo.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/universes/{index}/map:
+    get:
+      tags: [io]
+      summary: El mapa de direcciones de un universo — qué canal ocupa quién.
+      description: Lo que hay que mirar antes de patchear una lámpara nueva, para no pisar una dirección.
+      parameters: [{$ref: "#/components/parameters/universeIndex"}]
+      responses:
+        "200":
+          description: Los 512 canales, con quién los ocupa y cuántos quedan libres.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: integer}
+                  name: {type: string}
+                  used: {type: integer}
+                  free: {type: integer}
+                  fixtures: {type: array, items: {type: object, additionalProperties: true}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/universes/{index}/dmx:
+    get:
+      tags: [directo]
+      summary: Qué está saliendo por este universo ahora mismo.
+      description: |
+        El bucle de verificación. La interfaz web lee los frames del WebSocket,
+        pero un cliente que no puede sostener un socket —un script, una shell,
+        un agente moviendo la mesa con curl— no tiene forma de comprobar su
+        propio trabajo, y configurar un rig sin mirar nunca la salida es
+        configurarlo a ciegas.
+
+        Son los valores **después del grand master**, que es lo que reciben las
+        lámparas: una foto que lo ignorase diría que el rig está encendido en
+        mitad de un fundido a negro.
+
+        `active` es lo que de verdad se lee: los canales que no están a cero,
+        con el nombre de su fixture y de su canal. 512 ceros es lo que parece un
+        universo la mayor parte del tiempo y no le dicen nada a nadie;
+        «Cabeza L · Dimmer · 255» es la línea que contesta «¿ha funcionado?».
+      parameters: [{$ref: "#/components/parameters/universeIndex"}]
+      responses:
+        "200":
+          description: La foto del universo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  universe: {type: integer}
+                  blackout: {type: boolean}
+                  values:
+                    type: array
+                    description: Los 512 canales, en orden, de 0 a 255.
+                    items: {type: integer, minimum: 0, maximum: 255}
+                  active:
+                    type: array
+                    description: Solo los que no están a cero, con nombre.
+                    items:
+                      type: object
+                      properties:
+                        channel: {type: integer, description: "Canal dentro del universo, desde 0."}
+                        value: {type: integer, minimum: 0, maximum: 255}
+                        fixture: {type: integer}
+                        fixtureName: {type: string}
+                        channelName: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/inputprofiles:
+    post:
+      tags: [io]
+      summary: Crear un perfil de entrada.
+      description: Para una superficie MIDI que la librería no trae.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manufacturer, model]
+              properties:
+                manufacturer: {type: string}
+                model: {type: string}
+                type: {type: string, enum: [MIDI, OSC, HID, DMX]}
+      responses:
+        "201":
+          description: El perfil creado.
+          content:
+            application/json:
+              schema: {type: object, properties: {name: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/inputprofiles/{name}:
+    get:
+      tags: [io]
+      summary: Un perfil de entrada, canal a canal.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: El perfil.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: {type: string}
+                  manufacturer: {type: string}
+                  model: {type: string}
+                  type: {type: string}
+                  editable: {type: boolean, description: "Los que trae la librería no lo son."}
+                  channels: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [io]
+      summary: Borrar un perfil de entrada propio.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Borrado.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: string}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/inputprofiles/{name}/channels/{channel}:
+    put:
+      tags: [io]
+      summary: Nombrar un canal de un perfil de entrada.
+      description: Es lo que convierte «canal 47» en «Fader 3», que es lo que hace legible un mapeo.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+        - name: channel
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+                type: {type: string, enum: [Button, Slider, Knob, Encoder, Prev, Next, Page]}
+      responses:
+        "200":
+          description: El canal.
+          content:
+            application/json:
+              schema: {type: object, properties: {channel: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [io]
+      summary: Quitar un canal de un perfil de entrada.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
+        - name: channel
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        "200":
+          description: Quitado.
+          content:
+            application/json:
+              schema: {type: object, properties: {removed: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/input/last:
+    get:
+      tags: [io]
+      summary: La última entrada externa que vio el daemon.
+      description: |
+        Cómo se aprende un mapeo: se pulsa el control físico y se pregunta aquí.
+        Nadie sabe que su fader es el canal 47 del universo de entrada 1, y un
+        formulario que pide dos números es un formulario que nadie rellena.
+      responses:
+        "200":
+          description: Qué se movió y cuándo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  seen: {type: boolean}
+                  universe: {type: integer}
+                  channel: {type: integer}
+                  value: {type: integer}
+                  note: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/beat:
+    get:
+      tags: [io]
+      summary: De dónde viene el pulso y a cuánto va.
+      responses:
+        "200":
+          description: La fuente y los BPM.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source: {type: string, enum: [internal, midi, audio, none]}
+                  bpm: {type: integer}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      tags: [io]
+      summary: Cambiar la fuente del pulso o los BPM internos.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source: {type: string, enum: [internal, midi, audio, none]}
+                bpm: {type: integer}
+      responses:
+        "200":
+          description: Lo que quedó.
+          content:
+            application/json:
+              schema: {type: object, properties: {source: {type: string}, bpm: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/audio:
+    get:
+      tags: [io]
+      summary: Las entradas y salidas de audio, y cuál está elegida.
+      description: |
+        Elegir la entrada es la diferencia entre un widget que no funciona y uno
+        que escucha el conector equivocado: la entrada por defecto de Qt puede
+        ser un jack de auriculares sin nada enchufado, y desde la consola las
+        dos cosas se ven idénticas.
+      responses:
+        "200":
+          description: Los dispositivos y el estado de la captura.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inputs: {type: array, items: {type: object, additionalProperties: true}}
+                  outputs: {type: array, items: {type: object, additionalProperties: true}}
+                  selected: {type: string}
+                  capturing: {type: boolean}
+                  canPlay: {type: boolean}
+                  formats: {type: array, items: {type: string}}
+                  unavailable: {type: boolean}
+                  silentBecause: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      tags: [io]
+      summary: Elegir la entrada de audio.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {input: {type: string}}
+      responses:
+        "200":
+          description: Lo elegido y si está capturando.
+          content:
+            application/json:
+              schema: {type: object, properties: {selected: {type: string}, capturing: {type: boolean}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/live:
+    get:
+      tags: [directo]
+      summary: Los valores que la mesa en vivo está sujetando ahora.
+      responses:
+        "200":
+          description: Los valores.
+          content:
+            application/json:
+              schema: {type: object, properties: {values: {$ref: "#/components/schemas/Values"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      tags: [directo]
+      summary: Clavar valores absolutos en canales sueltos.
+      description: |
+        **No es una edición**: no toca el documento y no sobrevive a una
+        recarga. Es lo que hace falta para un color —rojo 255, verde 40, azul
+        0—, que un fader de nivel no puede porque sujeta todos sus canales a UN
+        valor. Soltar con DELETE baja los canales a cero en vez de dejarlos
+        enganchados.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [values]
+              properties:
+                values: {$ref: "#/components/schemas/Values"}
+      responses:
+        "200":
+          description: Cuántos canales quedan sujetos.
+          content:
+            application/json:
+              schema: {type: object, properties: {held: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [directo]
+      summary: Soltar la mesa en vivo.
+      responses:
+        "200":
+          description: Cuántos quedan sujetos.
+          content:
+            application/json:
+              schema: {type: object, properties: {held: {type: integer}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/simpledesk/{universe}:
+    get:
+      tags: [mesa]
+      summary: Qué sujeta la Simple Desk en un universo.
+      parameters:
+        - name: universe
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: Los canales sujetos.
+          content:
+            application/json:
+              schema: {type: object, properties: {universe: {type: integer}, held: {type: array, items: {type: object, additionalProperties: true}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [mesa]
+      summary: Soltar el universo entero.
+      parameters:
+        - name: universe
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: Cuántos se soltaron.
+          content:
+            application/json:
+              schema: {type: object, properties: {released: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/simpledesk/{universe}/channels:
+    put:
+      tags: [mesa]
+      summary: Sujetar canales desde la Simple Desk.
+      parameters:
+        - name: universe
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [values]
+              properties:
+                values:
+                  type: object
+                  description: |
+                    Indexado por canal del universo, **de 1 a 512** — lo que
+                    teclea un operador, no el desplazamiento interno. La
+                    petición se valida entera antes de que aterrice nada: una
+                    que es medio disparate no puede ocurrir a medias.
+                  additionalProperties: {type: integer, minimum: 0, maximum: 255}
+                  examples: [{"1": 255, "6": 128}]
+      responses:
+        "200":
+          description: Los canales sujetos.
+          content:
+            application/json:
+              schema: {type: object, properties: {universe: {type: integer}, held: {type: array, items: {type: object, additionalProperties: true}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/simpledesk/{universe}/channels/{channel}:
+    delete:
+      tags: [mesa]
+      summary: Soltar un canal.
+      parameters:
+        - name: universe
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+        - name: channel
+          in: path
+          required: true
+          schema: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: Soltado.
+          content:
+            application/json:
+              schema: {type: object, properties: {released: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/simpledesk/{universe}/keypad:
+    post:
+      tags: [mesa]
+      summary: El keypad — «1 THRU 12 @ FULL», como en una mesa de verdad.
+      parameters:
+        - name: universe
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                command: {type: string, examples: ["1 THRU 12 @ FULL"]}
+      responses:
+        "200":
+          description: A cuántos canales llegó.
+          content:
+            application/json:
+              schema: {type: object, properties: {universe: {type: integer}, applied: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/grandmaster:
+    get:
+      tags: [mesa]
+      summary: Dónde está el grand master.
+      responses:
+        "200":
+          description: Su valor y sus modos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value: {type: integer, minimum: 0, maximum: 255}
+                  valueMode: {type: string, enum: [limit, reduce]}
+                  channelMode: {type: string, enum: [intensity, all]}
+                  visible: {type: boolean}
+                  input: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      tags: [mesa]
+      summary: Mover el grand master.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value: {type: integer, minimum: 0, maximum: 255}
+                valueMode: {type: string, enum: [limit, reduce]}
+                channelMode: {type: string, enum: [intensity, all]}
+                visible: {type: boolean}
+      responses:
+        "200":
+          description: Cómo quedó.
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/blackout:
+    post:
+      tags: [mesa]
+      summary: Blackout.
+      responses:
+        "200":
+          description: A oscuras.
+          content:
+            application/json:
+              schema: {type: object, properties: {blackout: {type: boolean}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      tags: [mesa]
+      summary: Quitar el blackout.
+      responses:
+        "200":
+          description: Vuelve la luz.
+          content:
+            application/json:
+              schema: {type: object, properties: {blackout: {type: boolean}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/stop:
+    post:
+      tags: [mesa]
+      summary: Parar todo lo que esté corriendo.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fadeMs: {type: integer, description: "Con qué fundido, en milisegundos."}
+      responses:
+        "200":
+          description: Cuántas funciones se pararon.
+          content:
+            application/json:
+              schema: {type: object, properties: {stopping: {type: integer}, fadeMs: {type: integer}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/dump:
+    get:
+      tags: [mesa]
+      summary: Qué se llevaría un volcado del estado actual del rig.
+      responses:
+        "200":
+          description: Los canales sueltos y los que caen en un grupo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: {type: integer}
+                  bare: {type: array, items: {type: object, additionalProperties: true}}
+                  groups: {type: array, items: {type: object, additionalProperties: true}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [mesa]
+      summary: Volcar lo que está puesto ahora mismo a una escena nueva.
+      description: Cómo se construye una escena de verdad — se monta el look en el rig y se guarda.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string, description: "Cómo se llamará la escena nueva."}
+                sceneId: {type: integer, description: "Volcar sobre una escena que ya existe en vez de crear una."}
+                nonZeroOnly: {type: boolean, description: "Dejar fuera los canales que están a cero."}
+                groups:
+                  type: array
+                  description: |
+                    Qué grupos de canal entran — Intensity, Colour, Pan, Tilt,
+                    Gobo… Vacío es todos. Volcar solo la intensidad es cómo se
+                    guarda un look de dímeres sin llevarse las posiciones.
+                  items: {type: string}
+      responses:
+        "201":
+          description: La escena creada y cuántos canales lleva.
+          content:
+            application/json:
+              schema: {type: object, properties: {scene: {type: integer}, written: {type: integer}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        El token de `~/.orchidlights/api-token`. Obligatorio cuando el daemon
+        escucha fuera de loopback, y siempre para las rutas que tocan el disco
+        o apagan el proceso. Se compara en tiempo constante.
+
+  parameters:
+    fixtureId:
+      name: id
+      in: path
+      required: true
+      description: Identificador de la fixture, asignado por el motor.
+      schema: {type: integer, minimum: 0}
+    functionId:
+      name: id
+      in: path
+      required: true
+      description: Identificador de la función, asignado por el motor.
+      schema: {type: integer, minimum: 0}
+    universeIndex:
+      name: index
+      in: path
+      required: true
+      description: Universo, contado desde 1.
+      schema: {type: integer, minimum: 1}
+    widgetId:
+      name: id
+      in: path
+      required: true
+      description: Identificador del widget de la Virtual Console.
+      schema: {type: integer, minimum: 0}
+
+  responses:
+    BadRequest:
+      description: La petición no describe una operación válida.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unauthorized:
+      description: Falta el token, o el presentado no es el de esta mesa.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Forbidden:
+      description: La máscara de acceso de esta mesa cierra esa área.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: No existe lo que se pide.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Conflict:
+      description: |
+        La operación es válida pero rompería algo — una función que otra usa,
+        un solape en una pista, una dirección DMX ocupada.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+
+  schemas:
+    Error:
+      type: object
+      description: Todo fallo se contesta así, con una frase que se le puede enseñar a un operador.
+      required: [error]
+      properties:
+        error: {type: string, description: "Qué ha ido mal, en prosa."}
+
+    Fixture:
+      type: object
+      description: Una lámpara del patch.
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        type: {type: string, description: "Familia del perfil: Moving Head, LED Bar, Dimmer…"}
+        universe: {type: integer, minimum: 1, description: "Contado desde 1."}
+        address: {type: integer, minimum: 1, description: "Primer canal, contado desde 1."}
+        channels: {type: integer, description: "Cuántos canales ocupa el modo."}
+        manufacturer: {type: string}
+        model: {type: string}
+        mode: {type: string}
+        resolved:
+          type: boolean
+          description: |
+            Falso cuando el perfil que nombra el proyecto no está en la
+            librería de esta instalación. La fixture existe y ocupa sus
+            canales, pero nadie sabe qué hace cada uno.
+        heads: {type: integer}
+        channelList:
+          type: array
+          description: >-
+            Solo en GET /fixtures/{id} — la lista no los nombra, porque un rig de
+            30 cabezas son mil nombres que nadie pidió.
+          items:
+            type: object
+            properties:
+              index: {type: integer}
+              name: {type: string}
+              group: {type: string}
+        physical:
+          type: object
+          properties:
+            weight: {type: number}
+            power: {type: number}
+            width: {type: number}
+            height: {type: number}
+            depth: {type: number}
+
+    Function:
+      type: object
+      description: Una función del proyecto, sin su cuerpo.
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        type:
+          type: string
+          enum: [Scene, Chaser, EFX, RGBMatrix, Collection, Script, Audio, Video, Show, Sequence]
+        running: {type: boolean}
+        flashing: {type: boolean}
+        path: {type: string, description: "Carpeta en el árbol de funciones."}
+        fadeIn: {type: integer, description: "Milisegundos."}
+        fadeOut: {type: integer, description: "Milisegundos."}
+        duration: {type: integer, description: "Milisegundos."}
+        runOrder: {type: string, enum: [loop, singleshot, pingpong, random]}
+        direction: {type: string, enum: [forward, backward]}
+        tempoType: {type: string, enum: [original, time, beats]}
+        step: {type: integer, description: "Paso actual, solo en chasers."}
+        steps: {type: integer, description: "Cuántos pasos tiene, solo en chasers."}
+
+    Universe:
+      type: object
+      description: Un universo DMX y por dónde entra y sale.
+      properties:
+        id: {type: integer, minimum: 1}
+        name: {type: string}
+        patched: {type: boolean}
+        passthrough: {type: boolean, description: "Reenvía a la salida lo que entra, sin pasar por el motor."}
+        outputs:
+          type: array
+          items:
+            type: object
+            properties:
+              plugin: {type: string, examples: [ArtNet, E1.31, DMX USB, MIDI, OSC]}
+              output: {type: string, description: "La línea concreta del plugin."}
+              parameters: {type: object, additionalProperties: true}
+        input:
+          type: object
+          properties:
+            plugin: {type: string}
+            line: {type: string}
+            profile: {type: string, description: "Perfil de entrada, para dar sentido a las notas y CC de un ala MIDI."}
+            parameters: {type: object, additionalProperties: true}
+        feedback:
+          type: object
+          description: Adónde van los faders motorizados y los LEDs de lo que esté patcheado como entrada.
+          properties:
+            plugin: {type: string}
+            line: {type: string}
+
+    PlanFixture:
+      type: object
+      description: |
+        Una lámpara en el escenario. Las posiciones van en milímetros contra el
+        `grid`. Una fixture sin colocar se devuelve sin coordenadas, no en el
+        origen: un plano que apila calladamente todo lo no colocado en una
+        esquina parece un plano y no lo es.
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        universe: {type: integer}
+        address: {type: integer}
+        channels: {type: integer}
+        x: {type: number}
+        y: {type: number}
+        z: {type: number}
+        rotation: {type: number, description: "Giro sobre el eje vertical, en grados."}
+        rotationX: {type: number}
+        rotationZ: {type: number}
+        gel: {type: string, description: 'Color del filtro, en "#rrggbb".'}
+        zoom: {type: integer}
+        hidden: {type: boolean}
+        locked: {type: boolean}
+        invertPan: {type: boolean}
+        invertTilt: {type: boolean}
+
+    VcWidget:
+      type: object
+      description: |
+        Un widget de la Virtual Console, con la geometría original del lienzo en
+        que se diseñó el show. La interfaz la lee como intención, no la escala.
+      properties:
+        id: {type: integer}
+        type:
+          type: string
+          enum: [Frame, SoloFrame, Button, Slider, XYPad, CueList, Label, Clock, AudioTriggers, Speeddial, Animation, Matrix]
+        caption: {type: string}
+        x: {type: integer}
+        y: {type: integer}
+        width: {type: integer}
+        height: {type: integer}
+        page: {type: integer}
+        children:
+          type: array
+          items: {$ref: "#/components/schemas/VcWidget"}
+
+    Values:
+      type: array
+      description: |
+        Valores absolutos clavados en canales sueltos. Se direccionan por
+        fixture y por el índice del canal DENTRO de ella, no por universo: es
+        la misma pareja que usan las escenas, así que un look montado aquí se
+        vuelca a escena sin traducir nada.
+      items:
+        type: object
+        required: [fixture, channel, value]
+        properties:
+          fixture: {type: integer, minimum: 0}
+          channel: {type: integer, minimum: 0, description: "Índice dentro de la fixture, contado desde 0."}
+          value: {type: integer, minimum: 0, maximum: 255}

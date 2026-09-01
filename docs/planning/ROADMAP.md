@@ -397,6 +397,79 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 ---
 
+### F9 — Agentes: el proyecto como archivo de texto
+
+> El daemon ya expone 134 operaciones sobre 100 rutas, y entre ellas está todo
+> lo que hace falta para montar un show entero: patch de fixtures, `/io` con
+> MIDI y DMX, `/plan` con posición y rotación en la 3D, cuerpos de función
+> editables, palettes, `/vc/widgets`. **La capacidad está; lo que falta es que
+> se pueda encontrar, aplicar de una vez y comprobar.**
+>
+> Un agente hoy, contra este daemon, se encuentra cuatro paredes:
+>
+> 1. **No sabe que existe.** Sin OpenAPI y sin `AGENTS.md`, averiguar la API es
+>    leer 215 KB de `apiserver.cpp`.
+> 2. **Montar un show son ~200 llamadas en orden**, y un fallo a mitad deja el
+>    proyecto en un estado que no es ni el viejo ni el nuevo.
+> 3. **No puede direccionar nada.** Los `id` los asigna `Doc` —el hueco libre
+>    más bajo—, así que un agente no puede escribirlos, solo descubrirlos
+>    después de crear. Un archivo declarativo tiene que ir por nombre.
+> 4. **No puede verificar.** Configura el rig y no tiene forma de mirar el
+>    universo de vuelta para saber si la luz se encendió.
+
+- [x] **El contrato legible.** OpenAPI 3.1 en `docs/api/openapi.yaml`, servido en
+      `GET /api/v1/openapi.json`, más un documento de descubrimiento en
+      `GET /api/v1` que diga versión, capacidades y si hace falta token.
+  - **Y un test antideriva en CI**, que es lo único que separa una spec de una
+    mentira futura: extrae la tabla de rutas de `apiserver.cpp` y la compara con
+    la spec en los dos sentidos. Una ruta nueva sin documentar rompe el build;
+    una documentada que ya no existe, también. Una spec que miente es peor que
+    no tener ninguna, porque el agente se la cree.
+  - `AGENTS.md` en la raíz — la convención que leen OpenCode, Claude Code y
+    Cursor: cómo levantar el daemon headless, dónde está el token, y el camino
+    dorado para construir un show.
+
+- [ ] **El spec: exportar.** `GET /api/v1/spec` devuelve el `.qxw` cargado como
+      un documento declarativo, versionado, con esquema en
+      `docs/api/showspec.schema.json`: universos con su patch de entrada y
+      salida, fixtures con dirección y sitio en el escenario, grupos, funciones
+      de los diez tipos, palettes y la consola entera con su disposición.
+  - **Todo direccionado por nombre**, no por id. Es la única forma de que un
+    archivo escrito a mano se pueda aplicar dos veces.
+
+- [ ] **El spec: aplicar.** `POST /api/v1/spec/apply` calcula el diff contra el
+      proyecto cargado y lo aplica.
+  - **`?dryRun=1` devuelve el plan sin tocar nada.** Un agente que no puede
+    ensayar es un agente que aprende rompiendo.
+  - **Idempotente**: aplicar dos veces el mismo archivo no crea nada la segunda.
+  - **Una sola entrada de undo para el lote entero**, no doscientas. Un operador
+    tiene que poder deshacer «lo que hizo el agente» con un `Ctrl+Z`, no con
+    doscientos.
+  - **No borra lo que el archivo no menciona** salvo que se pida `prune`. Un
+    spec parcial es lo normal; interpretarlo como «borra el resto» es perder un
+    show por omisión.
+  - `export → apply → export` es **punto fijo** sobre los `.qxw` de
+    `server/test/data`, comprobado en CI. Sin eso, exportar y volver a aplicar
+    es una forma elaborada de corromper un proyecto.
+
+- [ ] **El servidor MCP.** Paquete `mcp/` en TypeScript con el SDK oficial,
+      hablando REST con el daemon. Stdio para Claude Code y OpenCode, `.mcp.json`
+      en el checkout, y sidecar en la carcasa Tauri.
+  - **~15 herramientas con forma de tarea, no 134 envoltorios de endpoint.** Un
+    agente al que le das 134 herramientas gasta el contexto en elegir. Las que
+    importan: describir el proyecto, exportar y aplicar el spec, buscar en la
+    librería de 1.735 perfiles, disparar y parar funciones, **leer el universo
+    de vuelta** —el bucle de verificación—, y guardar.
+
+- [ ] **El CLI.** `orchidctl`, porque un agente de Claude Code o de OpenCode vive
+      en una shell y ya sabe usarla: `orchidctl export > show.yaml`,
+      `orchidctl apply --dry-run show.yaml`, `orchidctl dmx 1`, `orchidctl run`.
+
+> **Decidido: acceso total, sin rails.** Un agente puede todo lo que puede la
+> web, el rig en directo incluido. La frontera es el token, no una jaula aparte:
+> quien da el token da la mesa. Lo que sí hay es undo — cada lote es una entrada
+> — y `dryRun`, que es la diferencia entre ensayar y aprender rompiendo.
+
 ## 5. Riesgos
 
 

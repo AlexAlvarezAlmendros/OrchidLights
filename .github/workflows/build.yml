@@ -191,6 +191,11 @@ jobs:
       - name: Smoke test - the web API drives the engine
         run: ./server/test/api-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      # Antes que el resto: si el contrato y las rutas se han separado, el fallo
+      # se lee de un vistazo, y no hay por qué esperar a los treinta de abajo.
+      - name: OpenAPI smoke test (el contrato contra las rutas, campo a campo)
+        run: ./server/test/openapi-smoke.sh orchidlightsd
+
       - name: Shutdown smoke test (signals, token-gated route, last frame on the wire)
         run: ./server/test/shutdown-smoke.sh orchidlightsd
 

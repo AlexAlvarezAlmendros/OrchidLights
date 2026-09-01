@@ -74,6 +74,7 @@
 
 #include "functionparent.h"
 #include "inputoutputmap.h"
+#include "universe.h"
 #include "mastertimer.h"
 #include "qlcinputprofile.h"
 #include "qlcinputchannel.h"
@@ -426,6 +427,65 @@ void ApiServer::registerRoutes()
             return asset;
         });
     }
+
+    /* The entry point for a client that knows nothing yet: what this is, where
+       the full contract lives, whether it needs a token, and which areas the
+       mask leaves open.
+     *
+       Deliberately answerable without one -- a client that has to authenticate
+       before it can find out that it has to authenticate is a client that
+       guesses. The project block is the exception: its name and path say
+       something about the venue, so it only appears for a caller that
+       presented the token. */
+    m_server->route("/api/v1", QHttpServerRequest::Method::Get,
+                    [this, doc](const QHttpServerRequest &request) {
+        QJsonObject body;
+        body["name"] = QStringLiteral(APPNAME);
+        body["version"] = QStringLiteral(APPVERSION);
+        body["apiVersion"] = 1;
+        body["openapi"] = QStringLiteral("/api/v1/openapi.json");
+        body["websocket"] = QStringLiteral("/ws");
+        body["authRequired"] = m_auth.isRequired();
+
+        const quint32 mask = m_engine->accessMask();
+        QJsonObject access;
+        access["fixtures"] = bool(mask & EngineHost::AccessFixtures);
+        access["functions"] = bool(mask & EngineHost::AccessFunctions);
+        access["vcControl"] = bool(mask & EngineHost::AccessVcControl);
+        access["vcEditing"] = bool(mask & EngineHost::AccessVcEditing);
+        access["simpleDesk"] = bool(mask & EngineHost::AccessSimpleDesk);
+        access["show"] = bool(mask & EngineHost::AccessShow);
+        access["io"] = bool(mask & EngineHost::AccessIO);
+        body["access"] = access;
+
+        if (m_auth.authorize(request))
+        {
+            QJsonObject project;
+            project["path"] = m_engine->projectPath();
+            project["name"] = QFileInfo(m_engine->projectPath()).fileName();
+            project["modified"] = doc->isModified();
+            body["project"] = project;
+        }
+
+        return QHttpServerResponse(body);
+    });
+
+    /* The contract itself, so a client reads it off the desk in front of it
+       rather than off a repository that may be on another version. Generated
+       from docs/api/openapi.yaml, which is the source of truth; CI keeps the
+       two in step and both of them in step with the route table below. */
+    m_server->route("/api/v1/openapi.json", QHttpServerRequest::Method::Get, [] {
+        const QString path = InstallPaths::apiContract();
+        if (path.isEmpty())
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("This installation does not carry the API contract"));
+        }
+
+        QHttpServerResponse contract = QHttpServerResponse::fromFile(path);
+        contract.setHeader("Content-Type", "application/json");
+        return contract;
+    });
 
     m_server->route("/api/v1/status", QHttpServerRequest::Method::Get, [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
         if (const int refusal = refused(request))
@@ -858,6 +918,96 @@ void ApiServer::registerRoutes()
         body["used"] = used;
         body["free"] = 512 - used;
         body["fixtures"] = occupants;
+        return QHttpServerResponse(body);
+    });
+
+    /* What is actually going out of this universe right now.
+     *
+       The web interface reads the frames off the WebSocket, but a client that
+       cannot hold a socket -- a script, a shell, an agent driving the desk
+       through curl -- has no way to check its own work, and configuring a rig
+       without ever looking at the output is configuring it blind.
+     *
+       postGMValues() and not preGMValues(): the question being asked is what
+       the lamps receive, and the grand master sits between the two. A snapshot
+       that ignored it would report a lit rig during a fade to black.
+     *
+       Read under the same claim the writers take. Without it the 512 bytes can
+       be copied across a tick boundary and come back as a frame that never
+       existed -- half of one look and half of the next. Released with
+       changed=false: looking at a universe does not dirty it. */
+    m_server->route("/api/v1/universes/<arg>/dmx", QHttpServerRequest::Method::Get,
+                    [doc, denied, refused, maskForbidden](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        bool ok = false;
+        const int index = rawIndex.toInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a number"));
+
+        const int count = int(doc->inputOutputMap()->universesCount());
+        if (index < 1 || index > count)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("Universe %1 does not exist; this project has %2")
+                                 .arg(index).arg(count));
+        }
+
+        QByteArray snapshot;
+        {
+            const QList<Universe *> universes = doc->inputOutputMap()->claimUniverses();
+            if (index - 1 < universes.count())
+            {
+                const QByteArray *values = universes.at(index - 1)->postGMValues();
+                if (values != nullptr)
+                    snapshot = *values;
+            }
+            doc->inputOutputMap()->releaseUniverses(false);
+        }
+
+        QJsonArray values;
+        for (int channel = 0; channel < 512; channel++)
+            values.append(channel < snapshot.size() ? uchar(snapshot.at(channel)) : 0);
+
+        /* The non-zero channels, named. 512 zeroes are what a universe looks
+           like most of the time and reading them tells nobody anything; "Cabeza
+           L, Dimmer, 255" is the line that answers "did it work". Bounded by
+           what is lit, so a dark rig costs nothing to ask about. */
+        QJsonArray active;
+        for (int channel = 0; channel < snapshot.size(); channel++)
+        {
+            const uchar value = uchar(snapshot.at(channel));
+            if (value == 0)
+                continue;
+
+            QJsonObject entry;
+            entry["channel"] = channel;
+            entry["value"] = int(value);
+
+            for (const Fixture *fixture : doc->fixtures())
+            {
+                if (int(fixture->universe()) != index - 1)
+                    continue;
+                const int first = int(fixture->address());
+                if (channel < first || channel >= first + int(fixture->channels()))
+                    continue;
+
+                entry["fixture"] = qint64(fixture->id());
+                entry["fixtureName"] = fixture->name();
+                if (const QLCChannel *definition = fixture->channel(quint32(channel - first)))
+                    entry["channelName"] = definition->name();
+                break;
+            }
+
+            active.append(entry);
+        }
+
+        QJsonObject body;
+        body["universe"] = index;
+        body["blackout"] = doc->inputOutputMap()->blackout();
+        body["values"] = values;
+        body["active"] = active;
         return QHttpServerResponse(body);
     });
 
