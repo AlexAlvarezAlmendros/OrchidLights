@@ -197,6 +197,11 @@ ApiServer::ApiServer(EngineHost *engine, QObject *parent)
 {
     Q_ASSERT(engine != nullptr);
     UndoGuard::setRing(m_undo.get());
+
+    /* Another project is another document. Kept, the ring would undo an edit
+       of the previous show by swapping its XML over whatever this one has
+       under the same id. */
+    connect(engine, &EngineHost::projectReplaced, this, [this] { m_undo->clear(); });
 }
 
 ApiServer::~ApiServer() = default;
@@ -4500,6 +4505,42 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response);
     });
 
+    /* A batch: everything edited between opening and closing it undoes as
+       ONE entry. What a client applies as a whole -- a show document, a few
+       hundred calls -- comes back as a whole, and takes one slot of the ring
+       instead of eating it. */
+    m_server->route("/api/v1/undo/batch", QHttpServerRequest::Method::Post,
+                    [this, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        QString label = body.value("label").toString().trimmed();
+        if (label.isEmpty())
+            label = QStringLiteral("batch");
+
+        m_undo->beginBatch(label);
+
+        QJsonObject response;
+        response["open"] = true;
+        response["label"] = label;
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/undo/batch", QHttpServerRequest::Method::Delete,
+                    [this, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        /* Idempotent: closing what is not open seals nothing and says so. A
+           batch an undo already sealed, or one that went idle, is not an
+           error for the client that opened it. */
+        QJsonObject response;
+        response["sealed"] = m_undo->endBatch();
+        response["undo"] = m_undo->canUndo();
+        return QHttpServerResponse(response);
+    });
+
     m_server->route("/api/v1/history", QHttpServerRequest::Method::Get,
                     [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
         if (const int refusal = refused(request))
@@ -4507,6 +4548,7 @@ void ApiServer::registerRoutes()
 
         QJsonObject body;
         body["entries"] = m_undo->history();
+        body["batch"] = m_undo->batchOpen();
         body["undo"] = m_undo->canUndo();
         body["redo"] = m_undo->canRedo();
         return QHttpServerResponse(body);

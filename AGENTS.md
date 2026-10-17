@@ -17,7 +17,7 @@ Este documento es para las dos cosas que puede querer un agente aquí:
 ## Tres formas de entrar, y cuál usar
 
 **MCP**, si tu cliente lo habla. Diecinueve herramientas con forma de tarea, no
-ciento treinta y nueve envoltorios de endpoint: con ciento treinta y nueve
+ciento cuarenta y un envoltorios de endpoint: con ciento cuarenta y una
 herramientas delante el contexto se gasta en elegir.
 
 **Si instalaste el `.deb` de escritorio ya lo tienes**: el servidor MCP y el CLI
@@ -64,7 +64,7 @@ con el `.deb`.
 > Ubuntu 24.04.
 
 Trae tres recursos que conviene leer antes de construir nada: `orchid://guide`
-(esto mismo, que viaja dentro del paquete), `orchid://routes` (las 139
+(esto mismo, que viaja dentro del paquete), `orchid://routes` (las 141
 operaciones en una línea cada una) y `orchid://project` (el proyecto cargado,
 como documento).
 
@@ -212,7 +212,7 @@ está el contrato completo. **Contesta sin token a propósito**: un cliente que
 tiene que autenticarse para enterarse de que tiene que autenticarse es un
 cliente que adivina.
 
-El contrato entero —137 operaciones, con la forma de cada petición y cada
+El contrato entero —141 operaciones, con la forma de cada petición y cada
 respuesta— está en `GET /api/v1/openapi.json`, servido por el propio daemon, y
 en `docs/api/openapi.yaml` en el repositorio. **Léelo antes de inventarte una
 ruta.** `server/test/openapi-smoke.sh` lo compara con la tabla de rutas real en
@@ -439,7 +439,11 @@ Comprueba también lo que no debería haber pasado:
   de borrarla. Borrar una que usa un chaser contesta 409 y te dice con qué
   choca; `?force=true` la borra igualmente.
 
-Si te has equivocado: `POST /api/v1/undo`. El anillo guarda ~200 ediciones.
+Si te has equivocado: `POST /api/v1/undo`. El anillo guarda ~200 entradas, y
+un documento aplicado entero es **una**: el aplicador lo envuelve en un lote
+(`POST /undo/batch` … `DELETE /undo/batch`), así que un solo undo lo devuelve
+todo, aunque fueran cientos de llamadas. Si haces tus propias tandas por REST,
+envuélvelas igual. El anillo se vacía al cargar otro proyecto.
 
 ---
 

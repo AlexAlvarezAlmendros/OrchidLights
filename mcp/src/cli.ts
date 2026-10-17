@@ -229,7 +229,9 @@ async function main(): Promise<number> {
             console.log(
               'el lote no cabe en el anillo de undo (200 entradas): no se puede deshacer entero',
             )
-          } else if (report.undoSteps > 0) {
+          } else if (report.undoSteps === 1) {
+            console.log('para deshacerlo entero: orchidctl undo')
+          } else if (report.undoSteps > 1) {
             console.log(`para deshacerlo: orchidctl undo ×${report.undoSteps}`)
           }
         },

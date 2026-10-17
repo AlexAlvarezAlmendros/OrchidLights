@@ -1116,7 +1116,9 @@ export const api = {
   /** The GLOBAL ring: every edit, console included (via markers). */
   globalHistory: () =>
     json<{
-      entries: { label: string; scope: number; items: number }[]
+      /** `edits` only on a batch: a whole applied document is one entry. */
+      entries: { label: string; scope: number; items: number; edits?: number }[]
+      batch: boolean
       undo: boolean
       redo: boolean
     }>('/api/v1/history'),

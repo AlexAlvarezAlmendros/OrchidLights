@@ -160,5 +160,43 @@ check(
     : `distintos: ${brokenChasers.slice(0, 3).map((fn) => fn.name).join(', ')}`,
 )
 
+/* ---- y se deshace entero, de una vez --------------------------------- */
+
+/* El documento son cientos de llamadas, más de las 200 que guarda el anillo.
+   Sin lotes se comía su propio principio y no había vuelta atrás; ahora es
+   una entrada, que un undo quita entera y un redo devuelve entera. */
+check(
+  'el documento entero deja UNA entrada de undo',
+  first.undoSteps === 1 && first.undoOverflowed === false,
+  `${first.undoSteps} entradas para ${first.actions.length} acciones`,
+)
+
+const history = await target.get('/history')
+const sealed = history.entries.at(-1)
+check(
+  'y esa entrada lleva dentro más ediciones de las que caben en el anillo',
+  (sealed?.edits ?? 0) > 200,
+  `${sealed?.edits} ediciones en «${sealed?.label}»`,
+)
+
+await target.post('/undo', {})
+const undone = await exportSpec(target, { console: false })
+check(
+  'un solo undo devuelve la mesa a como estaba antes de aplicar',
+  undone.fixtures.length === 0 && undone.functions.length === 0,
+  `${undone.fixtures.length} fixtures, ${undone.functions.length} funciones`,
+)
+
+await target.post('/redo', {})
+const redone = await exportSpec(target, { console: false })
+const redoneScenes = new Map(redone.functions.map((fn) => [fn.name, fn]))
+check(
+  'y un solo redo lo trae de vuelta, escenas incluidas valor a valor',
+  redone.fixtures.length === spec.fixtures.length
+    && redone.functions.length === spec.functions.length
+    && scenes.every((fn) => shape(fn) === shape(redoneScenes.get(fn.name))),
+  `${redone.fixtures.length} fixtures, ${redone.functions.length} funciones`,
+)
+
 console.log(failures === 0 ? '\nPASS' : `\nFAIL: ${failures}`)
 process.exit(failures === 0 ? 0 : 1)

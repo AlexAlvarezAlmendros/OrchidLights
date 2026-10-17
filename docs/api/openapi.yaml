@@ -1,6 +1,6 @@
 # OrchidLights — contrato de la API HTTP.
 #
-# Esta es la descripción legible por máquinas de las 134 operaciones que el
+# Esta es la descripción legible por máquinas de las 141 operaciones que el
 # daemon expone. Está escrita a mano, y por eso mismo `server/test/openapi-smoke.sh`
 # la compara en CI contra la tabla de rutas real de `server/src/apiserver.cpp`:
 # una ruta nueva sin documentar rompe el build, y una documentada que ya no
@@ -233,10 +233,10 @@ paths:
       tags: [sistema]
       summary: El anillo de undo, para enseñárselo a alguien.
       description: |
-        El anillo guarda **200 entradas**. Un lote más largo que eso se come su
-        propio principio, y entonces no se puede deshacer entero: lo que se
-        aplica en bloque conviene aplicarlo sobre un proyecto guardado, que es
-        el punto al que siempre se puede volver.
+        El anillo guarda **200 entradas**, y se vacía al cargar otro proyecto:
+        una entrada del show anterior se desharía sobre este. Lo que se aplica
+        en bloque va dentro de un lote (`POST /undo/batch`) y ocupa una sola
+        entrada, con `edits` diciendo cuántas ediciones lleva dentro.
 
         `undo` y `redo` son **booleanos** —si queda algo a cada lado—, no
         contadores. `GET /vc/history` sí cuenta, porque la consola lleva su
@@ -257,8 +257,62 @@ paths:
                         label: {type: string, description: "Qué operación fue."}
                         scope: {type: integer, description: "Sobre qué clase de cosa."}
                         items: {type: integer, description: "Cuántas entidades tocó."}
+                        edits: {type: integer, description: "Solo un lote: cuántas ediciones lleva dentro."}
+                  batch: {type: boolean, description: "Si hay un lote abierto recogiendo ediciones."}
                   undo: {type: boolean}
                   redo: {type: boolean}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/undo/batch:
+    post:
+      tags: [sistema]
+      summary: Abrir un lote de undo.
+      description: |
+        Todo lo que se edite mientras el lote está abierto se sella como **una
+        sola entrada** del anillo: un `POST /undo` lo deshace entero, en orden
+        inverso, y un `POST /redo` lo rehace entero. Es lo que permite deshacer
+        un documento aplicado de cientos de llamadas sin comerse el anillo.
+
+        Los lotes no se anidan: abrir uno con otro abierto sella el anterior.
+        Un lote recoge **todas** las ediciones de la mesa mientras está abierto,
+        vengan de quien vengan. Uno que pasa 30 segundos sin recibir ninguna se
+        sella solo, para que las ediciones de otro no acaben dentro de un lote
+        abandonado; y un `POST /undo` con un lote abierto lo sella antes de
+        deshacerlo.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: {type: string, description: "Cómo aparecerá en el historial. Por defecto `batch`."}
+      responses:
+        "201":
+          description: El lote está abierto.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  open: {type: boolean}
+                  label: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    delete:
+      tags: [sistema]
+      summary: Cerrar el lote y sellarlo como una entrada.
+      description: |
+        Idempotente: cerrar sin lote abierto no es un error y sella cero
+        ediciones. Un lote que no recogió nada no deja entrada.
+      responses:
+        "200":
+          description: Cuántas ediciones quedaron selladas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sealed: {type: integer, description: "Ediciones dentro de la entrada sellada; 0 si no había lote o estaba vacío."}
+                  undo: {type: boolean}
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/access:

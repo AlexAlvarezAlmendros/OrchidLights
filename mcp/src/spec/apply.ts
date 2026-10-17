@@ -52,16 +52,17 @@ export interface ApplyReport {
   created: number
   updated: number
   deleted: number
-  /** Cuántas entradas dejó el lote en el anillo de undo, para poder deshacerlo entero. */
   /**
    * Cuántas entradas dejó el lote en el anillo de undo: cuántas veces hay que
-   * llamar a `POST /api/v1/undo` para devolverlo todo.
+   * llamar a `POST /api/v1/undo` para devolverlo todo. Con un daemon que tiene
+   * lotes es una, por largo que sea el documento.
    */
   undoSteps: number
   /**
    * Verdadero cuando el lote fue más largo que el anillo y se comió su propio
    * principio. Entonces NO se puede deshacer entero, y decirlo importa: quien
-   * crea que puede volver atrás y no pueda, descubre que no puede tarde.
+   * crea que puede volver atrás y no pueda, descubre que no puede tarde. Solo
+   * pasa contra un daemon sin lotes de undo.
    */
   undoOverflowed: boolean
   savedTo?: string
@@ -1389,10 +1390,36 @@ const UNDO_RING = 200
  * No son lo mismo, y eso ya costó una cifra inventada en este mismo informe.)
  */
 async function undoDepth(client: OrchidClient): Promise<number> {
+  return (await undoHistory(client)).length
+}
+
+async function undoHistory(client: OrchidClient): Promise<{ label: string }[]> {
   try {
-    return (await client.get<{ entries: unknown[] }>('/history')).entries.length
+    return (await client.get<{ entries: { label: string }[] }>('/history')).entries
   } catch {
-    return 0
+    return []
+  }
+}
+
+/**
+ * Abre un lote de undo: todo lo que se aplique dentro se deshace con UN undo.
+ * Falso si el daemon es anterior a los lotes (contesta 404), y entonces el
+ * informe cuenta las entradas una a una, como antes.
+ */
+async function openUndoBatch(client: OrchidClient, label: string): Promise<boolean> {
+  try {
+    await client.post('/undo/batch', { label })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function closeUndoBatch(client: OrchidClient): Promise<void> {
+  try {
+    await client.delete('/undo/batch')
+  } catch {
+    // Un lote que no se pudo cerrar se sella solo a los 30 s sin ediciones.
   }
 }
 
@@ -1421,29 +1448,51 @@ export async function applySpec(
   const before = await undoDepth(client)
   const resolver = new Resolver(client)
 
-  for (const [index, action] of actions.entries()) {
-    try {
-      await action.run(resolver)
-      // Lo que se acaba de crear tiene un id que nadie sabía hace un momento.
-      if (action.kind !== 'update') resolver.invalidate()
-    } catch (cause) {
-      const reason = cause instanceof Error ? cause.message : String(cause)
-      throw new SpecError([
-        `${action.section}: "${action.name}" falló — ${reason}`,
-        [
-          `Se aplicaron ${index} de ${actions.length} acciones, así que el proyecto está a medias.`,
-          'Deshaz con POST /api/v1/undo, o arregla el documento y vuelve a aplicarlo:',
-          'es idempotente, así que lo que ya se hizo no se repite.',
-        ].join(' '),
-      ])
+  // La hora hace única la etiqueta, que es como se encuentra después el lote
+  // en el historial aunque el anillo estuviera lleno y no haya crecido.
+  const label = `aplicar documento · ${actions.length} acciones · ${new Date().toISOString()}`
+  const batched = await openUndoBatch(client, label)
+
+  try {
+    for (const [index, action] of actions.entries()) {
+      try {
+        await action.run(resolver)
+        // Lo que se acaba de crear tiene un id que nadie sabía hace un momento.
+        if (action.kind !== 'update') resolver.invalidate()
+      } catch (cause) {
+        const reason = cause instanceof Error ? cause.message : String(cause)
+        throw new SpecError([
+          `${action.section}: "${action.name}" falló — ${reason}`,
+          [
+            `Se aplicaron ${index} de ${actions.length} acciones, así que el proyecto está a medias.`,
+            batched
+              ? 'Un solo POST /api/v1/undo deshace lo aplicado,'
+              : 'Deshaz con POST /api/v1/undo,',
+            'o arregla el documento y vuelve a aplicarlo:',
+            'es idempotente, así que lo que ya se hizo no se repite.',
+          ].join(' '),
+        ])
+      }
     }
+  } finally {
+    // También si falló a mitad: lo aplicado hasta ahí es una entrada, no cien.
+    if (batched) await closeUndoBatch(client)
   }
 
-  const depth = await undoDepth(client)
-  report.undoSteps = Math.max(0, depth - before)
-  // El anillo lleno después de un lote que lo llena significa que se comió su
-  // propio principio: lo de antes ya no está.
-  report.undoOverflowed = depth >= UNDO_RING && actions.length > UNDO_RING - before
+  if (batched) {
+    // Desde el lote hasta el final: una entrada si nada lo partió. Si alguien
+    // lo selló antes de tiempo —un undo, 30 s sin ediciones—, lo que vino
+    // después quedó suelto detrás, y también hay que contarlo.
+    const entries = await undoHistory(client)
+    const at = entries.map((entry) => entry.label).lastIndexOf(label)
+    report.undoSteps = at === -1 ? 0 : entries.length - at
+  } else {
+    const depth = await undoDepth(client)
+    report.undoSteps = Math.max(0, depth - before)
+    // El anillo lleno después de un lote que lo llena significa que se comió su
+    // propio principio: lo de antes ya no está.
+    report.undoOverflowed = depth >= UNDO_RING && actions.length > UNDO_RING - before
+  }
 
   if (options.save) report.savedTo = (await client.save()).path
 

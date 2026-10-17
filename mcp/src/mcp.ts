@@ -2,9 +2,9 @@
 /**
  * El servidor MCP de OrchidLights.
  *
- * Dieciséis herramientas, no ciento treinta y nueve. El daemon expone una
+ * Diecinueve herramientas, no ciento cuarenta y una. El daemon expone una
  * operación por cosa que se puede hacer, que es lo correcto para un API y lo
- * peor posible para un agente: con ciento treinta y nueve herramientas delante,
+ * peor posible para un agente: con ciento cuarenta y una herramientas delante,
  * el contexto se gasta en elegir. Aquí hay una por *tarea* —describir el
  * proyecto, aplicarlo, buscar una lámpara, mirar el universo de vuelta— y una
  * sola salida de emergencia, `orchid_request`, para lo que no entre en ninguna.
@@ -364,7 +364,9 @@ server.registerTool(
           'El lote no cabe en el anillo de undo (200 entradas): no se puede deshacer entero. ' +
             'Vuelve al último proyecto guardado si hace falta.',
         )
-      } else if (!dryRun && report.undoSteps > 0) {
+      } else if (!dryRun && report.undoSteps === 1) {
+        tail.push('Para deshacerlo entero: orchid_undo, una vez.')
+      } else if (!dryRun && report.undoSteps > 1) {
         tail.push(`Para deshacerlo: orchid_undo con times=${report.undoSteps}.`)
       }
 
@@ -547,8 +549,8 @@ server.registerTool(
   {
     title: 'Deshacer',
     description:
-      'Deshace la última edición. El anillo guarda 200, y cubre el documento, no el estado ' +
-      'de ejecución: esto no va a parar un chaser.',
+      'Deshace la última edición. El anillo guarda 200, y un orchid_apply entero cuenta como ' +
+      'una sola. Cubre el documento, no el estado de ejecución: esto no va a parar un chaser.',
     inputSchema: { times: z.number().int().min(1).max(50).default(1) },
   },
   async ({ times }) =>
@@ -574,7 +576,7 @@ server.registerTool(
   {
     title: 'Cualquier otra operación del API',
     description:
-      'Las herramientas de arriba cubren lo que se hace a diario, pero el daemon expone 139 ' +
+      'Las herramientas de arriba cubren lo que se hace a diario, pero el daemon expone 141 ' +
       'operaciones: editar el cuerpo de una escena canal a canal, mover la timeline de un ' +
       'show, crear perfiles de entrada, colocar fixtures en el escenario 3D. Lee el recurso ' +
       '`orchid://routes` para ver todas, o `orchid://contract` para la forma exacta de una, ' +
@@ -628,7 +630,7 @@ server.registerResource(
   'routes',
   'orchid://routes',
   {
-    title: 'Las 139 operaciones, en una línea cada una',
+    title: 'Las 141 operaciones, en una línea cada una',
     description:
       'El índice para orchid_request: método, ruta y qué hace. Mucho más corto que el ' +
       'contrato entero, y suficiente para encontrar la operación que hace falta.',

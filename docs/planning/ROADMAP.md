@@ -493,12 +493,28 @@ resumen en el README:
     13 chasers paso a paso. Sin eso, exportar y volver a aplicar es una forma
     elaborada de corromper un proyecto.
 
-  > **Sobre el undo, lo que no se cumplió.** El plan pedía una sola entrada para
-  > el lote entero. No la hay: cada llamada deja la suya, y un lote de 355 se
-  > come el anillo, que guarda 200. Un lote grande no se deshace entero, así que
-  > se aplica sobre un proyecto guardado — que es el punto al que siempre se
-  > puede volver — y eso es lo que dice el informe. Una entrada única exigiría
-  > que `UndoRing` supiera de lotes de varios ámbitos, y eso es otro trabajo.
+- [x] **Un documento aplicado se deshace de una vez** (2026-10-17). El plan
+      pedía una sola entrada para el lote entero, y no la había: cada llamada
+      dejaba la suya, y aplicar el `Sample.qxw` —355 acciones— se comía el
+      anillo de 200 y su propio principio. Ahora `UndoRing` sabe de lotes:
+      `POST /undo/batch` abre uno, todo lo que se edite dentro se sella al
+      cerrarlo como **una** entrada de cualquier mezcla de ámbitos, que se
+      deshace en orden inverso y se rehace en orden. Si una pieza se niega a
+      volver, las que ya se movieron vuelven a su sitio: el lote queda entero
+      a un lado o al otro, nunca a medias.
+  - El aplicador del MCP abre el lote, y lo cierra también si falla a mitad:
+    lo aplicado hasta ahí es un undo, no cien.
+  - **Un lote abandonado no secuestra la mesa.** Los lotes no se anidan —abrir
+    uno sella el anterior—, un undo con uno abierto lo sella antes de
+    deshacerlo, y uno que pasa 30 s sin ediciones se sella solo, para que el
+    trabajo de otro no acabe dentro del lote de un cliente que murió.
+  - `spec-smoke.sh` aplica el Sample sobre una mesa vacía: una entrada con
+    284 ediciones dentro, un undo la deja vacía y un redo lo devuelve escena a
+    escena.
+  - **Y un fallo que salió al hacerlo: el anillo sobrevivía a cargar otro
+    proyecto.** Un undo tras abrir un show deshacía, sobre él, una edición del
+    anterior —su XML metido por el id que coincidiera—. Ahora se vacía con
+    cada proyecto cargado o nuevo; `undo-smoke.sh` lo comprueba.
 
 - [x] **El servidor MCP.** Paquete `mcp/` en TypeScript con el SDK oficial,
       hablando REST con el daemon. Stdio para Claude Code y OpenCode, y
@@ -584,5 +600,4 @@ resumen en el README:
 
 Revisado el 2026-10-17. La paridad está hecha; lo que queda abierto, por orden:
 
-1. **Deshacer un `apply` entero de una vez** (F9): `UndoRing` con lotes.
-2. **Roles** (F8): operador y diseñador con permisos distintos.
+1. **Roles** (F8): operador y diseñador con permisos distintos.
