@@ -443,10 +443,17 @@ resumen en el README:
   - `devices-smoke.sh`, con un `HOME` temporal: emparejar, el fichero sin
     llaves, lo que puede y no puede cada rol con y sin kiosko, cambiar el rol,
     revocar con el socket abierto, reiniciar el daemon, y `orchidctl`.
-  - **Lo que queda igual, a sabiendas:** la ventana de kiosko de la carcasa
-    de escritorio sigue entrando con la maestra, así que en ESE equipo la
-    jaula la guarda la interfaz y el PIN. Darle una llave de operador propia
-    es el paso siguiente.
+  - **Y el kiosko de la carcasa también** (2026-10-17). Su ventana entraba
+    con la maestra, así que en el propio equipo de la mesa la jaula la
+    guardaban la interfaz y el PIN. Con `--kiosk` la carcasa empareja un
+    dispositivo de operador, «Kiosko de este equipo», guarda su llave en
+    `~/.orchidlights/kiosk-key` (`600`) y la reutiliza: una fila en la lista,
+    no una por arranque. Si alguien la revoca, el siguiente arranque empareja
+    otra y quita la fila vieja. La carcasa —bandeja, pánico, salir del kiosko—
+    sigue con la maestra. Si emparejar falla, el kiosko entra con la maestra y
+    lo dice, porque una mesa que no abre su consola por un problema de llaves
+    es peor que una jaula de interfaz. `kiosk-smoke.sh` lo comprueba desde
+    fuera: la conexión de la ventana es ese dispositivo y no construye nada.
 
 ---
 
@@ -622,7 +629,7 @@ resumen en el README:
 
 ## 7. Siguiente paso
 
-Revisado el 2026-10-17. La paridad está hecha y el plan, cerrado. Lo abierto:
-
-1. **El kiosko de la carcasa con llave de operador**, para que la jaula del
-   propio equipo de la mesa también la guarde el daemon.
+Revisado el 2026-10-17. La paridad está hecha y el plan, cerrado: no queda
+nada abierto en este documento. Lo siguiente es fusionar la rama `agentes` y
+ver la CI completa —el `.deb`, el AppImage y la interfaz en Chrome solo se
+prueban allí— antes de abrir un plan nuevo.

@@ -576,6 +576,12 @@ jobs:
       - name: Shell smoke test
         run: xvfb-run -a desktop/test/shell-smoke.sh
 
+      # The kiosk window used to carry the master key, which walks through the
+      # access mask: its cage was the interface's alone. Now it pairs an
+      # operator's key of its own, reused across launches.
+      - name: Kiosk smoke test
+        run: xvfb-run -a desktop/test/kiosk-smoke.sh
+
   desktop-bundle:
     name: Desktop bundle (deb + AppImage)
     # Bundles are release artifacts, not per-PR noise: a PR is already covered

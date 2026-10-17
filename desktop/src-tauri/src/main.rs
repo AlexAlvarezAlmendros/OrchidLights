@@ -15,6 +15,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod agent;
+mod kiosk;
 mod layout;
 mod sidecar;
 
@@ -414,8 +415,26 @@ fn boot(
 
                 // Kiosk rides in the URL so a reload keeps the cage on.
                 let view = if mode.kiosk { "#/vc?kiosk=1" } else { "" };
-                let url = match &token {
-                    Some(token) => format!("{}/{view}#token={token}", sidecar.base_url()),
+
+                // The kiosk window enters with an operator's key, so the
+                // daemon keeps its cage and not only the interface. The shell
+                // itself -- tray, panic, leaving the kiosk -- keeps the master.
+                let window_key = match (&token, mode.kiosk) {
+                    (Some(master), true) => Some(
+                        kiosk::operator_key(sidecar.base_url(), master, &user_dir).unwrap_or_else(
+                            || {
+                                eprintln!(
+                                    "orchidlights-desktop: sin llave de operador, el kiosko \
+                                     entra con la maestra y la jaula la guarda solo la interfaz"
+                                );
+                                master.clone()
+                            },
+                        ),
+                    ),
+                    _ => token.clone(),
+                };
+                let url = match &window_key {
+                    Some(key) => format!("{}/{view}#token={key}", sidecar.base_url()),
                     None => format!("{}/{view}", sidecar.base_url()),
                 };
 

@@ -78,7 +78,10 @@ abrir/guardar, asociación de `.qxw`, bandeja con pánico y blackout que hablan
 directo con el daemon, ventanas por contexto (la mesa en un monitor, la
 planta en otro, una superficie de vídeo a pantalla completa en el proyector) y
 los flags `--kiosk` / `--operate`, que cierran la máscara de acceso **en el
-daemon** para que los móviles de la misma mesa obedezcan la misma jaula.
+daemon** para que los móviles de la misma mesa obedezcan la misma jaula. La
+ventana de `--kiosk` entra además con una llave de operador propia, emparejada
+la primera vez y reutilizada después (`~/.orchidlights/kiosk-key`): la jaula
+del propio equipo la guarda también el daemon, no solo la interfaz y el PIN.
 
 Dentro del paquete viaja todo lo que la mesa necesita —el daemon, sus plugins,
 la librería de fixtures, la interfaz— y también **el servidor MCP y `orchidctl`**,
