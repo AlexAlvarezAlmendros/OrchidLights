@@ -4771,9 +4771,12 @@
           "type": "string",
           "enum": [
            "toggle",
-           "flash"
+           "flash",
+           "override",
+           "blackout",
+           "stopall"
           ],
-          "description": "Botón: pulsar y quedarse, o mientras se sujeta."
+          "description": "Botón: qué hace al pulsarlo. `toggle` arranca la función y\nse queda; `flash` la enciende mientras se sujeta;\n`override` deja una escena **encima** de lo que corre y\nse queda — sus canales se escriben después de todas las\nfunciones en marcha y con LTP forzado, así que\n**sustituyen** lo que HTP habría mezclado: es lo que\nrecolorea un chaser en marcha sin pararlo. Solo una\nescena tiene esa capa; sobre cualquier otra función\n`override` se comporta como `toggle`. Dentro de un marco\nsolo un override es una capa sobre el estado del marco,\nno un estado más: al pulsarlo suelta los otros overrides\ndel marco y deja sus toggles corriendo, y arrancar un\ntoggle del marco suelta los overrides. QLC+ lo lee como\n`toggle`. `blackout` y `stopall` no llevan función.\n"
          },
          "key": {
           "type": [
@@ -5029,7 +5032,7 @@
      "consola"
     ],
     "summary": "Pulsar un widget de la consola, con su semántica propia.",
-    "description": "Un widget es más que la función a la que apunta: un botón en modo flash\nse enciende mientras se sujeta y se apaga al soltar, uno dentro de un\nmarco solo mata a sus hermanos, y Blackout y Stop All no son funciones\nen absoluto.\n\nEsta ruta pasa por el mismo sitio que un ala MIDI, así que hace\nexactamente lo mismo que hacer clic. Arrancar la función a mano\n—`POST /functions/{id}/start`— es otra cosa: no sabe de flash, no sabe\nde marcos solo, y no es lo que hace ese botón.\n",
+    "description": "Un widget es más que la función a la que apunta: un botón en modo flash\nse enciende mientras se sujeta y se apaga al soltar, uno en modo\noverride deja su escena pisando lo que corre y la suelta a la\nsiguiente pulsación, uno dentro de un marco solo mata a sus hermanos,\ny Blackout y Stop All no son funciones en absoluto.\n\nEsta ruta pasa por el mismo sitio que un ala MIDI, así que hace\nexactamente lo mismo que hacer clic. Arrancar la función a mano\n—`POST /functions/{id}/start`— es otra cosa: no sabe de flash, no sabe\nde marcos solo, y no es lo que hace ese botón.\n",
     "parameters": [
      {
       "$ref": "#/components/parameters/widgetId"
@@ -8022,7 +8025,8 @@
       "type": "boolean"
      },
      "flashing": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Encendida por la capa de flash: un flash sujeto o un override enganchado. No es `running`."
      },
      "path": {
       "type": "string",
@@ -8251,6 +8255,31 @@
      },
      "page": {
       "type": "integer"
+     },
+     "speedInputs": {
+      "type": "array",
+      "description": "Solo un dial de tempo, y solo los mandos que tiene asignados: tap,\nmultiplicar, dividir y volver al tempo de partida, cada uno con su\ncontrol externo. El universo es de entrada, no de DMX.\n",
+      "items": {
+       "type": "object",
+       "properties": {
+        "control": {
+         "type": "string",
+         "enum": [
+          "tap",
+          "multiply",
+          "divide",
+          "reset",
+          "unknown"
+         ]
+        },
+        "universe": {
+         "type": "integer"
+        },
+        "channel": {
+         "type": "integer"
+        }
+       }
+      }
      },
      "children": {
       "type": "array",

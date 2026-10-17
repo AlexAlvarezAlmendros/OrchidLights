@@ -246,7 +246,20 @@ s.send(JSON.stringify({ type: 'auth', token }))
 
 s.send(JSON.stringify({ type: 'subscribe', universes: [1] }))
 s.send(JSON.stringify({ type: 'function', id: 3, action: 'start' }))
+// start · stop · pause · resume · flash · unflash · override · release
 ```
+
+El dial de tempo tiene sus propios mandos externos: `{type: 'speeddial', id,
+value}` pone un tiempo en milisegundos, y desde un ala MIDI el tap y los pads
+de multiplicar, dividir y reset entran por el encaminador de entrada como
+cualquier otro control.
+
+Las acciones sobre una función son las de un botón: `start`/`stop` con la
+semántica de los marcos solo, `flash`/`unflash` la capa momentánea (con
+`override` y `forceLTP` como banderas), y `override`/`release` esa misma capa
+**enganchada**: la escena se queda pisando lo que corre —canales sustituidos,
+no mezclados— hasta que se suelta. Un override enganchado sale como `flashing`
+en el mensaje `functions`, no como `running`.
 
 **Por qué binario:** 512 canales por universo como array JSON de números pesa
 unas diez veces lo mismo para la misma información.

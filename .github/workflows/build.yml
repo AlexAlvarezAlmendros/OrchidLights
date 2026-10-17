@@ -297,6 +297,12 @@ jobs:
       - name: Smoke test - a solo frame drops what it replaces
         run: ./server/test/frames-smoke.sh orchidlightsd server/test/data/vc-frames.qxw
 
+      # A speed dial carries four external controls on one widget. Read into a
+      # single binding, the last one in the file ate the other three -- the tap
+      # among them. The Loopback plugin closes the wire, so it runs with output.
+      - name: Smoke test - the tempo dial is tapped, doubled, halved and reset
+        run: ./server/test/tempo-smoke.sh orchidlightsd server/test/data/vc-tempo.qxw
+
       # Editing the console re-registers everything with the engine. A fader
       # that survives that in name but not in effect is a lamp stuck up.
       - name: Smoke test - an edit does not strand the faders holding a look

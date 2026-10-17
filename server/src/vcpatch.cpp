@@ -293,8 +293,11 @@ namespace
         if (widget.name != QStringLiteral("Button"))
             return VcPatch::Result::failure(QStringLiteral("Only a button has an action"));
 
+        /* Override is this daemon's own: QLC+ reads an action it does not
+           know as Toggle, so the file still opens there, as a toggle. */
         static const QStringList actions = {
             QStringLiteral("Toggle"), QStringLiteral("Flash"),
+            QStringLiteral("Override"),
             QStringLiteral("Blackout"), QStringLiteral("StopAll"),
         };
 

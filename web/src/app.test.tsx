@@ -16,6 +16,8 @@ import { App } from './App'
    daemon: fire onError, onRemote, onProject and watch the screen react. */
 const feed = vi.hoisted(() => ({
   handlers: [] as import('./live').LiveHandlers[],
+  /* What the App asked the feed to do, for the commands worth asserting. */
+  sent: [] as string[],
 }))
 
 vi.mock('./live', () => {
@@ -32,6 +34,9 @@ vi.mock('./live', () => {
     send(): void {}
     toggle(): void {}
     flash(): void {}
+    override(id: number, on: boolean): void {
+      feed.sent.push(`override:${id}:${on}`)
+    }
     setFramePage(): void {}
     cuelistSideFader(): void {}
     setSpeedDial(): void {}
@@ -157,6 +162,7 @@ async function mountApp() {
 
 beforeEach(() => {
   feed.handlers.length = 0
+  feed.sent.length = 0
   // Theme, operator mode and scale persist on purpose; a test must not
   // inherit the previous test's operator lock.
   window.localStorage.clear()
@@ -182,6 +188,51 @@ describe('App at boot', () => {
 
     // Nothing went wrong on the way up.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('latches an Override button through the feed, and releases it when lit', async () => {
+    stubFetch({
+      '/api/v1/functions': [
+        { id: 1, name: 'Roja', type: 'Scene', running: false },
+        { id: 2, name: 'Cian', type: 'Scene', running: false },
+      ],
+      '/api/v1/vc': {
+        ...vcRoot,
+        children: [
+          ...vcRoot.children,
+          {
+            type: 'button',
+            id: 11,
+            caption: 'CIAN',
+            functionId: 2,
+            action: 'Override',
+            geometry: { x: 130, y: 0, width: 120, height: 60 },
+          },
+        ],
+      },
+    })
+    const handlers = await mountApp()
+
+    const palette = await screen.findByRole('button', { name: 'CIAN' })
+    expect(palette).toHaveAttribute('aria-pressed', 'false')
+
+    // Dark, so a press latches.
+    act(() => palette.click())
+    expect(feed.sent).toEqual(['override:2:true'])
+
+    // The daemon says it is up -- as flashing, which is what a latched
+    // override is -- and the button lights from that, not from the click.
+    act(() => {
+      handlers.onFunctions([
+        { id: 1, name: 'Roja', type: 'Scene', running: false },
+        { id: 2, name: 'Cian', type: 'Scene', running: false, flashing: true },
+      ] as Parameters<typeof handlers.onFunctions>[0])
+    })
+    await waitFor(() => expect(palette).toHaveAttribute('aria-pressed', 'true'))
+
+    // Lit, so the next press releases.
+    act(() => palette.click())
+    expect(feed.sent).toEqual(['override:2:true', 'override:2:false'])
   })
 
   it('strips the rail down to what the access mask allows', async () => {

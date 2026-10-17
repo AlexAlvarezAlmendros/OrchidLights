@@ -2150,7 +2150,24 @@ paths:
                 caption: {type: string}
                 functionId: {type: integer, description: "Botón, slider de playback, animación: qué función dispara."}
                 chaserId: {type: integer, description: "Cue list: el chaser que corre."}
-                action: {type: string, enum: [toggle, flash], description: "Botón: pulsar y quedarse, o mientras se sujeta."}
+                action:
+                  type: string
+                  enum: [toggle, flash, override, blackout, stopall]
+                  description: |
+                    Botón: qué hace al pulsarlo. `toggle` arranca la función y
+                    se queda; `flash` la enciende mientras se sujeta;
+                    `override` deja una escena **encima** de lo que corre y
+                    se queda — sus canales se escriben después de todas las
+                    funciones en marcha y con LTP forzado, así que
+                    **sustituyen** lo que HTP habría mezclado: es lo que
+                    recolorea un chaser en marcha sin pararlo. Solo una
+                    escena tiene esa capa; sobre cualquier otra función
+                    `override` se comporta como `toggle`. Dentro de un marco
+                    solo un override es una capa sobre el estado del marco,
+                    no un estado más: al pulsarlo suelta los otros overrides
+                    del marco y deja sus toggles corriendo, y arrancar un
+                    toggle del marco suelta los overrides. QLC+ lo lee como
+                    `toggle`. `blackout` y `stopall` no llevan función.
                 key: {type: [string, "null"], description: "Botón: atajo de teclado."}
                 flashOverride: {type: integer, description: "Botón en flash: intensidad forzada."}
                 flashForceLTP: {type: boolean}
@@ -2252,9 +2269,10 @@ paths:
       summary: Pulsar un widget de la consola, con su semántica propia.
       description: |
         Un widget es más que la función a la que apunta: un botón en modo flash
-        se enciende mientras se sujeta y se apaga al soltar, uno dentro de un
-        marco solo mata a sus hermanos, y Blackout y Stop All no son funciones
-        en absoluto.
+        se enciende mientras se sujeta y se apaga al soltar, uno en modo
+        override deja su escena pisando lo que corre y la suelta a la
+        siguiente pulsación, uno dentro de un marco solo mata a sus hermanos,
+        y Blackout y Stop All no son funciones en absoluto.
 
         Esta ruta pasa por el mismo sitio que un ala MIDI, así que hace
         exactamente lo mismo que hacer clic. Arrancar la función a mano
@@ -3602,7 +3620,7 @@ components:
           type: string
           enum: [Scene, Chaser, EFX, RGBMatrix, Collection, Script, Audio, Video, Show, Sequence]
         running: {type: boolean}
-        flashing: {type: boolean}
+        flashing: {type: boolean, description: "Encendida por la capa de flash: un flash sujeto o un override enganchado. No es `running`."}
         path: {type: string, description: "Carpeta en el árbol de funciones."}
         fadeIn: {type: integer, description: "Milisegundos."}
         fadeOut: {type: integer, description: "Milisegundos."}
@@ -3688,6 +3706,18 @@ components:
         width: {type: integer}
         height: {type: integer}
         page: {type: integer}
+        speedInputs:
+          type: array
+          description: |
+            Solo un dial de tempo, y solo los mandos que tiene asignados: tap,
+            multiplicar, dividir y volver al tempo de partida, cada uno con su
+            control externo. El universo es de entrada, no de DMX.
+          items:
+            type: object
+            properties:
+              control: {type: string, enum: [tap, multiply, divide, reset, unknown]}
+              universe: {type: integer}
+              channel: {type: integer}
         children:
           type: array
           items: {$ref: "#/components/schemas/VcWidget"}

@@ -1,0 +1,79 @@
+<!DOCTYPE Workspace>
+<!--
+  Un dial de tempo con sus cuatro mandos externos.
+
+  Un espectáculo que va al ritmo de la música se toca con el tap: el operador
+  golpea un pad al compás y todos los chasers se ponen en fase. Ese pad no es
+  el único mando del dial: también están multiplicar, dividir y volver al
+  tempo de partida, y los cuatro viven en el MISMO widget, cada uno con su
+  Input ID. Leerlos en el hueco de una sola asignación deja tres fuera, y el
+  que sobrevive es el último del fichero.
+
+  Al lado, un botón cuyo único mando lleva ID="0", que es como lo escribe
+  QLC+ 5 en cualquier widget de una sola asignación. El ID es del dial y de
+  nadie más: leerlo en un botón como mando de tempo le quita el MIDI.
+
+  El universo 2 se parchea en bucle desde el test: su salida alimenta su propia
+  entrada, así que escribir un canal es pulsar el mando.
+-->
+<Workspace xmlns="http://www.qlcplus.org/Workspace">
+ <Creator>
+  <Name>OrchidLights</Name>
+  <Version>0.1.0</Version>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <Universe Name="Universe 1" ID="0"/>
+   <Universe Name="Universe 2" ID="1"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Generic</Manufacturer>
+   <Model>Generic RGB</Model>
+   <Mode>RGB</Mode>
+   <ID>0</ID>
+   <Name>Par</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Function ID="0" Type="Scene" Name="Rojo">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,255,1,0,2,0</FixtureVal>
+  </Function>
+  <Function ID="1" Type="Scene" Name="Azul">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,0,1,0,2,255</FixtureVal>
+  </Function>
+  <!-- Un segundo por paso: el número que el dial mueve. -->
+  <Function ID="2" Type="Chaser" Name="Al ritmo">
+   <Speed FadeIn="0" FadeOut="0" Duration="1000"/>
+   <Direction>Forward</Direction>
+   <RunOrder>Loop</RunOrder>
+   <SpeedModes FadeIn="Common" FadeOut="Common" Duration="Common"/>
+   <Step Number="0" FadeIn="0" Hold="0" FadeOut="0">0</Step>
+   <Step Number="1" FadeIn="0" Hold="0" FadeOut="0">1</Step>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="Consola" ID="0">
+   <WindowState Visible="True" X="0" Y="0" Width="1920" Height="1080"/>
+   <SpeedDial Caption="TEMPO" ID="1">
+    <WindowState Visible="True" X="10" Y="10" Width="380" Height="210"/>
+    <Visibility>487</Visibility>
+    <Time>1000</Time>
+    <AbsoluteValue Minimum="0" Maximum="10000"/>
+    <Function FadeIn="0" FadeOut="0" Duration="6">2</Function>
+    <Input ID="1" Universe="1" Channel="10" Key="T"/>
+    <Input ID="2" Universe="1" Channel="11"/>
+    <Input ID="3" Universe="1" Channel="12"/>
+    <Input ID="4" Universe="1" Channel="13"/>
+   </SpeedDial>
+   <Button Caption="Azul" ID="2">
+    <WindowState Visible="True" X="400" Y="10" Width="100" Height="50"/>
+    <Function ID="1"/>
+    <Action>Toggle</Action>
+    <Input ID="0" Universe="1" Channel="15" LowerValue="2" UpperValue="4"/>
+   </Button>
+  </Frame>
+ </VirtualConsole>
+</Workspace>

@@ -361,6 +361,45 @@ curl -s -X PATCH "$BASE/vc/widgets/1042" -H 'Content-Type: application/json' \
 Los colores no son decoración: una botonera donde todo es gris es una botonera
 que nadie puede usar a oscuras.
 
+**Paletas: un botón que recolorea un chaser en marcha.** El color de una
+lámpara es HTP —gana el valor más alto—, así que una escena azul arrancada
+encima de un chaser rojo no da azul: da magenta. La acción `override` de un
+botón deja su escena **encima** de todo lo que corre, con sus canales escritos
+después y con LTP forzado, y se queda hasta la siguiente pulsación: el chaser
+sigue con su ritmo, su intensidad y su movimiento, y solo el color es el de la
+paleta.
+
+```bash
+curl -s -X PATCH "$BASE/vc/widgets/1043" -H 'Content-Type: application/json' \
+  -d '{"caption": "ROJO · CIAN", "functionId": 30, "action": "override", "background": "#b91c1c"}'
+```
+
+**El tempo se toca, no se escribe.** Un `SpeedDial` lleva cuatro mandos
+externos —tap, multiplicar, dividir y volver al tempo de partida—, cada uno con
+su `<Input ID>`, y el daemon los encamina como cualquier otro control. `GET
+/vc` los devuelve nombrados en `speedInputs`. El tap promedia los últimos
+cuatro intervalos y empieza de nuevo si pasan más de tres segundos entre
+golpes, que es lo que separa un tempo de una pausa.
+
+**Y una regla de los marcos solo que conviene saber:** un botón que arranca
+una Collection arrastra la regla del marco de cada miembro. Si un look es una
+Collection {posición, chaser} y la escena de posición tiene su botón en un
+marco solo de posiciones, arrancar el look para la posición anterior igual que
+lo haría su propio botón — porque un marco que solo fuera solo para quien pulsa
+dentro de él deja la posición vieja corriendo debajo, perdida por LTP y con su
+pad encendido, a una pulsación de apagarse en vez de encenderse.
+
+Tres cosas que decide el motor y no el botón. **Solo una escena** tiene esa
+capa; sobre cualquier otra función `override` se comporta como `toggle`. La
+paleta lleva **solo los canales que quiere pisar** —el rojo, el verde y el
+azul de cada cabeza— y ni dimmer ni pan ni tilt, que son del chaser. Y dentro
+de un **marco solo** un override es una capa sobre el estado del marco, no un
+estado más: pulsar una paleta suelta las otras paletas del marco y deja el
+look corriendo; arrancar un look suelta la paleta, porque cada look entra con
+sus propios colores. Anida las paletas en su propio marco solo *dentro* del de
+los looks: en QLC+ —que lee `override` como `toggle`— quedan exclusivas entre
+ellas y no matan el look.
+
 ### 8. Guarda
 
 ```bash

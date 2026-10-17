@@ -418,9 +418,10 @@ server.registerTool(
     title: 'Pulsar un widget de la consola',
     description:
       'Hace lo mismo que un clic, con la semántica del widget: un botón en flash se ' +
-      'enciende mientras se sujeta (manda `on: false` para soltarlo), uno en un marco solo ' +
-      'mata a sus hermanos, y Blackout y Stop All no son funciones. Arrancar la función a ' +
-      'mano con orchid_run es otra cosa: no sabe nada de eso. Los ids salen de orchid_console.',
+      'enciende mientras se sujeta (manda `on: false` para soltarlo), uno en override deja su ' +
+      'escena pisando el color de lo que corre hasta la siguiente pulsación, uno en un marco ' +
+      'solo mata a sus hermanos, y Blackout y Stop All no son funciones. Arrancar la función ' +
+      'a mano con orchid_run es otra cosa: no sabe nada de eso. Los ids salen de orchid_console.',
     inputSchema: {
       id: z.number().int().min(0),
       on: z.boolean().optional().describe('El flanco. Ausente es una pulsación.'),

@@ -92,6 +92,25 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(doc->masterTimer(), &MasterTimer::functionListChanged,
             this, &LiveFeed::onFunctionListChanged, Qt::QueuedConnection);
 
+    /* Flashing is not running: the timer's list does not change when a scene
+       is laid over the rig, so nothing above would say so. A held flash gets
+       away with it -- the finger that holds it can see it -- but an Override
+       latched from one phone has to light on the other, and the engine is
+       the one that knows. Every function that exists now, and every one that
+       arrives later, whichever way it arrives. */
+    const auto watchFlashing = [this](Function *function) {
+        /* Overloaded with the getter of the same name. */
+        connect(function, qOverload<quint32, bool>(&Function::flashing),
+                this, &LiveFeed::onFunctionListChanged);
+    };
+    for (Function *function : doc->functions())
+        watchFlashing(function);
+    connect(doc, &Doc::functionAdded, this, [doc, watchFlashing](quint32 id) {
+        Function *function = doc->function(id);
+        if (function != nullptr)
+            watchFlashing(function);
+    });
+
     /* Edits. Doc::modified fires on every mutation without exception, so it is
        the guarantee that nothing is missed; the rest only narrow it down, so a
        browser showing the console does not re-read the fixture library because
@@ -856,6 +875,10 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
                                          message.value("forceLTP").toBool(false));
         else if (action == QStringLiteral("unflash"))
             WidgetActions::unflashFunction(m_engine, function->id());
+        else if (action == QStringLiteral("override"))
+            WidgetActions::overrideFunction(m_engine, function->id());
+        else if (action == QStringLiteral("release"))
+            WidgetActions::releaseFunction(m_engine, function->id());
 
         /* No reply: the state change arrives as a functions broadcast once the
            engine has actually made it, on its next tick. */
