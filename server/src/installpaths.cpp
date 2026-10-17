@@ -218,6 +218,27 @@ QString InstallPaths::webRoot()
     return firstWithFile(candidates, QStringLiteral("index.html"));
 }
 
+QString InstallPaths::apiContract()
+{
+    QStringList candidates;
+
+    if (qEnvironmentVariableIsSet("ORCHID_API_CONTRACT"))
+        candidates << QFileInfo(qEnvironmentVariable("ORCHID_API_CONTRACT")).path();
+
+    candidates << anchoredToBinary(QStringLiteral("share/orchidlights/api"));
+
+    /* Uninstalled: the daemon sits in build/server/src/ and the generated
+       contract is still in the source tree next to the YAML it comes from. */
+    candidates << QDir(QCoreApplication::applicationDirPath()
+                       + QStringLiteral("/../../../docs/api")).absolutePath();
+
+    const QString directory = firstWithFile(candidates, QStringLiteral("openapi.json"));
+    if (directory.isEmpty())
+        return QString();
+
+    return QDir(directory).absoluteFilePath(QStringLiteral("openapi.json"));
+}
+
 QString InstallPaths::legacyUserDirectory(const QString &subdir)
 {
 #if defined(Q_OS_WIN)

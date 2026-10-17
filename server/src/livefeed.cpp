@@ -92,6 +92,25 @@ LiveFeed::LiveFeed(EngineHost *engine, const ApiAuth *auth, QObject *parent)
     connect(doc->masterTimer(), &MasterTimer::functionListChanged,
             this, &LiveFeed::onFunctionListChanged, Qt::QueuedConnection);
 
+    /* Flashing is not running: the timer's list does not change when a scene
+       is laid over the rig, so nothing above would say so. A held flash gets
+       away with it -- the finger that holds it can see it -- but an Override
+       latched from one phone has to light on the other, and the engine is
+       the one that knows. Every function that exists now, and every one that
+       arrives later, whichever way it arrives. */
+    const auto watchFlashing = [this](Function *function) {
+        /* Overloaded with the getter of the same name. */
+        connect(function, qOverload<quint32, bool>(&Function::flashing),
+                this, &LiveFeed::onFunctionListChanged);
+    };
+    for (Function *function : doc->functions())
+        watchFlashing(function);
+    connect(doc, &Doc::functionAdded, this, [doc, watchFlashing](quint32 id) {
+        Function *function = doc->function(id);
+        if (function != nullptr)
+            watchFlashing(function);
+    });
+
     /* Edits. Doc::modified fires on every mutation without exception, so it is
        the guarantee that nothing is missed; the rest only narrow it down, so a
        browser showing the console does not re-read the fixture library because
@@ -390,17 +409,25 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
             return;
         }
 
-        if (m_auth->matches(message.value("token").toString().toUtf8()) == false)
+        const ApiAuth::Caller caller =
+            m_auth->identifyKey(message.value("token").toString().toUtf8());
+        if (caller.role == ApiAuth::Role::Open)
         {
             rejectSocket(socket, QStringLiteral("Bad token"));
             return;
         }
 
         client.authenticated = true;
-        client.trusted = true;
+        client.role = caller.role;
+        client.device = caller.device;
+        /* An operator's device is held to the mask like any untrusted
+           socket; the master and a design device are not. */
+        client.trusted = caller.role != ApiAuth::Role::Operate;
+        m_remoteDirty = true;
 
         QJsonObject ok;
         ok["type"] = "authenticated";
+        ok["role"] = ApiAuth::roleName(caller.role);
         sendJson(socket, ok);
 
         sendFunctions(socket);
@@ -411,11 +438,19 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
        so a masked desk keeps answering ITS controls. */
     if (type == QStringLiteral("auth"))
     {
-        if (m_auth->matches(message.value("token").toString().toUtf8()))
-            client.trusted = true;
+        const ApiAuth::Caller caller =
+            m_auth->identifyKey(message.value("token").toString().toUtf8());
+        if (caller.role != ApiAuth::Role::Open)
+        {
+            client.role = caller.role;
+            client.device = caller.device;
+            client.trusted = caller.role != ApiAuth::Role::Operate;
+            m_remoteDirty = true;
+        }
         QJsonObject ok;
         ok["type"] = "authenticated";
         ok["trusted"] = client.trusted;
+        ok["role"] = ApiAuth::roleName(client.role);
         sendJson(socket, ok);
         return;
     }
@@ -856,6 +891,10 @@ void LiveFeed::handleMessage(QWebSocket *socket, Client &client, const QJsonObje
                                          message.value("forceLTP").toBool(false));
         else if (action == QStringLiteral("unflash"))
             WidgetActions::unflashFunction(m_engine, function->id());
+        else if (action == QStringLiteral("override"))
+            WidgetActions::overrideFunction(m_engine, function->id());
+        else if (action == QStringLiteral("release"))
+            WidgetActions::releaseFunction(m_engine, function->id());
 
         /* No reply: the state change arrives as a functions broadcast once the
            engine has actually made it, on its next tick. */
@@ -919,6 +958,16 @@ QJsonArray LiveFeed::clientsJson() const
                                    .toString(Qt::ISODate);
         entry["authenticated"] = client.authenticated;
         entry["trusted"] = client.trusted;
+        entry["role"] = ApiAuth::roleName(client.role);
+        if (client.device != 0)
+        {
+            entry["deviceId"] = qint64(client.device);
+            for (const ApiAuth::Device &device : m_auth->devices())
+            {
+                if (device.id == client.device)
+                    entry["device"] = device.name;
+            }
+        }
         entry["universes"] = client.universes.count();
         clients.append(entry);
     }
@@ -942,6 +991,39 @@ bool LiveFeed::closeClient(quint32 id)
     }
 
     return false;
+}
+
+int LiveFeed::closeDevice(quint32 deviceId)
+{
+    if (deviceId == 0)
+        return 0;
+
+    /* Collected first: a close may report the disconnect before it returns,
+       and that removes the socket from the map being walked. */
+    QList<QWebSocket *> sockets;
+    for (auto it = m_clients.constBegin(); it != m_clients.constEnd(); ++it)
+    {
+        if (it.value().device == deviceId)
+            sockets.append(it.key());
+    }
+
+    for (QWebSocket *socket : sockets)
+    {
+        socket->close(QWebSocketProtocol::CloseCodePolicyViolated,
+                      QStringLiteral("La llave de este dispositivo ha cambiado"));
+    }
+    return sockets.count();
+}
+
+int LiveFeed::connectionsOf(quint32 deviceId) const
+{
+    int count = 0;
+    for (auto it = m_clients.constBegin(); it != m_clients.constEnd(); ++it)
+    {
+        if (deviceId != 0 && it.value().device == deviceId)
+            count++;
+    }
+    return count;
 }
 
 QByteArray LiveFeed::framePayload(quint32 universeId, const QByteArray &values)

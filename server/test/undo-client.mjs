@@ -12,7 +12,11 @@
  *  - a console widget created over the API disappears with the same global
  *    undo (the marker delegates to the VC's own history);
  *  - two rapid plan moves coalesce into ONE entry (a drag is one gesture);
- *  - the live desk is NOT in the ring.
+ *  - the live desk is NOT in the ring;
+ *  - a batch seals many edits into ONE entry, undone in reverse and redone in
+ *    order, and an undo with a batch still open seals it first;
+ *  - loading another project empties the ring: an entry of the previous
+ *    show would otherwise swap its XML over whatever this one has.
  */
 
 import process from 'node:process'
@@ -177,6 +181,51 @@ watching = false
 check('the guard scene NEVER blinked through any of it', sawDip === false
   && frame2?.[0] === 200, `dip=${sawDip} now=${frame2?.[0]}`)
 socket.send(JSON.stringify({ type: 'function', id: guardian, action: 'stop' }))
+
+/* --- A batch is one entry ---------------------------------------------------- */
+
+const names = async () => (await get('/functions')).map((f) => f.name)
+const ringBeforeBatch = (await get('/history')).entries.length
+const opened = await post('/undo/batch', { label: 'tres de golpe' })
+check('a batch opens', opened.status === 201, `${opened.status}`)
+const one = await (await post('/functions', { type: 'Scene', name: 'Lote A' })).json()
+await post(`/functions/${one.id}/values`, { fixture: 0, channel: 1, value: 50 })
+await post('/functions', { type: 'Chaser', name: 'Lote B' })
+const inside = await get('/history')
+check('while open, the edits wait inside it', inside.batch === true
+  && inside.entries.length === ringBeforeBatch, `${ringBeforeBatch} -> ${inside.entries.length}`)
+const closed = await (await fetch(`${base}/api/v1/undo/batch`, { method: 'DELETE' })).json()
+check('closing seals the three edits', closed.sealed === 3, JSON.stringify(closed))
+const after = await get('/history')
+const entry = after.entries.at(-1)
+check('as ONE entry, with its label and its count', after.entries.length === ringBeforeBatch + 1
+  && entry?.label === 'tres de golpe' && entry?.edits === 3, JSON.stringify(entry))
+
+await undo()
+const gone = await names()
+check('one undo takes all three back', !gone.includes('Lote A') && !gone.includes('Lote B'),
+  gone.filter((n) => n.startsWith('Lote')).join(', ') || 'none left')
+await redo()
+const back = await get(`/functions/${one.id}/body`)
+check('one redo brings them back, values and all', (await names()).includes('Lote B')
+  && JSON.stringify(back).includes('50'), JSON.stringify(back).slice(0, 120))
+
+const again = await (await fetch(`${base}/api/v1/undo/batch`, { method: 'DELETE' })).json()
+check('closing with nothing open seals nothing, and is not an error', again.sealed === 0)
+
+await post('/undo/batch', { label: 'a medias' })
+await post('/functions', { type: 'Scene', name: 'Lote C' })
+await undo()
+check('an undo with a batch open seals it and undoes all of it',
+  !(await names()).includes('Lote C') && (await get('/history')).batch === false)
+
+/* --- Another project, another ring --------------------------------------- */
+
+await post('/project/save/undo-otro.qxw', {})
+const loaded = await post('/project/load/undo-otro.qxw', {})
+const fresh = await get('/history')
+check('loading a project empties the ring', loaded.ok && fresh.entries.length === 0
+  && fresh.undo === false && fresh.redo === false, JSON.stringify(fresh).slice(0, 120))
 
 socket.close()
 process.exit(failures.length === 0 ? 0 : 1)

@@ -37,6 +37,7 @@
 #include "jsonview.h"
 #include "livefeed.h"
 #include "virtualconsole.h"
+#include "widgetactions.h"
 #include "consolelayout.h"
 #include "audiotriggers.h"
 #include "audioplugincache.h"
@@ -74,6 +75,7 @@
 
 #include "functionparent.h"
 #include "inputoutputmap.h"
+#include "universe.h"
 #include "mastertimer.h"
 #include "qlcinputprofile.h"
 #include "qlcinputchannel.h"
@@ -195,6 +197,11 @@ ApiServer::ApiServer(EngineHost *engine, QObject *parent)
 {
     Q_ASSERT(engine != nullptr);
     UndoGuard::setRing(m_undo.get());
+
+    /* Another project is another document. Kept, the ring would undo an edit
+       of the previous show by swapping its XML over whatever this one has
+       under the same id. */
+    connect(engine, &EngineHost::projectReplaced, this, [this] { m_undo->clear(); });
 }
 
 ApiServer::~ApiServer() = default;
@@ -277,23 +284,36 @@ void ApiServer::registerRoutes()
 
     /* The kiosk gate: 0 lets the request through, 401 is a failed token, 403
        is an area the mask closed. GETs always pass -- the mask hides levers,
-       not eyes -- and the STRICT token bypasses it entirely: the mask is what
-       a kiosk phone gets, not what the operator's own shell gets. */
+       not eyes. The master key and a design device bypass it entirely: the
+       mask is what a kiosk phone gets, not what the people building the show
+       get. An operate device is held to the mask AND to the operating areas,
+       whatever the mask says, and outside every area to the few routes an
+       operator reaches for in the dark. */
     const auto refused = [this](const QHttpServerRequest &request) -> int {
         if (m_auth.authorize(request) == false)
             return 401;
         if (request.method() == QHttpServerRequest::Method::Get)
             return 0;
 
-        const quint32 mask = m_engine->accessMask();
-        if (mask == EngineHost::AccessAll)
+        const ApiAuth::Caller caller = m_auth.identify(request);
+        if (caller.role == ApiAuth::Role::Master || caller.role == ApiAuth::Role::Design)
             return 0;
-        if (m_auth.authorizeStrict(request))
+
+        const bool operate = caller.role == ApiAuth::Role::Operate;
+        const quint32 mask = effectiveMask(caller);
+        if (mask == EngineHost::AccessAll)
             return 0;
 
         const QString path = request.url().path();
         quint32 area = 0;
-        if (path.startsWith(QStringLiteral("/api/v1/functions")))
+        if (path.startsWith(QStringLiteral("/api/v1/vc/widgets/"))
+            && (path.endsWith(QStringLiteral("/press")) || path.endsWith(QStringLiteral("/level"))))
+        {
+            /* Working a widget is control, not editing: the same press the
+               WebSocket gates on VC control. */
+            area = EngineHost::AccessVcControl;
+        }
+        else if (path.startsWith(QStringLiteral("/api/v1/functions")))
         {
             const bool show = path.contains(QStringLiteral("/tracks"))
                 || path.contains(QStringLiteral("/items"))
@@ -327,12 +347,28 @@ void ApiServer::registerRoutes()
 
         if (area != 0 && (mask & area) == 0)
             return 403;
+
+        if (area == 0 && operate)
+        {
+            /* Everything else that writes -- loading and saving projects,
+               undo, palettes, the patch of a universe -- is building, and an
+               operator's device does not build. These are the exceptions: the
+               levers of a show already built. */
+            static const QStringList operating = {
+                QStringLiteral("/api/v1/blackout"), QStringLiteral("/api/v1/grandmaster"),
+                QStringLiteral("/api/v1/stop"), QStringLiteral("/api/v1/live"),
+                QStringLiteral("/api/v1/script/check"),
+            };
+            if (operating.contains(path) == false)
+                return 403;
+        }
         return 0;
     };
 
     const auto maskForbidden = [] {
         return jsonError(StatusCode::Forbidden,
-                         QStringLiteral("The access mask of this desk closes that area"));
+                         QStringLiteral("The access mask of this desk, or this device's role, "
+                                        "closes that area"));
     };
     Q_UNUSED(denied)
 
@@ -426,6 +462,67 @@ void ApiServer::registerRoutes()
             return asset;
         });
     }
+
+    /* The entry point for a client that knows nothing yet: what this is, where
+       the full contract lives, whether it needs a token, and which areas the
+       mask leaves open.
+     *
+       Deliberately answerable without one -- a client that has to authenticate
+       before it can find out that it has to authenticate is a client that
+       guesses. The project block is the exception: its name and path say
+       something about the venue, so it only appears for a caller that
+       presented the token. */
+    m_server->route("/api/v1", QHttpServerRequest::Method::Get,
+                    [this, doc](const QHttpServerRequest &request) {
+        QJsonObject body;
+        body["name"] = QStringLiteral(APPNAME);
+        body["version"] = QStringLiteral(APPVERSION);
+        body["apiVersion"] = 1;
+        body["openapi"] = QStringLiteral("/api/v1/openapi.json");
+        body["websocket"] = QStringLiteral("/ws");
+        body["authRequired"] = m_auth.isRequired();
+
+        const ApiAuth::Caller caller = m_auth.identify(request);
+        body["role"] = ApiAuth::roleName(caller.role);
+        const quint32 mask = effectiveMask(caller);
+        QJsonObject access;
+        access["fixtures"] = bool(mask & EngineHost::AccessFixtures);
+        access["functions"] = bool(mask & EngineHost::AccessFunctions);
+        access["vcControl"] = bool(mask & EngineHost::AccessVcControl);
+        access["vcEditing"] = bool(mask & EngineHost::AccessVcEditing);
+        access["simpleDesk"] = bool(mask & EngineHost::AccessSimpleDesk);
+        access["show"] = bool(mask & EngineHost::AccessShow);
+        access["io"] = bool(mask & EngineHost::AccessIO);
+        body["access"] = access;
+
+        if (m_auth.authorize(request))
+        {
+            QJsonObject project;
+            project["path"] = m_engine->projectPath();
+            project["name"] = QFileInfo(m_engine->projectPath()).fileName();
+            project["modified"] = doc->isModified();
+            body["project"] = project;
+        }
+
+        return QHttpServerResponse(body);
+    });
+
+    /* The contract itself, so a client reads it off the desk in front of it
+       rather than off a repository that may be on another version. Generated
+       from docs/api/openapi.yaml, which is the source of truth; CI keeps the
+       two in step and both of them in step with the route table below. */
+    m_server->route("/api/v1/openapi.json", QHttpServerRequest::Method::Get, [] {
+        const QString path = InstallPaths::apiContract();
+        if (path.isEmpty())
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("This installation does not carry the API contract"));
+        }
+
+        QHttpServerResponse contract = QHttpServerResponse::fromFile(path);
+        contract.setHeader("Content-Type", "application/json");
+        return contract;
+    });
 
     m_server->route("/api/v1/status", QHttpServerRequest::Method::Get, [this, doc, denied, refused, maskForbidden](const QHttpServerRequest &request) {
         if (const int refusal = refused(request))
@@ -742,6 +839,86 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(body);
     });
 
+    /* Working the console itself, and not the functions behind it.
+     *
+       A widget is more than the function it points at: a button in flash mode
+       lights while it is held and lets go, one in a solo frame kills its
+       siblings, and Blackout and Stop All are not functions at all.
+       WidgetActions::pressButton knows all of that -- it is what a MIDI wing
+       goes through -- but until now nothing but a MIDI wing could reach it.
+       The browser composes the same behaviour client-side out of the widget's
+       action, which works only because the browser has read /vc first.
+     *
+       A caller with a shell and curl had neither option, so a console built
+       through this API could not be operated through it. One call, and the
+       semantics live where they already lived. */
+    m_server->route("/api/v1/vc/widgets/<arg>/press", QHttpServerRequest::Method::Post,
+                    [this, denied, refused, maskForbidden](const QString &rawId,
+                                                           const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Widget id must be a number"));
+
+        VcWidget root;
+        if (VirtualConsole::parse(m_engine->preservedSections(), root) == false)
+            return jsonError(StatusCode::NotFound, QStringLiteral("This project has no Virtual Console"));
+
+        const VcWidget *widget = VirtualConsole::find(root, id);
+        if (widget == nullptr)
+            return jsonError(StatusCode::NotFound, QStringLiteral("No widget with id %1").arg(id));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        /* Absent means a press. A flash button needs the release too, and a
+           caller that can only press would leave the rig lit. */
+        const bool on = body.value("on").toBool(true);
+
+        const int state = WidgetActions::pressButton(m_engine, *widget, on);
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        /* What the press DID, not what isRunning() says: start() only
+           schedules, so reading the engine back a tick early reports "off"
+           for a button that just went on. */
+        response["state"] = state;
+        return QHttpServerResponse(response);
+    });
+
+    m_server->route("/api/v1/vc/widgets/<arg>/level", QHttpServerRequest::Method::Put,
+                    [this, denied, refused, maskForbidden](const QString &rawId,
+                                                           const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        bool ok = false;
+        const quint32 id = rawId.toUInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Widget id must be a number"));
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        const int value = body.value("value").toInt(-1);
+        if (value < 0 || value > 255)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("\"value\" is 0 to 255"));
+
+        /* False is "this id moves nothing" -- a label, a frame, or a slider
+           the level source was never taught. Said as a 404 rather than
+           swallowed, because a fader that answers 200 and does nothing is the
+           worst control there is. */
+        if (WidgetActions::setSliderLevel(m_engine, id, uchar(value)) == false)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("Widget %1 is not a fader that moves anything").arg(id));
+        }
+
+        QJsonObject response;
+        response["id"] = qint64(id);
+        response["value"] = value;
+        return QHttpServerResponse(response);
+    });
+
     /* What a universe can be patched to. Without this the operator would be
        guessing at plugin and line names, which the writer then refuses. */
     /* The fixture library. 1735 definitions is far too many to hand over in one
@@ -811,7 +988,10 @@ void ApiServer::registerRoutes()
         QJsonObject body;
         body["manufacturer"] = definition->manufacturer();
         body["model"] = definition->model();
-        body["type"] = definition->type();
+        /* The name, not the enum's number. GET /fixtures already answers
+           "Moving Head" here, and a client picking a lamp out of a library of
+           1735 cannot do anything with a 9. */
+        body["type"] = QLCFixtureDef::typeToString(definition->type());
         body["modes"] = modes;
         return QHttpServerResponse(body);
     });
@@ -858,6 +1038,96 @@ void ApiServer::registerRoutes()
         body["used"] = used;
         body["free"] = 512 - used;
         body["fixtures"] = occupants;
+        return QHttpServerResponse(body);
+    });
+
+    /* What is actually going out of this universe right now.
+     *
+       The web interface reads the frames off the WebSocket, but a client that
+       cannot hold a socket -- a script, a shell, an agent driving the desk
+       through curl -- has no way to check its own work, and configuring a rig
+       without ever looking at the output is configuring it blind.
+     *
+       postGMValues() and not preGMValues(): the question being asked is what
+       the lamps receive, and the grand master sits between the two. A snapshot
+       that ignored it would report a lit rig during a fade to black.
+     *
+       Read under the same claim the writers take. Without it the 512 bytes can
+       be copied across a tick boundary and come back as a frame that never
+       existed -- half of one look and half of the next. Released with
+       changed=false: looking at a universe does not dirty it. */
+    m_server->route("/api/v1/universes/<arg>/dmx", QHttpServerRequest::Method::Get,
+                    [doc, denied, refused, maskForbidden](const QString &rawIndex, const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        bool ok = false;
+        const int index = rawIndex.toInt(&ok);
+        if (ok == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("Universe must be a number"));
+
+        const int count = int(doc->inputOutputMap()->universesCount());
+        if (index < 1 || index > count)
+        {
+            return jsonError(StatusCode::NotFound,
+                             QStringLiteral("Universe %1 does not exist; this project has %2")
+                                 .arg(index).arg(count));
+        }
+
+        QByteArray snapshot;
+        {
+            const QList<Universe *> universes = doc->inputOutputMap()->claimUniverses();
+            if (index - 1 < universes.count())
+            {
+                const QByteArray *values = universes.at(index - 1)->postGMValues();
+                if (values != nullptr)
+                    snapshot = *values;
+            }
+            doc->inputOutputMap()->releaseUniverses(false);
+        }
+
+        QJsonArray values;
+        for (int channel = 0; channel < 512; channel++)
+            values.append(channel < snapshot.size() ? uchar(snapshot.at(channel)) : 0);
+
+        /* The non-zero channels, named. 512 zeroes are what a universe looks
+           like most of the time and reading them tells nobody anything; "Cabeza
+           L, Dimmer, 255" is the line that answers "did it work". Bounded by
+           what is lit, so a dark rig costs nothing to ask about. */
+        QJsonArray active;
+        for (int channel = 0; channel < snapshot.size(); channel++)
+        {
+            const uchar value = uchar(snapshot.at(channel));
+            if (value == 0)
+                continue;
+
+            QJsonObject entry;
+            entry["channel"] = channel;
+            entry["value"] = int(value);
+
+            for (const Fixture *fixture : doc->fixtures())
+            {
+                if (int(fixture->universe()) != index - 1)
+                    continue;
+                const int first = int(fixture->address());
+                if (channel < first || channel >= first + int(fixture->channels()))
+                    continue;
+
+                entry["fixture"] = qint64(fixture->id());
+                entry["fixtureName"] = fixture->name();
+                if (const QLCChannel *definition = fixture->channel(quint32(channel - first)))
+                    entry["channelName"] = definition->name();
+                break;
+            }
+
+            active.append(entry);
+        }
+
+        QJsonObject body;
+        body["universe"] = index;
+        body["blackout"] = doc->inputOutputMap()->blackout();
+        body["values"] = values;
+        body["active"] = active;
         return QHttpServerResponse(body);
     });
 
@@ -1896,7 +2166,24 @@ void ApiServer::registerRoutes()
                 }
             }
 
-            result = DocWriter::setEfx(doc, id, body.value("algorithm").toString(), body,
+            /* setEfx reads width, height, xOffset and the rest off the top
+               level, but GET returns them nested under "geometry" -- so the
+               write did not accept what the read emitted, and a client that
+               fed one into the other silently changed nothing. Flattened here
+               rather than in every caller: symmetry between read and write is
+               what lets anything round-trip a project through this API.
+
+               A key written both ways keeps the outer one, because that is
+               the one the caller wrote most deliberately. */
+            QJsonObject efxBody = body;
+            const QJsonObject geometry = body.value("geometry").toObject();
+            for (auto it = geometry.constBegin(); it != geometry.constEnd(); ++it)
+            {
+                if (efxBody.contains(it.key()) == false)
+                    efxBody.insert(it.key(), it.value());
+            }
+
+            result = DocWriter::setEfx(doc, id, efxBody.value("algorithm").toString(), efxBody,
                                        hasFixtures ? &fixtures : nullptr);
             break;
         }
@@ -4063,8 +4350,12 @@ void ApiServer::registerRoutes()
         if (denied(request))
             return unauthorized();
 
-        const quint32 mask = m_engine->accessMask();
+        /* The caller's own: an operator's device reads the cage it is in,
+           which is narrower than the desk's. */
+        const ApiAuth::Caller caller = m_auth.identify(request);
+        const quint32 mask = effectiveMask(caller);
         QJsonObject body;
+        body["role"] = ApiAuth::roleName(caller.role);
         body["fixtures"] = bool(mask & EngineHost::AccessFixtures);
         body["functions"] = bool(mask & EngineHost::AccessFunctions);
         body["vcControl"] = bool(mask & EngineHost::AccessVcControl);
@@ -4124,20 +4415,133 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response);
     });
 
+    /* Paired devices: every phone with a key of its own and a role, revocable
+       one by one. Master key only, all four -- a device must not be able to
+       pair more of itself, widen its own role or keep a revoked friend in. */
+    m_server->route("/api/v1/devices", QHttpServerRequest::Method::Get,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        QJsonArray list;
+        for (const ApiAuth::Device &device : m_auth.devices())
+            list.append(deviceJson(device));
+
+        QJsonObject body;
+        body["devices"] = list;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/devices", QHttpServerRequest::Method::Post,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        ApiAuth::Role role = ApiAuth::Role::Operate;
+        if (body.contains("role")
+            && ApiAuth::roleFromName(body.value("role").toString(), role) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"role\" is design or operate"));
+        }
+
+        ApiAuth::Device made;
+        QByteArray key;
+        QString error;
+        if (m_auth.createDevice(body.value("name").toString(), role, made, key, error) == false)
+            return jsonError(StatusCode::BadRequest, error);
+
+        /* The key, this once. After this response only its hash exists: a
+           phone that loses it is paired again, not looked up. */
+        QJsonObject response = deviceJson(made);
+        response["key"] = QString::fromLatin1(key);
+        response["urls"] = networkDoors(key);
+        response["localUrl"] = QStringLiteral("http://127.0.0.1:%1/#token=%2")
+                                   .arg(m_port)
+                                   .arg(QString::fromLatin1(key));
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/devices/<arg>", QHttpServerRequest::Method::Patch,
+                    [this](quint32 id, const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        QString name;
+        const QString *nameIn = nullptr;
+        if (body.contains("name"))
+        {
+            name = body.value("name").toString();
+            nameIn = &name;
+        }
+
+        ApiAuth::Role role = ApiAuth::Role::Operate;
+        const ApiAuth::Role *roleIn = nullptr;
+        if (body.contains("role"))
+        {
+            if (ApiAuth::roleFromName(body.value("role").toString(), role) == false)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("\"role\" is design or operate"));
+            }
+            roleIn = &role;
+        }
+
+        QString error;
+        if (m_auth.updateDevice(id, nameIn, roleIn, error) == false)
+        {
+            return jsonError(error == QStringLiteral("No such device")
+                                 ? StatusCode::NotFound : StatusCode::BadRequest,
+                             error);
+        }
+
+        /* A new role takes hold on the next request over HTTP. A socket keeps
+           what it authenticated with, so it is closed: the phone reconnects
+           and comes back as what it is now. */
+        if (roleIn != nullptr)
+            m_feed->closeDevice(id);
+
+        for (const ApiAuth::Device &device : m_auth.devices())
+        {
+            if (device.id == id)
+                return QHttpServerResponse(deviceJson(device));
+        }
+        return jsonError(StatusCode::NotFound, QStringLiteral("No such device"));
+    });
+
+    m_server->route("/api/v1/devices/<arg>", QHttpServerRequest::Method::Delete,
+                    [this](quint32 id, const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        QString error;
+        if (m_auth.revokeDevice(id, error) == false)
+        {
+            return jsonError(error == QStringLiteral("No such device")
+                                 ? StatusCode::NotFound : StatusCode::InternalServerError,
+                             error);
+        }
+
+        /* Revoked means out now, not at its next request: a socket that is
+           already open keeps moving lights until it is closed. */
+        QJsonObject response;
+        response["revoked"] = qint64(id);
+        response["closed"] = m_feed->closeDevice(id);
+        return QHttpServerResponse(response);
+    });
+
     /* Remote access, as a thing the operator can see: where this desk can be
        reached, and who is on it right now.
      *
-       The join URLs carry the token ONLY for a caller that presented it. On a
-       masked desk the whole point of the mask is that an untrusted client
-       cannot widen its own cage, and a URL with the token in it is the whole
-       cage handed over. */
+       The join URLs carry no key: pairing a device is what hands one out. */
     m_server->route("/api/v1/remote", QHttpServerRequest::Method::Get,
                     [this, refused, maskForbidden](const QHttpServerRequest &request) {
         if (const int refusal = refused(request))
             return refusal == 403 ? maskForbidden() : unauthorized();
 
-        const bool bearer = m_auth.authorizeStrict(request);
-        const bool tokenInUrl = bearer && m_auth.isRequired();
 
         QJsonObject body;
         body["listenAll"] = m_listenAll;
@@ -4145,43 +4549,10 @@ void ApiServer::registerRoutes()
         body["authRequired"] = m_auth.isRequired();
         body["localUrl"] = QStringLiteral("http://127.0.0.1:%1/").arg(m_port);
 
-        /* Real doors only. With the daemon on loopback these addresses would
-           be URLs that do not answer, and a QR code to nowhere is worse than
-           none -- so a desk that is not listening shows no addresses. */
-        QJsonArray addresses;
-        if (m_listenAll)
-        {
-            for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
-            {
-                const auto flags = iface.flags();
-                if (!(flags & QNetworkInterface::IsUp)
-                    || !(flags & QNetworkInterface::IsRunning)
-                    || (flags & QNetworkInterface::IsLoopBack))
-                    continue;
-
-                for (const QNetworkAddressEntry &entry : iface.addressEntries())
-                {
-                    /* Phones dial IPv4: a link-local IPv6 needs a zone id no
-                       phone keyboard has. */
-                    if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol)
-                        continue;
-
-                    QString url = QStringLiteral("http://%1:%2/")
-                                      .arg(entry.ip().toString())
-                                      .arg(m_port);
-                    if (tokenInUrl)
-                        url += QStringLiteral("#token=%1")
-                                   .arg(QString::fromUtf8(m_auth.token()));
-
-                    QJsonObject address;
-                    address["interface"] = iface.humanReadableName();
-                    address["ip"] = entry.ip().toString();
-                    address["url"] = url;
-                    addresses.append(address);
-                }
-            }
-        }
-        body["addresses"] = addresses;
+        /* No key aboard. Handing out the master key in a QR made every phone
+           that scanned it the owner of the desk; a phone is paired instead
+           (POST /devices) and its URL carries a key of its own. */
+        body["addresses"] = networkDoors();
         body["clients"] = m_feed->clientsJson();
 
         return QHttpServerResponse(body);
@@ -4249,6 +4620,42 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response);
     });
 
+    /* A batch: everything edited between opening and closing it undoes as
+       ONE entry. What a client applies as a whole -- a show document, a few
+       hundred calls -- comes back as a whole, and takes one slot of the ring
+       instead of eating it. */
+    m_server->route("/api/v1/undo/batch", QHttpServerRequest::Method::Post,
+                    [this, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        QString label = body.value("label").toString().trimmed();
+        if (label.isEmpty())
+            label = QStringLiteral("batch");
+
+        m_undo->beginBatch(label);
+
+        QJsonObject response;
+        response["open"] = true;
+        response["label"] = label;
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/undo/batch", QHttpServerRequest::Method::Delete,
+                    [this, refused, maskForbidden](const QHttpServerRequest &request) {
+        if (const int refusal = refused(request))
+            return refusal == 403 ? maskForbidden() : unauthorized();
+
+        /* Idempotent: closing what is not open seals nothing and says so. A
+           batch an undo already sealed, or one that went idle, is not an
+           error for the client that opened it. */
+        QJsonObject response;
+        response["sealed"] = m_undo->endBatch();
+        response["undo"] = m_undo->canUndo();
+        return QHttpServerResponse(response);
+    });
+
     m_server->route("/api/v1/history", QHttpServerRequest::Method::Get,
                     [this, denied, refused, maskForbidden](const QHttpServerRequest &request) {
         if (const int refusal = refused(request))
@@ -4256,6 +4663,7 @@ void ApiServer::registerRoutes()
 
         QJsonObject body;
         body["entries"] = m_undo->history();
+        body["batch"] = m_undo->batchOpen();
         body["undo"] = m_undo->canUndo();
         body["redo"] = m_undo->canRedo();
         return QHttpServerResponse(body);
@@ -4821,4 +5229,62 @@ void ApiServer::registerRoutes()
         noCache(response);
         return response;
     });
+}
+
+quint32 ApiServer::effectiveMask(const ApiAuth::Caller &caller) const
+{
+    const quint32 desk = m_engine->accessMask();
+    if (caller.role == ApiAuth::Role::Operate)
+        return desk & (EngineHost::AccessVcControl | EngineHost::AccessSimpleDesk);
+    return desk;
+}
+
+QJsonArray ApiServer::networkDoors(const QByteArray &key) const
+{
+    QJsonArray doors;
+    if (m_listenAll == false)
+        return doors;
+
+    for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
+    {
+        const auto flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp)
+            || !(flags & QNetworkInterface::IsRunning)
+            || (flags & QNetworkInterface::IsLoopBack))
+            continue;
+
+        for (const QNetworkAddressEntry &entry : iface.addressEntries())
+        {
+            /* Phones dial IPv4: a link-local IPv6 needs a zone id no phone
+               keyboard has. */
+            if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol)
+                continue;
+
+            QString url = QStringLiteral("http://%1:%2/").arg(entry.ip().toString()).arg(m_port);
+            if (key.isEmpty() == false)
+                url += QStringLiteral("#token=%1").arg(QString::fromLatin1(key));
+
+            QJsonObject door;
+            door["interface"] = iface.humanReadableName();
+            door["ip"] = entry.ip().toString();
+            door["url"] = url;
+            doors.append(door);
+        }
+    }
+    return doors;
+}
+
+QJsonObject ApiServer::deviceJson(const ApiAuth::Device &device) const
+{
+    QJsonObject json;
+    json["id"] = qint64(device.id);
+    json["name"] = device.name;
+    json["role"] = ApiAuth::roleName(device.role);
+    json["created"] = device.created.toString(Qt::ISODate);
+    const qint64 seen = m_auth.lastSeen(device.id);
+    json["lastSeen"] = seen > 0 ? QJsonValue(QDateTime::fromMSecsSinceEpoch(seen)
+                                                 .toUTC().toString(Qt::ISODate))
+                                : QJsonValue();
+    json["connections"] = m_feed->connectionsOf(device.id);
+    return json;
 }

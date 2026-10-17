@@ -9,7 +9,9 @@
 #      phone would use);
 #   2. the daemon holds a token and the shell's handover of it works (the file
 #      exists and authorizes);
-#   3. closing the shell takes the daemon with it -- no orphan keeps driving
+#   3. it publishes where the desk ended up, so an agent's MCP registration
+#      needs no port in it -- and takes the note back when it closes;
+#   4. closing the shell takes the daemon with it -- no orphan keeps driving
 #      the rig after the window is gone -- and the shell exits 0.
 #
 # Runs headless under xvfb-run in CI; locally it uses the session's display.
@@ -92,6 +94,36 @@ LISTEN=$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/remote" \
     | python3 -c "import json,sys; print(json.load(sys.stdin)['listenAll'])" 2>/dev/null || true)
 [ "$LISTEN" = "True" ] || fail "the sidecar daemon is not listening for the venue (listenAll=$LISTEN)"
 
+# 2c. Where the desk ended up, written down.
+#
+#     The shell asks for 9998 and takes any free port when that one is busy, so
+#     an MCP registration with the port baked in would work until the day it
+#     did not -- and then talk to somebody else's desk. This file is what makes
+#     `claude mcp add orchidlights -- orchidlights-mcp` right forever.
+URL_FILE="$HOME/.orchidlights/desktop-url"
+[ -f "$URL_FILE" ] || fail "the shell did not publish its URL at $URL_FILE"
+PUBLISHED=$(cat "$URL_FILE")
+[ "$PUBLISHED" = "$BASE" ] \
+    || fail "the published URL is $PUBLISHED and the daemon is at $BASE"
+
+# And the launcher that ships in the bundle actually uses it: no ORCHID_URL,
+# no port anywhere, and it still finds this desk. Driven through the launcher
+# rather than the bundle directly so the name dispatch, the Node hunt and the
+# bundle lookup are all on the hook too.
+BUNDLE_DIR="$REPO/mcp/dist/bundle"
+[ -f "$BUNDLE_DIR/orchidctl.mjs" ] \
+    || fail "the agent bundle is missing; run pnpm install && pnpm bundle in mcp/"
+
+LAUNCH=$(mktemp -d)
+cp "$REPO/desktop/scripts/orchid-launcher.sh" "$LAUNCH/orchidctl"
+chmod +x "$LAUNCH/orchidctl"
+FOUND=$(ORCHID_MCP_DIR="$BUNDLE_DIR" ORCHID_URL= ORCHID_TOKEN="$TOKEN" \
+        "$LAUNCH/orchidctl" status 2>&1) \
+    || fail "the launcher could not reach the published desk: $FOUND"
+rm -rf "$LAUNCH"
+echo "$FOUND" | grep -q "$BASE" \
+    || fail "the launcher talked to the wrong desk: $FOUND"
+
 # 3. A second launch carrying a project opens it in the FIRST instance -- the
 #    whole chain, through the real webview: single-instance forwards the path,
 #    the shell evals an orchid-open-request into the page, the page (holding
@@ -137,6 +169,13 @@ done
 if kill -0 "$DAEMON_PID" 2>/dev/null; then
     kill -9 "$DAEMON_PID" 2>/dev/null || true
     fail "the daemon outlived its shell"
+fi
+
+# The note goes with it. A file naming a port nothing answers on is worse than
+# no file: it turns "the desk is not running" into "the desk is running and
+# broken", and the next agent to look believes it.
+if [ -f "$URL_FILE" ]; then
+    fail "the shell left its published URL behind: $(cat "$URL_FILE")"
 fi
 
 # The daemon's log went where the shell promised, and stayed bounded.

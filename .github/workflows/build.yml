@@ -35,12 +35,28 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          # Los dos lockfiles: este job construye la web y el paquete de
+          # agentes, y una caché indexada solo por el primero se reutiliza
+          # cuando el segundo ha cambiado.
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            mcp/pnpm-lock.yaml
 
       # Before CMake: the install rule picks up web/dist if it is there, and the
       # daemon serves its own interface only when it has been built.
       - name: Build the web interface
         working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          pnpm test
+          pnpm build
+
+      # El paquete de agentes: el CLI, el servidor MCP y el motor del documento
+      # declarativo. Se construye antes que el daemon porque spec-smoke.sh lo
+      # necesita compilado, y sus tests no necesitan un daemon en absoluto.
+      - name: Build the agent package
+        working-directory: mcp
         run: |
           pnpm install --frozen-lockfile
           pnpm check
@@ -191,6 +207,14 @@ jobs:
       - name: Smoke test - the web API drives the engine
         run: ./server/test/api-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      # Antes que el resto: si el contrato y las rutas se han separado, el fallo
+      # se lee de un vistazo, y no hay por qué esperar a los treinta de abajo.
+      - name: OpenAPI smoke test (el contrato contra las rutas, campo a campo)
+        run: ./server/test/openapi-smoke.sh orchidlightsd
+
+      - name: Spec smoke test (un show entero, exportado y vuelto a aplicar)
+        run: ./server/test/spec-smoke.sh orchidlightsd resources/samples/Sample.qxw
+
       - name: Shutdown smoke test (signals, token-gated route, last frame on the wire)
         run: ./server/test/shutdown-smoke.sh orchidlightsd
 
@@ -248,6 +272,9 @@ jobs:
       - name: Remote smoke test (doors, keys, and the wire that closes)
         run: ./server/test/remote-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      - name: Devices smoke test (a key per phone, roles the daemon keeps, revoke cuts the wire)
+        run: ./server/test/devices-smoke.sh orchidlightsd server/test/data/vc-frames.qxw
+
       - name: Video smoke test (media without a token, the feed directs)
         run: ./server/test/video-smoke.sh orchidlightsd
 
@@ -272,6 +299,12 @@ jobs:
       # not solo at all, so the rule lives in the daemon and is checked there.
       - name: Smoke test - a solo frame drops what it replaces
         run: ./server/test/frames-smoke.sh orchidlightsd server/test/data/vc-frames.qxw
+
+      # A speed dial carries four external controls on one widget. Read into a
+      # single binding, the last one in the file ate the other three -- the tap
+      # among them. The Loopback plugin closes the wire, so it runs with output.
+      - name: Smoke test - the tempo dial is tapped, doubled, halved and reset
+        run: ./server/test/tempo-smoke.sh orchidlightsd server/test/data/vc-tempo.qxw
 
       # Editing the console re-registers everything with the engine. A fader
       # that survives that in name but not in effect is a lamp stuck up.
@@ -504,13 +537,24 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            mcp/pnpm-lock.yaml
 
       - name: Build the web interface
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+
+      # shell-smoke comprueba que la URL que publica la carcasa la usa de
+      # verdad el lanzador que viaja en el paquete, y para eso necesita el
+      # bundle construido.
+      - name: Bundle the agent package
+        working-directory: mcp
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm bundle
 
       - name: Build the daemon
         run: |
@@ -531,6 +575,12 @@ jobs:
       # assertions themselves are all from outside (HTTP, /proc, signals).
       - name: Shell smoke test
         run: xvfb-run -a desktop/test/shell-smoke.sh
+
+      # The kiosk window used to carry the master key, which walks through the
+      # access mask: its cage was the interface's alone. Now it pairs an
+      # operator's key of its own, reused across launches.
+      - name: Kiosk smoke test
+        run: xvfb-run -a desktop/test/kiosk-smoke.sh
 
   desktop-bundle:
     name: Desktop bundle (deb + AppImage)
@@ -563,7 +613,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            mcp/pnpm-lock.yaml
 
       - name: Build the web interface
         working-directory: web
@@ -571,7 +623,15 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Stage the sidecar (daemon + plugins + fixtures + web)
+      # El servidor MCP y el CLI viajan dentro del paquete, un fichero cada uno.
+      # collect-sidecar.sh se niega a seguir si no están.
+      - name: Bundle the agent package
+        working-directory: mcp
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm bundle
+
+      - name: Stage the sidecar (daemon + plugins + fixtures + web + agentes)
         run: ./desktop/scripts/collect-sidecar.sh
 
       - name: Build the bundles
@@ -614,6 +674,18 @@ jobs:
           assert len(body[\"outputPlugins\"]) >= 10, body
           assert len(body[\"audioFormats\"]) >= 5, body
           "
+            # Y el paquete de agentes: los dos comandos quedan en el PATH, y
+            # encuentran esta mesa SIN que el puerto aparezca en ningún sitio
+            # -- la carcasa lo dejó escrito al arrancar, que es lo que hace que
+            # un registro de MCP valga para siempre.
+            command -v orchidlights-mcp > /dev/null \
+              || { echo "orchidlights-mcp no quedó en el PATH"; exit 1; }
+            [ -x /usr/bin/orchidctl ] \
+              || { echo "orchidctl quedó sin bit de ejecución"; exit 1; }
+            OUT=$(orchidctl status) || { echo "orchidctl falló: $OUT"; exit 1; }
+            echo "$OUT"
+            echo "$OUT" | grep -q "127.0.0.1:$PORT" \
+              || { echo "orchidctl habló con otra mesa"; exit 1; }
             kill -TERM $SHELL_PID
             for _ in $(seq 1 40); do
               kill -0 "$DP" 2>/dev/null || exit 0
@@ -658,6 +730,19 @@ jobs:
               echo "--- daemon.log:"; cat "$HOME/.orchidlights/daemon.log" 2>/dev/null || true
               exit 1
             fi
+            # Y los agentes: el AppImage no deja nada en el PATH, así que
+            # responde él por los dos comandos. Sin puerto en ninguna parte,
+            # como con el .deb: tiene que encontrar ESTA mesa por su cuenta.
+            OUT=$(APPIMAGE_EXTRACT_AND_RUN=1 "'"$AI"'" --ctl status) \
+              || { echo "--ctl falló: $OUT"; exit 1; }
+            echo "$OUT"
+            echo "$OUT" | grep -q "127.0.0.1:$PORT" \
+              || { echo "--ctl habló con otra mesa"; exit 1; }
+            INIT="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ci\",\"version\":\"0\"}}}"
+            printf "%s\n" "$INIT" \
+              | APPIMAGE_EXTRACT_AND_RUN=1 timeout 60 "'"$AI"'" --mcp \
+              | head -1 | grep -q "\"serverInfo\"" \
+              || { echo "--mcp no contestó al initialize"; exit 1; }
             SHELL_PID=$(ps -o ppid= -p "$DP" | tr -d " ")
             kill -TERM "$SHELL_PID"
             for _ in $(seq 1 40); do

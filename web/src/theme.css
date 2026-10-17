@@ -3573,6 +3573,52 @@ body[data-kiosk="1"] .bpm-dock {
   font-size: 0.8rem;
 }
 
+/* Pairing: name and role on one line, the button where the thumb is. */
+.remote-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.remote-pair .field {
+  flex: 1 1 12rem;
+}
+
+.remote-pair button {
+  min-height: 44px;
+}
+
+/* The key exists outside the phone for as long as this card is open. */
+.remote-paired {
+  margin-bottom: 0.9rem;
+  border-color: var(--accent);
+  max-width: 20rem;
+}
+
+.remote-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.remote-actions select {
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.remote-error {
+  margin-top: 0.7rem;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
 /* ---- Native controls, brought into the house ------------------------- */
 
 /* The browser's own widgets (scrollbars, checkboxes, number spinners) were

@@ -21,6 +21,9 @@
 #define APIAUTH_H
 
 #include <QByteArray>
+#include <QDateTime>
+#include <QHash>
+#include <QList>
 #include <QString>
 
 class QHttpServerRequest;
@@ -35,10 +38,44 @@ class QHttpServerRequest;
  * The token lives in the user data directory with owner-only permissions and is
  * generated on first use. It is deliberately not a password: there is no user
  * to remember it, the browser stores it, and rotating it is deleting a file.
+ *
+ * That token is the MASTER key: it opens everything, the disk and the off
+ * switch included, and it stays on this machine. Every other device gets a
+ * key of its own, paired from the desk and revocable one by one, with a ROLE:
+ *
+ *  - design: the whole desk, as the master has it, minus the disk, the
+ *    shutdown, the access mask and the device list -- the designer's phone
+ *    walking the venue;
+ *  - operate: the console and the desk under the access mask, never the
+ *    editors -- the phone taped to a truss.
+ *
+ * Before device keys every client carried the one token, and the token
+ * bypassed the mask: on a desk open to the network the kiosk cage was kept by
+ * the interface alone. Device keys are stored as SHA-256 hashes, so the file
+ * that lists them is not a file of keys.
  */
 class ApiAuth
 {
 public:
+    /** Who is asking. Open is nobody in particular: no key, or one this desk
+     *  does not know -- allowed only where no key is demanded. */
+    enum class Role { Open, Master, Design, Operate };
+
+    struct Caller
+    {
+        Role role = Role::Open;
+        quint32 device = 0;  //!< the device's id, for Design and Operate
+    };
+
+    struct Device
+    {
+        quint32 id = 0;
+        QString name;
+        Role role = Role::Operate;
+        QByteArray hash;     //!< SHA-256 of the key, hex; the key itself is never kept
+        QDateTime created;
+    };
+
     /**
      * Load the token, generating and persisting one if there is none.
      * Returns false and fills errorMessage if it cannot be stored, because
@@ -53,6 +90,13 @@ public:
 
     /** True when the request may proceed. */
     bool authorize(const QHttpServerRequest &request) const;
+
+    /** Who the request's bearer key belongs to. */
+    Caller identify(const QHttpServerRequest &request) const;
+
+    /** The same, for a key presented some other way (a WebSocket's first
+     *  message). Also stamps the device's last-seen time. */
+    Caller identifyKey(const QByteArray &presented) const;
 
     /**
      * True only when the request carries the token, whatever setRequired says.
@@ -81,11 +125,40 @@ public:
     /** True when the token was created by this run rather than read back. */
     bool wasGenerated() const { return m_generated; }
 
+    /* ---- device keys ----------------------------------------------------- */
+
+    QList<Device> devices() const { return m_devices; }
+
+    /** When the device last presented its key in this run; 0 for never. */
+    qint64 lastSeen(quint32 id) const { return m_lastSeen.value(id, 0); }
+
+    /** Pair a device. The key comes back in `key` and is NOT kept: shown once,
+     *  in the QR, and after that only its hash exists. */
+    bool createDevice(const QString &name, Role role, Device &made, QByteArray &key,
+                      QString &errorMessage);
+
+    /** Rename or change the role; null leaves that field as it is. */
+    bool updateDevice(quint32 id, const QString *name, const Role *role,
+                      QString &errorMessage);
+
+    bool revokeDevice(quint32 id, QString &errorMessage);
+
+    static QString roleName(Role role);
+    static bool roleFromName(const QString &name, Role &role);
+
 private:
+    bool loadDevices(QString &errorMessage);
+    bool saveDevices(QString &errorMessage) const;
+
     QByteArray m_token;
     QString m_path;
     bool m_required = false;
     bool m_generated = false;
+
+    QString m_devicesPath;
+    QList<Device> m_devices;
+    quint32 m_nextDevice = 1;
+    mutable QHash<quint32, qint64> m_lastSeen;
 };
 
 #endif // APIAUTH_H

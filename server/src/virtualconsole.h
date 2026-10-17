@@ -259,6 +259,23 @@ struct VcWidget
         int duration = 0;
     };
     QVector<SpeedTarget> speedTargets;
+
+    /**
+     * A speed dial's external controls: tap, multiply, divide and reset, each
+     * with its own <Input ID>.
+     *
+     * Four bindings on one widget, so they cannot live in the single-binding
+     * fields above -- reading them into those made the last one win, and three
+     * of the four vanished. On a show that runs on tap tempo, the tap was one
+     * of the three.
+     */
+    struct SpeedInput
+    {
+        int id = 0;             //!< 1 tap, 2 multiply, 3 divide, 4 reset
+        quint32 universe = 0;
+        quint32 channel = 0;
+    };
+    QVector<SpeedInput> speedInputs;
     int speedMs = 0;       //!< the dial's stored position, in milliseconds
     int speedMin = 0;
     int speedMax = 10000;

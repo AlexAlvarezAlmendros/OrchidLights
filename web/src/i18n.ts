@@ -57,8 +57,6 @@ const EN: Record<string, string> = {
   'El motor solo escucha en este equipo': 'The engine only listens on this machine',
   'Para abrirlo a los móviles de la red, arranca el daemon con':
     'To open it to the phones on the network, start the daemon with',
-  'La URL lleva la llave de esta mesa: compártela solo con quien deba tocarla.':
-    'The URL carries the key to this desk: share it only with someone who should touch it.',
   Conectados: 'Connected',
   'Nadie más está conectado ahora mismo.': 'Nobody else is connected right now.',
   'desde las': 'since',
@@ -83,6 +81,39 @@ const EN: Record<string, string> = {
   Recientes: 'Recent',
   Abrir: 'Open',
   'Salir del kiosko': 'Leave kiosk',
+  // Paired devices (remote screen)
+  Dispositivos: 'Devices',
+  'Los dispositivos se emparejan desde el equipo de la mesa, con su llave maestra.':
+    "Devices are paired from the desk's own machine, with its master key.",
+  Operar: 'Operate',
+  Diseñar: 'Design',
+  'Llave maestra': 'Master key',
+  'Sin llave': 'No key',
+  'El motor solo escucha en este equipo: el móvil no llegará hasta arrancarlo con':
+    'The engine only listens on this machine: the phone will not reach it until it is started with',
+  'Su llave:': 'Its key:',
+  'Esta llave solo se enseña ahora: escanéala desde el móvil antes de cerrar.':
+    'This key is shown only now: scan it from the phone before closing.',
+  Hecho: 'Done',
+  Nombre: 'Name',
+  'Truss izquierdo': 'Left truss',
+  Rol: 'Role',
+  Emparejar: 'Pair',
+  'Operar: la consola y la mesa simple, bajo la máscara. No edita nada.':
+    'Operate: the console and the simple desk, under the mask. Edits nothing.',
+  'Diseñar: toda la mesa salvo el disco, el apagado, la máscara y los dispositivos.':
+    'Design: the whole desk except the disk, shutdown, the mask and the devices.',
+  'El motor solo escucha en este equipo: arráncalo con --listen-all para que lleguen los móviles.':
+    'The engine only listens on this machine: start it with --listen-all so phones can reach it.',
+  'Ningún dispositivo emparejado todavía.': 'No devices paired yet.',
+  'visto a las': 'seen at',
+  'sin estrenar': 'never used',
+  conectado: 'connected',
+  'Rol de': 'Role of',
+  '¿Revocar?': 'Revoke?',
+  Revocar: 'Revoke',
+  'La URL no lleva llave: empareja el móvil abajo para darle la suya.':
+    'The URL carries no key: pair the phone below to give it its own.',
 }
 
 export function t(text: string): string {

@@ -370,6 +370,16 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 > **Dos bugs que el mapeo del submaster destapó, arreglados antes de tocarlo.** Un `Universe` guarda su propia referencia a cada fader que reparte, así que soltar la nuestra **no lo desregistra**: cada edición de la consola dejaba uno huérfano asegurando su último valor, y como los faders mezclan HTP, el slider ya no podía bajar el canal nunca más. Editar un caption a mitad de show dejaba un foco arriba hasta recargar el proyecto. Y `forgetSliders` borraba los valores, así que arreglar lo primero habría hecho que cada edición apagara el rig. Ahora los faders se devuelven en el hilo del timer y los valores sobreviven, reafirmándose en el siguiente tick.
 
+- [x] **Botones `Override`: la paleta que recolorea un chaser en marcha** (2026-09-05). El color es HTP, así que un botón de color encima de un look rojo daba magenta, y la única salida era matar el look. La acción nueva deja una escena **encima** de lo que corre a través de la capa de flash del motor —prioridad de override y LTP forzado— y la engancha hasta la siguiente pulsación: el chaser sigue con su ritmo y su movimiento y solo el color es el de la paleta. En un marco solo un override es una capa sobre el estado, no un estado: suelta a las otras paletas, respeta a los toggles, y un toggle que arranca lo suelta a él. Stop All también. Solo escenas; sobre lo demás es un toggle. QLC+ lo lee como `Toggle`, y anidando las paletas en su propio marco solo el fichero degrada sin matar el look.
+  - El feed en vivo no se enteraba de los flashes: la lista del timer no cambia cuando una escena se pone encima, así que un botón enganchado desde un móvil no se encendía en el otro. Ahora escucha la señal `flashing` de cada función, existente o por llegar.
+  - `server/test/frames-smoke.sh` lee el universo: cian encima de rojo sale cian —HTP habría dado blanco—, un look nuevo suelta la paleta, y Stop All también.
+
+- [x] **El dial de tempo se deja tocar desde fuera** (2026-09-05). Un dial lleva **cuatro** mandos externos en un solo widget —tap, multiplicar, dividir y volver al tempo de partida—, cada uno con su `<Input ID>`. El lector los metía en el hueco de una sola asignación, así que **el último del fichero se comía a los otros tres**, y el router además no encaminaba nada de tipo `speeddial`: en un show que va a tap tempo, el pad de tap estaba encendido y no hacía nada. Ahora se parsean como lista (`VcWidget::speedInputs`), se encaminan, y `EngineHost::speedDialControl` les da semántica: el tap promedia los últimos cuatro intervalos y descarta las pausas de más de tres segundos, multiplicar y dividir parten del valor que alguien puso de verdad, y el reset vuelve al `<Time>` del fichero. `GET /vc` los reporta con nombre.
+  - **Y un botón de mantener pulsado sobre algo que no es una escena.** `Function::flash` solo está implementado en `Scene`: sobre un chaser levantaba la bandera, emitía la señal y no encendía nada, así que el botón se reportaba encendido sobre un rig que no había cambiado. Ahora cae a arrancar y parar, que es lo que un operador entiende por sujetar —y lo que hace posible un pad de estrobo que va al tempo, porque un estrobo al tempo es un chaser y no una escena.
+  - `server/test/tempo-smoke.sh` cierra el universo 2 en bucle con el plugin Loopback y comprueba el número que acaba teniendo el chaser: dividir lo baja a la mitad, multiplicar lo sube, el reset vuelve al de partida, dos taps lo dejan en su intervalo y un tap suelto tras una pausa larga no promedia la pausa.
+  - **El `ID` de un `<Input>` es cosa del dial.** QLC+ 5 escribe `ID="0"` también en la única asignación de un botón o un fader, y la primera versión del lector mandaba cualquier `<Input>` con `ID` a la lista del dial: en `14agostohostalets.qxw` eran 102 botones y 16 faders que se quedaban sin MIDI. Lo cazó la revisión antes del commit; ahora solo un dial reparte por `ID`, y `tempo-smoke.sh` lleva al lado un botón con `ID="0"` que tiene que reportar su asignación y responder a ella.
+  - **La regla de solo sigue a los miembros de una Collection.** Un look que es {posición, chaser} arranca su escena de posición, y si esa escena tiene botón en el marco solo de posiciones, la posición anterior cae como si se hubiera pulsado. Sin esto la vieja seguía corriendo debajo —perdida por LTP, invisible— con el pad encendido y a una pulsación de apagarse en vez de encenderse. Probado con «Rojo con humo».
+
 ### F7 — Show manager y previsualización 2D ✅
 
 - [x] **Timeline multipista**, con las barras arrastrables y el cabezal de reproducción en vivo. El cuerpo de un Show era lo único que este daemon no sabía leer en absoluto: contestaba una nota diciéndolo. Ahora se leen las pistas, lo que hay colocado en cada una y cuándo, y se edita desde el navegador — añadir y quitar pistas, colocar funciones, moverlas, estirarlas, bloquearlas.
@@ -389,13 +399,215 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
   - **No es una edición**: no toca el documento y no sobrevive a una recarga, y el panel lo dice. Soltar baja los canales a cero en vez de dejarlos enganchados.
   - Lo que no mezcla color, o no tiene dímer, se dice con el número — «2 de 4 no mezclan color»— en vez de ofrecer un control que no hace nada.
 
+### Plan de escritorio (F1–F22) ✅
+
+Después de F7 el trabajo siguió un plan propio, de paridad 1:1 con QLC+ 5 y una
+aplicación de escritorio, en ramas `desktop-f1` … `desktop-f22` y PRs #38–#72.
+Cada fase se fusionó con su smoke test en CI; el detalle está en cada PR y el
+resumen en el README:
+
+| Bloque | Contenido |
+|---|---|
+| A | Apagado limpio, auth, carcasa Tauri, ciclo de proyecto, deb + AppImage |
+| B | Grand Master, STOP ALL, Simple Desk con keypad, monitor DMX, dump a escena, entrada externa con feedback |
+| C | Editores 1:1 (chaser/EFX/matrix/script/audio/show), palettes con fanning, consola completa (multipágina, crossfade, XY pad), fixtures a escala de rig, 2D avanzada |
+| D | Undo global por instantáneas, kiosko + máscara de acceso, i18n es/en, ajustes |
+| E | Vídeo con superficies (`/#/surface`) y escenario 3D con picking |
+
 ### F8 — Extras
 
 - [x] PWA instalable — hecha en F2 junto al modo operador.
-- [ ] 3D opcional.
-- [ ] Multiusuario con roles.
+- [x] **3D** — escenario con haces que son el DMX, clic en el suelo que apunta
+      las móviles, colocar, colgar y girar, y picking por cuerpos (#62, #69–#72).
+- [x] **Una llave por dispositivo, con rol** (2026-10-17). Había token,
+      máscara de kiosko por áreas (#60) y conexiones vivas con su botón de
+      expulsar (#66) — y un hueco debajo: en una mesa abierta a la red todo
+      cliente llevaba **el único token**, y ese token se saltaba la máscara.
+      La jaula del kiosko la guardaba solo la interfaz, y el QR de la pantalla
+      Remoto repartía la llave maestra a quien lo escanease.
+  - El token de siempre pasa a ser la **llave maestra** y no sale del equipo.
+    Cada móvil se empareja desde *Remoto* o con `orchidctl pair` y recibe una
+    llave propia con un rol: **operar** (consola, mesa simple, blackout, grand
+    master, parar, mesa en vivo, bajo la máscara *en el daemon*) o **diseñar**
+    (toda la mesa, saltándose la máscara, salvo disco, apagado, máscara y
+    dispositivos). Solo la maestra empareja, cambia y revoca.
+  - La llave se enseña una vez, en el QR; `devices.json` guarda su SHA-256 con
+    permisos `600`. Revocar invalida la llave en la siguiente petición y
+    **cierra ya** su WebSocket; cambiar el rol también, para que vuelva a
+    entrar con el nuevo. Los ids no se reutilizan.
+  - Las puertas de red de `/remote` ya no llevan llave.
+  - Y de paso, dos rutas mal clasificadas: pulsar un widget y mover su fader
+    por REST caían en *editar la consola*; son *controlarla*, como ya decía el
+    WebSocket. La interfaz esconde «Editar» y «Ordenar» cuando la máscara los
+    cierra, en vez de ofrecer botones que el daemon va a rechazar.
+  - `devices-smoke.sh`, con un `HOME` temporal: emparejar, el fichero sin
+    llaves, lo que puede y no puede cada rol con y sin kiosko, cambiar el rol,
+    revocar con el socket abierto, reiniciar el daemon, y `orchidctl`.
+  - **Y el kiosko de la carcasa también** (2026-10-17). Su ventana entraba
+    con la maestra, así que en el propio equipo de la mesa la jaula la
+    guardaban la interfaz y el PIN. Con `--kiosk` la carcasa empareja un
+    dispositivo de operador, «Kiosko de este equipo», guarda su llave en
+    `~/.orchidlights/kiosk-key` (`600`) y la reutiliza: una fila en la lista,
+    no una por arranque. Si alguien la revoca, el siguiente arranque empareja
+    otra y quita la fila vieja. La carcasa —bandeja, pánico, salir del kiosko—
+    sigue con la maestra. Si emparejar falla, el kiosko entra con la maestra y
+    lo dice, porque una mesa que no abre su consola por un problema de llaves
+    es peor que una jaula de interfaz. `kiosk-smoke.sh` lo comprueba desde
+    fuera: la conexión de la ventana es ese dispositivo y no construye nada.
 
 ---
+
+### F9 — Agentes: el proyecto como archivo de texto
+
+> El daemon ya expone 134 operaciones sobre 100 rutas, y entre ellas está todo
+> lo que hace falta para montar un show entero: patch de fixtures, `/io` con
+> MIDI y DMX, `/plan` con posición y rotación en la 3D, cuerpos de función
+> editables, palettes, `/vc/widgets`. **La capacidad está; lo que falta es que
+> se pueda encontrar, aplicar de una vez y comprobar.**
+>
+> Un agente hoy, contra este daemon, se encuentra cuatro paredes:
+>
+> 1. **No sabe que existe.** Sin OpenAPI y sin `AGENTS.md`, averiguar la API es
+>    leer 215 KB de `apiserver.cpp`.
+> 2. **Montar un show son ~200 llamadas en orden**, y un fallo a mitad deja el
+>    proyecto en un estado que no es ni el viejo ni el nuevo.
+> 3. **No puede direccionar nada.** Los `id` los asigna `Doc` —el hueco libre
+>    más bajo—, así que un agente no puede escribirlos, solo descubrirlos
+>    después de crear. Un archivo declarativo tiene que ir por nombre.
+> 4. **No puede verificar.** Configura el rig y no tiene forma de mirar el
+>    universo de vuelta para saber si la luz se encendió.
+
+- [x] **El contrato legible.** OpenAPI 3.1 en `docs/api/openapi.yaml`, servido en
+      `GET /api/v1/openapi.json`, más un documento de descubrimiento en
+      `GET /api/v1` que diga versión, capacidades y si hace falta token.
+  - **Y un test antideriva en CI**, que es lo único que separa una spec de una
+    mentira futura: extrae la tabla de rutas de `apiserver.cpp` y la compara con
+    la spec en los dos sentidos. Una ruta nueva sin documentar rompe el build;
+    una documentada que ya no existe, también. Una spec que miente es peor que
+    no tener ninguna, porque el agente se la cree.
+  - `AGENTS.md` en la raíz — la convención que leen OpenCode, Claude Code y
+    Cursor: cómo levantar el daemon headless, dónde está el token, y el camino
+    dorado para construir un show.
+
+> **Dónde acabó viviendo, y por qué no en el daemon.** El plan decía
+> `GET /api/v1/spec` y `POST /api/v1/spec/apply` en C++. El aplicador iba a ser,
+> en cualquier caso, una composición de llamadas a `DocWriter`, cada una con su
+> propia entrada en el anillo de undo — así que ponerlo dentro del proceso no
+> compraba ni atomicidad ni un undo único, que eran las dos razones para
+> ponerlo ahí. Vive en `mcp/`, en TypeScript, sobre el REST que ya estaba
+> completo, y desde ahí lo usan las tres superficies: el MCP, el CLI y quien
+> importe el paquete. Lo que sí se paga: un cliente que no sea Node no tiene el
+> documento; tiene las 139 operaciones.
+
+- [x] **El spec: exportar.** El `.qxw` cargado como un documento declarativo
+      versionado: universos con su patch de entrada y salida, fixtures con
+      dirección y sitio en el escenario, grupos, funciones de los diez tipos y la
+      consola entera.
+  - **Todo direccionado por nombre**, no por id. Es la única forma de que un
+    archivo escrito a mano se pueda aplicar dos veces.
+
+- [x] **El spec: aplicar.** Calcula el diff contra el proyecto cargado y lo
+      aplica, sección por sección, con las llamadas del REST que ya existían.
+  - **`dryRun` devuelve el plan sin tocar nada.** Un agente que no puede ensayar
+    es un agente que aprende rompiendo.
+  - **Idempotente**: aplicar dos veces el mismo archivo no hace nada la segunda.
+  - **Se valida entero antes de tocar nada**, y se dicen todos los problemas de
+    golpe: nombres repetidos, referencias a lo que no existe, plugins que esta
+    máquina no tiene, perfiles que no están en la librería, modos que ese perfil
+    no tiene. Aplicar la mitad de un show deja un proyecto del que nadie sabe
+    qué mitad está mirando.
+  - **No borra lo que el archivo no menciona** salvo que se pida `prune`. Un
+    spec parcial es lo normal; interpretarlo como «borra el resto» es perder un
+    show por omisión.
+  - `export → apply → export` es **punto fijo**, comprobado en CI sobre el
+    `Sample.qxw` de QLC+: 13 fixtures, 114 funciones, 96 escenas valor a valor y
+    13 chasers paso a paso. Sin eso, exportar y volver a aplicar es una forma
+    elaborada de corromper un proyecto.
+
+- [x] **Un documento aplicado se deshace de una vez** (2026-10-17). El plan
+      pedía una sola entrada para el lote entero, y no la había: cada llamada
+      dejaba la suya, y aplicar el `Sample.qxw` —355 acciones— se comía el
+      anillo de 200 y su propio principio. Ahora `UndoRing` sabe de lotes:
+      `POST /undo/batch` abre uno, todo lo que se edite dentro se sella al
+      cerrarlo como **una** entrada de cualquier mezcla de ámbitos, que se
+      deshace en orden inverso y se rehace en orden. Si una pieza se niega a
+      volver, las que ya se movieron vuelven a su sitio: el lote queda entero
+      a un lado o al otro, nunca a medias.
+  - El aplicador del MCP abre el lote, y lo cierra también si falla a mitad:
+    lo aplicado hasta ahí es un undo, no cien.
+  - **Un lote abandonado no secuestra la mesa.** Los lotes no se anidan —abrir
+    uno sella el anterior—, un undo con uno abierto lo sella antes de
+    deshacerlo, y uno que pasa 30 s sin ediciones se sella solo, para que el
+    trabajo de otro no acabe dentro del lote de un cliente que murió.
+  - `spec-smoke.sh` aplica el Sample sobre una mesa vacía: una entrada con
+    284 ediciones dentro, un undo la deja vacía y un redo lo devuelve escena a
+    escena.
+  - **Y un fallo que salió al hacerlo: el anillo sobrevivía a cargar otro
+    proyecto.** Un undo tras abrir un show deshacía, sobre él, una edición del
+    anterior —su XML metido por el id que coincidiera—. Ahora se vacía con
+    cada proyecto cargado o nuevo; `undo-smoke.sh` lo comprueba.
+
+- [x] **El servidor MCP.** Paquete `mcp/` en TypeScript con el SDK oficial,
+      hablando REST con el daemon. Stdio para Claude Code y OpenCode, y
+      `.mcp.json` en el checkout para que Claude Code lo encuentre solo.
+  - **19 herramientas con forma de tarea, no 139 envoltorios de endpoint.** Un
+    agente al que le das 139 herramientas gasta el contexto en elegir. Las que
+    importan: describir el proyecto, exportar y aplicar el documento, buscar en
+    la librería de 1.735 perfiles, disparar y parar funciones, pulsar la
+    consola, **leer el universo de vuelta** —el bucle de verificación—, y
+    guardar. Más `orchid_request`, que es la salida de emergencia para las otras
+    120: el índice de rutas viaja como recurso, así que se encuentran y se
+    llaman sin que nadie las envuelva antes.
+
+- [x] **El CLI.** `orchidctl`, porque un agente de Claude Code o de OpenCode vive
+      en una shell y ya sabe usarla: `orchidctl export -o show.yaml`,
+      `orchidctl diff show.yaml`, `orchidctl dmx 1`, `orchidctl run "Azul"`.
+
+- [x] **Y tres huecos del daemon que solo salieron al usarlo desde fuera**: no
+      se podía parchear un dímer genérico, el `PUT` de un EFX no aceptaba la
+      geometría que devolvía su `GET`, y la consola no se podía operar sin un
+      WebSocket. Los tres arreglados; los tres invisibles desde la web, que ya
+      sabía sortearlos.
+
+- [x] **Sidecar en la carcasa Tauri.** El servidor MCP y `orchidctl` viajan
+      dentro del paquete —un fichero de un megabyte cada uno, empaquetados con
+      esbuild— y el `.deb` los deja en el PATH.
+  - **El registro no lleva puerto.** La carcasa pide el 9998 y coge cualquier
+    puerto libre si ese está ocupado, así que `ORCHID_URL=…:9998` en la
+    configuración de un agente funcionaría hasta el día que no, y ese día
+    hablaría con la mesa de otro. La carcasa publica dónde acabó en
+    `~/.orchidlights/desktop-url` y se lo lleva al cerrar —un fichero que nombra
+    un puerto muerto convierte «no está arrancada» en «está arrancada y rota»—,
+    y las dos herramientas lo leen. `claude mcp add orchidlights --
+    orchidlights-mcp`, una vez, para siempre.
+  - **Node no viaja.** El servidor cabe en 1 MB y el runtime pesa 119: doblar el
+    bundle por una función que muchos no usarán es un mal cambio. El `.deb`
+    recomienda `nodejs` —que `apt install` trae por defecto— y el lanzador, si
+    no lo encuentra, lo dice en una frase con qué instalar. Vale con Node 18,
+    que es el que trae Ubuntu 24.04: pedir 20 habría dejado fuera a quien lo
+    instaló de la forma más normal que hay.
+  - `shell-smoke.sh` comprueba que la carcasa publica la URL, que un lanzador
+    sin puerto por ninguna parte llega a esa mesa, y que al cerrar no deja el
+    fichero mintiendo. El smoke del `.deb` comprueba que los comandos quedan en
+    el PATH, con su bit de ejecución, y que hablan con la mesa correcta.
+
+- [x] **Lo mismo para el AppImage** (2026-10-17). Un AppImage no deja nada en
+      el PATH, pero su propia ruta no se mueve: `OrchidLights.AppImage --mcp`
+      es el servidor MCP y `--ctl` es `orchidctl`. La carcasa cede el proceso
+      al mismo lanzador que instala el `.deb` **antes** de arrancar Tauri, así
+      que ni abre una segunda ventana ni se la traga la instancia que ya está
+      abierta.
+  - **El `LD_LIBRARY_PATH` del AppRun se queda en el AppImage.** El AppRun lo
+    apunta a las librerías del bundle para el GTK de la carcasa; el lanzador
+    corre el Node del sistema, y un binario del sistema cargando librerías
+    ajenas falla de formas ilegibles. Se quitan solo las entradas del bundle.
+  - El smoke del AppImage en CI pide `--ctl status` sin puerto y comprueba que
+    habla con la mesa que acaba de arrancar, y manda un `initialize` a `--mcp`.
+
+> **Decidido: acceso total, sin rails.** Un agente puede todo lo que puede la
+> web, el rig en directo incluido. La frontera es el token, no una jaula aparte:
+> quien da el token da la mesa. Lo que sí hay es undo — cada lote es una entrada
+> — y `dryRun`, que es la diferencia entre ensayar y aprender rompiendo.
 
 ## 5. Riesgos
 
@@ -406,7 +618,7 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 | 2 | **Divergencia con upstream.** Fork duro = no llegan perfiles ni fixes nuevos | Mantener `upstream` como remote y cherry-pickear solo `resources/fixtures/` y `plugins/`, que están poco acoplados a nuestro código |
 | 3 | **Compatibilidad de proyectos.** Hay shows en producción | No tocar el formato `.qxw`. Test de round-trip en CI con proyectos reales |
 | 4 | **Tiempo real en el navegador.** 512 canales × N universos × 50 Hz | Frames binarios, delta encoding, throttle configurable, suscripción por universo |
-| 5 | **Fiabilidad en directo.** Un navegador no es una mesa de luces | El daemon sigue emitiendo aunque el navegador muera. Watchdog. Blackout de pánico por MIDI/OSC, independiente de la capa web |
+| 5 | **Fiabilidad en directo.** Un navegador no es una mesa de luces | El daemon sigue emitiendo aunque el navegador muera. La unidad systemd lo reinicia (`Restart=on-failure`); la carcasa de escritorio, a propósito, **no**: vigila el proceso y dice que el motor se cayó, porque un reinicio callado a mitad de show convierte una catástrofe en un misterio. Blackout y Stop All por MIDI/OSC, independientes de la capa web |
 
 ---
 
@@ -417,18 +629,7 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 ## 7. Siguiente paso
 
-Instalar el toolchain de Qt 6 y compilar por primera vez:
-
-```bash
-sudo apt install build-essential cmake ninja-build pkg-config \
-                 qt6-base-dev qt6-httpserver-dev qt6-websockets-dev \
-                 qt6-declarative-dev qt6-multimedia-dev qt6-tools-dev qt6-serialport-dev \
-                 libasound2-dev libusb-1.0-0-dev libftdi1-dev libudev-dev libmad0-dev \
-                 libsndfile1-dev libfftw3-dev
-
-cmake -S . -B build -G Ninja -Dserver=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-QT_QPA_PLATFORM=offscreen ./build/server/src/orchidlightsd ~/Documentos/QLC+/17Julio.qxw
-```
-
-Ese último comando, listando los 22 fixtures del P62 sin abrir ventana, cierra F0.
+Revisado el 2026-10-17. La paridad está hecha y el plan, cerrado: no queda
+nada abierto en este documento. Lo siguiente es fusionar la rama `agentes` y
+ver la CI completa —el `.deb`, el AppImage y la interfaz en Chrome solo se
+prueban allí— antes de abrir un plan nuevo.

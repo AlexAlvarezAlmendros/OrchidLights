@@ -1,0 +1,465 @@
+#!/usr/bin/env node
+/**
+ * orchidctl — la mesa desde una shell.
+ *
+ * Un agente de Claude Code o de OpenCode vive en una shell y ya sabe usarla, así
+ * que lo que más le sirve no es una API: es un comando que hace una cosa y la
+ * cuenta en una línea que se puede leer.
+ *
+ * Sale con 0 si funcionó y con 1 si no, y lo que va a stdout es lo que se puede
+ * encadenar; lo demás va a stderr.
+ */
+
+import { readFileSync, writeFileSync } from 'node:fs'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { OrchidClient, OrchidError } from './client.js'
+import { deskOptions } from './config.js'
+import { SpecError, applySpec } from './spec/apply.js'
+import { exportSpec } from './spec/export.js'
+import type { ShowSpec } from './spec/types.js'
+
+const USAGE = `orchidctl — la mesa OrchidLights desde una shell
+
+  orchidctl status                    qué mesa es y qué está corriendo
+  orchidctl export [-o fichero]       el proyecto como documento declarativo
+  orchidctl apply <fichero>           llevar el proyecto a lo que dice el documento
+  orchidctl diff <fichero>            qué haría un apply, sin hacerlo
+  orchidctl dmx [universo]            lo que sale ahora mismo, canal a canal
+  orchidctl run <nombre>              arrancar una función
+  orchidctl stop [nombre]             pararla; sin nombre, para todo
+  orchidctl blackout [on|off]         a oscuras, y de vuelta
+  orchidctl library <busqueda>        buscar en los 1.735 perfiles
+  orchidctl library <fabricante> <modelo>    sus modos y sus canales
+  orchidctl save                      escribir el proyecto al disco
+  orchidctl undo | redo               deshacer la última edición
+  orchidctl devices                   los móviles emparejados, con su rol
+  orchidctl pair <nombre> [--role operate|design]
+                                      emparejar uno: su URL, con su llave dentro
+  orchidctl revoke <nombre|id>        revocarlo, y echarlo si está conectado
+
+Opciones
+
+  --url <url>       dónde escucha la mesa. Sin esto: $ORCHID_URL, lo que dejó
+                    escrito la carcasa en ~/.orchidlights/desktop-url, y si no
+                    http://127.0.0.1:9998
+  --token <token>   el token (o $ORCHID_TOKEN, o ~/.orchidlights/api-token)
+  --console         incluir la Virtual Console en export
+  --prune           en apply, borrar lo que el documento no menciona
+  --save            en apply, guardar al terminar
+  --json            sacar JSON en vez de prosa
+  --role <rol>      en pair: operate (por defecto) o design
+
+Emparejar, cambiar y revocar dispositivos pide la llave maestra: la de
+~/.orchidlights/api-token, que solo existe en el equipo de la mesa.
+`
+
+interface Flags {
+  url?: string | undefined
+  token?: string | undefined
+  out?: string | undefined
+  console: boolean
+  prune: boolean
+  save: boolean
+  json: boolean
+  all: boolean
+  role?: string | undefined
+}
+
+function parseArgs(argv: string[]): { command: string; rest: string[]; flags: Flags } {
+  const flags: Flags = {
+    console: false,
+    prune: false,
+    save: false,
+    json: false,
+    all: false,
+  }
+  const rest: string[] = []
+
+  for (let index = 0; index < argv.length; index++) {
+    const argument = argv[index] as string
+    switch (argument) {
+      case '--url':
+        flags.url = argv[++index]
+        break
+      case '--token':
+        flags.token = argv[++index]
+        break
+      case '-o':
+      case '--out':
+        flags.out = argv[++index]
+        break
+      case '--console':
+        flags.console = true
+        break
+      case '--prune':
+        flags.prune = true
+        break
+      case '--save':
+        flags.save = true
+        break
+      case '--json':
+        flags.json = true
+        break
+      case '--all':
+        flags.all = true
+        break
+      case '--role':
+        flags.role = argv[++index]
+        break
+      default:
+        rest.push(argument)
+    }
+  }
+
+  return { command: rest.shift() ?? '', rest, flags }
+}
+
+/**
+ * A qué mesa se habla.
+ *
+ * Las banderas ganan a lo que resuelva `deskOptions`, que ya mira el entorno,
+ * lo que dejó escrito la carcasa de escritorio y el sitio por defecto.
+ */
+function connect(flags: Flags): OrchidClient {
+  const options = deskOptions()
+  if (flags.url) options.baseUrl = flags.url
+  if (flags.token) options.token = flags.token
+  return new OrchidClient(options)
+}
+
+function out(flags: Flags, human: () => void, data: unknown) {
+  if (flags.json) console.log(JSON.stringify(data, null, 2))
+  else human()
+}
+
+/** Una función por nombre, diciendo cuáles hay cuando no está. */
+async function findFunction(client: OrchidClient, name: string) {
+  const functions = await client.functions()
+  const exact = functions.find((fn) => fn.name === name)
+  if (exact) return exact
+
+  const near = functions.filter((fn) => fn.name.toLowerCase().includes(name.toLowerCase()))
+  if (near.length === 1) return near[0] as (typeof functions)[number]
+  if (near.length > 1) {
+    throw new Error(
+      `"${name}" encaja con ${near.length}: ${near
+        .slice(0, 6)
+        .map((fn) => fn.name)
+        .join(', ')}`,
+    )
+  }
+  throw new Error(`no hay ninguna función llamada "${name}"`)
+}
+
+interface Device {
+  id: number
+  name: string
+  role: 'operate' | 'design'
+  created: string
+  lastSeen: string | null
+  connections: number
+}
+
+async function main(): Promise<number> {
+  const { command, rest, flags } = parseArgs(process.argv.slice(2))
+
+  if (command === '' || command === 'help' || command === '--help' || command === '-h') {
+    console.log(USAGE)
+    return command === '' ? 1 : 0
+  }
+
+  const client = connect(flags)
+
+  switch (command) {
+    case 'status': {
+      const [discovery, status] = await Promise.all([client.discovery(), client.status()])
+      out(
+        flags,
+        () => {
+          const project = discovery.project
+          console.log(`${discovery.name} ${discovery.version} · ${client.baseUrl}`)
+          console.log(`proyecto: ${project?.name || '(ninguno)'}${project?.modified ? ' *' : ''}`)
+          const counts = [
+            `${status.fixtures} fixtures`,
+            `${status.functions} funciones`,
+            `${status.universes} universos`,
+            `${status.runningFunctions} corriendo`,
+          ]
+          if (status.blackout) counts.push('BLACKOUT')
+          console.log(counts.join(' · '))
+        },
+        { ...discovery, ...status },
+      )
+      return 0
+    }
+
+    case 'export': {
+      const spec = await exportSpec(client, { console: flags.console })
+      const text = flags.json ? JSON.stringify(spec, null, 2) : stringifyYaml(spec)
+      if (flags.out) {
+        writeFileSync(flags.out, text)
+        console.error(
+          `escrito ${flags.out}: ${spec.fixtures?.length ?? 0} fixtures, ` +
+            `${spec.functions?.length ?? 0} funciones`,
+        )
+      } else {
+        process.stdout.write(text)
+      }
+      return 0
+    }
+
+    case 'apply':
+    case 'diff': {
+      const file = rest[0]
+      if (file === undefined) {
+        console.error('falta el fichero. orchidctl apply show.yaml')
+        return 1
+      }
+
+      const text = readFileSync(file, 'utf8')
+      const spec = (file.endsWith('.json') ? JSON.parse(text) : parseYaml(text)) as ShowSpec
+      const dryRun = command === 'diff'
+
+      const report = await applySpec(client, spec, {
+        dryRun,
+        prune: flags.prune,
+        save: flags.save,
+      })
+
+      out(
+        flags,
+        () => {
+          for (const action of report.actions) {
+            const mark = action.kind === 'create' ? '+' : action.kind === 'delete' ? '-' : '~'
+            const detail = action.detail ? `  ${action.detail}` : ''
+            console.log(`${mark} ${action.section.padEnd(14)} ${action.name}${detail}`)
+          }
+          if (report.actions.length === 0) {
+            console.log('nada que hacer: el proyecto ya dice lo que dice el documento')
+          } else {
+            const verb = dryRun ? 'haría' : 'hechas'
+            const saved = report.savedTo ? `\nguardado en ${report.savedTo}` : ''
+            console.log(
+              `\n${verb}: +${report.created} ~${report.updated} -${report.deleted}${saved}`,
+            )
+          }
+          if (!dryRun && !flags.save && report.actions.length > 0) {
+            console.log('en memoria — orchidctl save para escribirlo al disco')
+          }
+          if (report.undoOverflowed) {
+            console.log(
+              'el lote no cabe en el anillo de undo (200 entradas): no se puede deshacer entero',
+            )
+          } else if (report.undoSteps === 1) {
+            console.log('para deshacerlo entero: orchidctl undo')
+          } else if (report.undoSteps > 1) {
+            console.log(`para deshacerlo: orchidctl undo ×${report.undoSteps}`)
+          }
+        },
+        report,
+      )
+      return 0
+    }
+
+    case 'dmx': {
+      const universe = Number(rest[0] ?? 1)
+      const snapshot = await client.dmx(universe)
+      out(
+        flags,
+        () => {
+          if (snapshot.blackout) console.log('BLACKOUT')
+          if (snapshot.active.length === 0) {
+            console.log(`universo ${universe}: a oscuras`)
+            return
+          }
+          for (const entry of snapshot.active) {
+            const who = entry.fixtureName
+              ? `${entry.fixtureName} · ${entry.channelName ?? `canal ${entry.channel}`}`
+              : `canal ${entry.channel}`
+            console.log(
+              `${String(entry.channel + 1).padStart(3)}  ${String(entry.value).padStart(3)}  ${who}`,
+            )
+          }
+        },
+        snapshot,
+      )
+      return 0
+    }
+
+    case 'run': {
+      const name = rest.join(' ')
+      if (!name) {
+        console.error('falta el nombre. orchidctl run "Azul frontal"')
+        return 1
+      }
+      const fn = await findFunction(client, name)
+      await client.post(`/functions/${fn.id}/start`)
+      console.log(`arrancando ${fn.name}`)
+      return 0
+    }
+
+    case 'stop': {
+      const name = rest.join(' ')
+      if (!name || flags.all) {
+        const stopped = await client.post<{ stopping: number }>('/stop')
+        console.log(`paradas ${stopped.stopping} funciones`)
+        return 0
+      }
+      const fn = await findFunction(client, name)
+      await client.post(`/functions/${fn.id}/stop`)
+      console.log(`parando ${fn.name}`)
+      return 0
+    }
+
+    case 'blackout': {
+      const wanted = rest[0] ?? 'on'
+      const result =
+        wanted === 'off'
+          ? await client.delete<{ blackout: boolean }>('/blackout')
+          : await client.post<{ blackout: boolean }>('/blackout')
+      console.log(result.blackout ? 'a oscuras' : 'vuelve la luz')
+      return 0
+    }
+
+    case 'library': {
+      if (rest.length >= 2) {
+        const [manufacturer, ...model] = rest
+        const profile = await client.get<{
+          manufacturer: string
+          model: string
+          type: string
+          modes: { name: string; channels: number }[]
+        }>(
+          `/library/${encodeURIComponent(manufacturer as string)}/${encodeURIComponent(model.join(' '))}`,
+        )
+        out(
+          flags,
+          () => {
+            console.log(`${profile.manufacturer} ${profile.model} · ${profile.type}`)
+            for (const mode of profile.modes) {
+              console.log(`  ${mode.name}  (${mode.channels} canales)`)
+            }
+          },
+          profile,
+        )
+        return 0
+      }
+
+      const query = rest[0]
+      const found = await client.get<{ total: number; manufacturers: string[] }>(
+        `/library${query ? `?q=${encodeURIComponent(query)}` : ''}`,
+      )
+      out(
+        flags,
+        () => {
+          console.log(`${found.manufacturers.length} fabricantes de ${found.total} perfiles`)
+          console.log(found.manufacturers.join(', '))
+        },
+        found,
+      )
+      return 0
+    }
+
+    case 'save': {
+      const saved = await client.save()
+      console.log(`guardado en ${saved.path}`)
+      return 0
+    }
+
+    case 'undo':
+    case 'redo': {
+      const result = await client.post<{ undone?: string; redone?: string }>(`/${command}`)
+      console.log(result.undone ?? result.redone ?? 'hecho')
+      return 0
+    }
+
+    case 'devices': {
+      const { devices } = await client.get<{ devices: Device[] }>('/devices')
+      out(
+        flags,
+        () => {
+          if (devices.length === 0) console.log('ningún dispositivo emparejado')
+          for (const device of devices) {
+            const seen = device.lastSeen ? `visto ${device.lastSeen}` : 'sin estrenar'
+            const live = device.connections > 0 ? ` · ${device.connections} conectado` : ''
+            console.log(`${device.id}\t${device.role}\t${device.name}\t${seen}${live}`)
+          }
+        },
+        devices,
+      )
+      return 0
+    }
+
+    case 'pair': {
+      const name = rest.join(' ').trim()
+      if (name === '') throw new Error('pair necesita un nombre: orchidctl pair "Truss izquierdo"')
+      const role = flags.role ?? 'operate'
+      if (role !== 'operate' && role !== 'design') {
+        throw new Error(`--role es operate o design, no "${role}"`)
+      }
+      const paired = await client.post<
+        Device & { key: string; urls: { url: string }[]; localUrl: string }
+      >('/devices', { name, role })
+      out(
+        flags,
+        () => {
+          // Solo la URL va a stdout, para encadenarla a un generador de QR.
+          const urls = paired.urls.map((door) => door.url)
+          for (const url of urls.length > 0 ? urls : [paired.localUrl]) console.log(url)
+          console.error(`emparejado «${paired.name}» (${paired.role}), id ${paired.id}`)
+          console.error('la llave va en la URL y no se vuelve a enseñar')
+          if (urls.length === 0) {
+            console.error(
+              'la mesa solo escucha en este equipo: arráncala con --listen-all para los móviles',
+            )
+          }
+        },
+        paired,
+      )
+      return 0
+    }
+
+    case 'revoke': {
+      const which = rest.join(' ').trim()
+      if (which === '') throw new Error('revoke necesita un nombre o un id')
+      const { devices } = await client.get<{ devices: Device[] }>('/devices')
+      const matches = devices.filter(
+        (device) => String(device.id) === which || device.name === which,
+      )
+      if (matches.length === 0) throw new Error(`no hay ningún dispositivo «${which}»`)
+      if (matches.length > 1) throw new Error(`«${which}» son ${matches.length}: revoca por id`)
+      const target = matches[0] as Device
+      const result = await client.delete<{ revoked: number; closed: number }>(
+        `/devices/${target.id}`,
+      )
+      console.log(
+        `revocado «${target.name}»${result.closed > 0 ? `, ${result.closed} conexión cerrada` : ''}`,
+      )
+      return 0
+    }
+
+    default:
+      console.error(`no conozco "${command}".\n`)
+      console.error(USAGE)
+      return 1
+  }
+}
+
+main()
+  .then((code) => {
+    process.exitCode = code
+  })
+  .catch((error: unknown) => {
+    if (error instanceof SpecError) {
+      console.error('El documento no se puede aplicar:')
+      for (const problem of error.problems) console.error(`  · ${problem}`)
+    } else if (error instanceof OrchidError) {
+      console.error(error.message)
+      if (error.status === 0) {
+        console.error('¿está el daemon arrancado? orchidlightsd tonight.qxw')
+      }
+    } else {
+      console.error(error instanceof Error ? error.message : String(error))
+    }
+    process.exitCode = 1
+  })

@@ -119,6 +119,19 @@ describe('a button in the editor', () => {
     expect(onApply).toHaveBeenCalledWith({ action: 'Flash' })
   })
 
+  it('offers Override, and says what it does', async () => {
+    const user = userEvent.setup()
+    const { onApply } = renderEditor(button)
+
+    await user.selectOptions(screen.getByDisplayValue('Alternar'), 'Sobrescribir (pisa el color)')
+    expect(onApply).toHaveBeenCalledWith({ action: 'Override' })
+
+    // A palette that silently toggles on stage is the failure this warns
+    // about, so the explanation is part of the control.
+    renderEditor({ ...button, action: 'Override' })
+    expect(screen.getByText(/pisando sus canales/)).toBeInTheDocument()
+  })
+
   it('offers the flash flags only on a flash button, and sends them', async () => {
     const user = userEvent.setup()
 
