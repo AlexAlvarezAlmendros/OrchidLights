@@ -131,9 +131,19 @@
           "authRequired": {
            "type": "boolean"
           },
+          "role": {
+           "type": "string",
+           "enum": [
+            "open",
+            "master",
+            "design",
+            "operate"
+           ],
+           "description": "Quién pregunta: la llave maestra, un dispositivo emparejado con su rol, o nadie en particular."
+          },
           "access": {
            "type": "object",
-           "description": "Las áreas que la máscara de esta mesa deja abiertas.",
+           "description": "Las áreas abiertas para quien pregunta — la máscara de la mesa, estrechada para un dispositivo de operador.",
            "additionalProperties": {
             "type": "boolean"
            }
@@ -515,7 +525,8 @@
     "tags": [
      "sistema"
     ],
-    "summary": "Qué áreas de esta mesa están abiertas.",
+    "summary": "Qué áreas de esta mesa están abiertas para quien pregunta.",
+    "description": "La máscara de la mesa, y para un dispositivo de operador además\nestrechada a la consola y la mesa simple: cada cliente lee la jaula en\nla que está. La llave maestra y un dispositivo de diseño se saltan la\nmáscara en el daemon, pero la leen igual — la interfaz la usa para\nesconder lo que la mesa tiene cerrado.\n",
     "responses": {
      "200": {
       "description": "La máscara, área por área.",
@@ -524,6 +535,15 @@
         "schema": {
          "type": "object",
          "properties": {
+          "role": {
+           "type": "string",
+           "enum": [
+            "open",
+            "master",
+            "design",
+            "operate"
+           ]
+          },
           "fixtures": {
            "type": "boolean"
           },
@@ -560,7 +580,7 @@
      "sistema"
     ],
     "summary": "Cerrar o abrir áreas — el modo kiosko del móvil que se presta.",
-    "description": "La máscara vive en el daemon, no en el navegador: cerrarla solo en un\ncliente es no cerrarla. Exige token siempre.\n",
+    "description": "La máscara vive en el daemon, no en el navegador: cerrarla solo en un\ncliente es no cerrarla. Exige la llave maestra siempre: ningún\ndispositivo ensancha su propia jaula.\n",
     "requestBody": {
      "content": {
       "application/json": {
@@ -633,7 +653,7 @@
      "sistema"
     ],
     "summary": "Dónde se alcanza esta mesa y quién está conectado.",
-    "description": "Las URLs de acceso llevan el token **solo** si quien pregunta lo presentó.\n",
+    "description": "Las URLs de acceso **no llevan llave**: repartir la maestra en un QR\nhacía dueño de la mesa a cualquiera que lo escanease. Un móvil entra\nemparejándolo (`POST /devices`), y la URL que devuelve lleva una llave\nsuya. Cada cliente conectado dice con qué rol entró y, si fue con la\nllave de un dispositivo, cuál (`device`, `deviceId`).\n",
     "responses": {
      "200": {
       "description": "Direcciones, puerto y clientes.",
@@ -675,6 +695,215 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/v1/devices": {
+   "get": {
+    "tags": [
+     "sistema"
+    ],
+    "summary": "Los dispositivos emparejados.",
+    "description": "Cada móvil con su llave y su rol, revocable uno a uno. Solo la llave\nmaestra los ve, los empareja, los cambia y los revoca: un dispositivo\nno puede emparejar más de sí mismo, ensancharse el rol ni salvar a un\ncompañero revocado. La llave de un dispositivo no se guarda — el daemon\nguarda su SHA-256 —, así que esta lista nunca la lleva.\n",
+    "responses": {
+     "200": {
+      "description": "Los dispositivos, del más antiguo al más reciente.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "devices": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/Device"
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "sistema"
+    ],
+    "summary": "Emparejar un dispositivo — su llave, esta vez y no más.",
+    "description": "`operate` maneja la consola y la mesa simple bajo la máscara, más\nblackout, grand master, parar todo y la mesa en vivo; no construye\nnada. `design` hace todo lo que la maestra salvo tocar el disco, apagar\nel daemon, la máscara y los dispositivos, y se salta la máscara.\n\nLa respuesta lleva la llave y las URLs con ella dentro, para un QR. Es\nla única vez que existe fuera del móvil: uno que la pierde se vuelve a\nemparejar.\n",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "type": "string",
+          "description": "Cómo se reconoce en la lista: «Truss izquierdo», «iPad de Ana»."
+         },
+         "role": {
+          "type": "string",
+          "enum": [
+           "operate",
+           "design"
+          ],
+          "description": "Por defecto `operate`."
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Emparejado.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "allOf": [
+          {
+           "$ref": "#/components/schemas/Device"
+          },
+          {
+           "type": "object",
+           "properties": {
+            "key": {
+             "type": "string",
+             "description": "La llave: 64 hexadecimales."
+            },
+            "urls": {
+             "type": "array",
+             "items": {
+              "type": "object",
+              "additionalProperties": true
+             },
+             "description": "Cada puerta de red con la llave en el fragmento. Vacío si el daemon solo escucha en loopback."
+            },
+            "localUrl": {
+             "type": "string"
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/v1/devices/{id}": {
+   "patch": {
+    "tags": [
+     "sistema"
+    ],
+    "summary": "Renombrar un dispositivo o cambiarle el rol.",
+    "description": "El rol nuevo se nota en la siguiente petición. Sus WebSockets abiertos\nse cierran para que vuelvan a entrar con él.\n",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "role": {
+          "type": "string",
+          "enum": [
+           "operate",
+           "design"
+          ]
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "El dispositivo, como queda.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Device"
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     }
+    }
+   },
+   "delete": {
+    "tags": [
+     "sistema"
+    ],
+    "summary": "Revocar un dispositivo — y echarlo ya.",
+    "description": "Su llave deja de valer en la siguiente petición, y sus WebSockets\nabiertos se cierran ahora: revocar no es esperar a que vuelva a llamar.\n",
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Revocado.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "revoked": {
+           "type": "integer"
+          },
+          "closed": {
+           "type": "integer",
+           "description": "Cuántas conexiones abiertas se cerraron."
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
      }
     }
    }
@@ -8297,6 +8526,39 @@
      },
      "invertTilt": {
       "type": "boolean"
+     }
+    }
+   },
+   "Device": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "integer",
+      "description": "No se reutiliza: una fila revocada no vuelve como la de otro."
+     },
+     "name": {
+      "type": "string"
+     },
+     "role": {
+      "type": "string",
+      "enum": [
+       "operate",
+       "design"
+      ]
+     },
+     "created": {
+      "type": "string"
+     },
+     "lastSeen": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "La última vez que presentó su llave desde que arrancó el daemon."
+     },
+     "connections": {
+      "type": "integer",
+      "description": "WebSockets abiertos con su llave ahora mismo."
      }
     }
    },

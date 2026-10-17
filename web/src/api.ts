@@ -470,6 +470,21 @@ export interface Status {
   blackout: boolean
 }
 
+/** Who a request comes from: the master key, a paired device, or nobody in
+ *  particular (loopback with no key). */
+export type Role = 'open' | 'master' | 'design' | 'operate'
+export type DeviceRole = 'design' | 'operate'
+
+export interface Device {
+  id: number
+  name: string
+  role: DeviceRole
+  created: string
+  /** Last time it presented its key since the daemon started; null for never. */
+  lastSeen: string | null
+  connections: number
+}
+
 /** Thrown on a 401 so the shell can tell "the daemon wants a token" apart
  *  from every other failure and show the connect screen instead of a toast. */
 export class Unauthorized extends Error {
@@ -500,6 +515,7 @@ export const api = {
   /** The kiosk access mask: what this desk lets untrusted clients touch. */
   access: () =>
     json<{
+      role?: Role
       fixtures: boolean
       functions: boolean
       vcControl: boolean
@@ -515,7 +531,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   /** Remote access: where this desk can be reached, and who is on it. The
-   *  join URLs carry the token only when this client presented it. */
+   *  join URLs carry no key: a phone gets one of its own by pairing. */
   remote: () =>
     json<{
       listenAll: boolean
@@ -530,10 +546,37 @@ export const api = {
         authenticated: boolean
         trusted: boolean
         universes: number
+        role?: Role
+        device?: string
+        deviceId?: number
       }[]
     }>('/api/v1/remote'),
   kickRemote: (id: number) =>
     json<{ closed: number }>(`/api/v1/remote/clients/${id}`, { method: 'DELETE' }),
+
+  /* Paired devices: master key only. A device asking gets a 401, which the
+     remote screen reads as "this is not the desk's own machine". */
+  devices: () => json<{ devices: Device[] }>('/api/v1/devices'),
+  pairDevice: (name: string, role: DeviceRole) =>
+    json<
+      Device & {
+        key: string
+        urls: { interface: string; ip: string; url: string }[]
+        localUrl: string
+      }
+    >('/api/v1/devices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, role }),
+    }),
+  updateDevice: (id: number, body: { name?: string; role?: DeviceRole }) =>
+    json<Device>(`/api/v1/devices/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  revokeDevice: (id: number) =>
+    json<{ revoked: number; closed: number }>(`/api/v1/devices/${id}`, { method: 'DELETE' }),
   project: () => json<ProjectState>('/api/v1/project'),
   functions: () => json<FunctionState[]>('/api/v1/functions'),
   vc: () => json<import('./layout').VcWidget>('/api/v1/vc'),

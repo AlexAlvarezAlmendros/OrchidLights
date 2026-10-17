@@ -32,6 +32,10 @@ const USAGE = `orchidctl — la mesa OrchidLights desde una shell
   orchidctl library <fabricante> <modelo>    sus modos y sus canales
   orchidctl save                      escribir el proyecto al disco
   orchidctl undo | redo               deshacer la última edición
+  orchidctl devices                   los móviles emparejados, con su rol
+  orchidctl pair <nombre> [--role operate|design]
+                                      emparejar uno: su URL, con su llave dentro
+  orchidctl revoke <nombre|id>        revocarlo, y echarlo si está conectado
 
 Opciones
 
@@ -43,6 +47,10 @@ Opciones
   --prune           en apply, borrar lo que el documento no menciona
   --save            en apply, guardar al terminar
   --json            sacar JSON en vez de prosa
+  --role <rol>      en pair: operate (por defecto) o design
+
+Emparejar, cambiar y revocar dispositivos pide la llave maestra: la de
+~/.orchidlights/api-token, que solo existe en el equipo de la mesa.
 `
 
 interface Flags {
@@ -54,6 +62,7 @@ interface Flags {
   save: boolean
   json: boolean
   all: boolean
+  role?: string | undefined
 }
 
 function parseArgs(argv: string[]): { command: string; rest: string[]; flags: Flags } {
@@ -93,6 +102,9 @@ function parseArgs(argv: string[]): { command: string; rest: string[]; flags: Fl
         break
       case '--all':
         flags.all = true
+        break
+      case '--role':
+        flags.role = argv[++index]
         break
       default:
         rest.push(argument)
@@ -137,6 +149,15 @@ async function findFunction(client: OrchidClient, name: string) {
     )
   }
   throw new Error(`no hay ninguna función llamada "${name}"`)
+}
+
+interface Device {
+  id: number
+  name: string
+  role: 'operate' | 'design'
+  created: string
+  lastSeen: string | null
+  connections: number
 }
 
 async function main(): Promise<number> {
@@ -349,6 +370,71 @@ async function main(): Promise<number> {
     case 'redo': {
       const result = await client.post<{ undone?: string; redone?: string }>(`/${command}`)
       console.log(result.undone ?? result.redone ?? 'hecho')
+      return 0
+    }
+
+    case 'devices': {
+      const { devices } = await client.get<{ devices: Device[] }>('/devices')
+      out(
+        flags,
+        () => {
+          if (devices.length === 0) console.log('ningún dispositivo emparejado')
+          for (const device of devices) {
+            const seen = device.lastSeen ? `visto ${device.lastSeen}` : 'sin estrenar'
+            const live = device.connections > 0 ? ` · ${device.connections} conectado` : ''
+            console.log(`${device.id}\t${device.role}\t${device.name}\t${seen}${live}`)
+          }
+        },
+        devices,
+      )
+      return 0
+    }
+
+    case 'pair': {
+      const name = rest.join(' ').trim()
+      if (name === '') throw new Error('pair necesita un nombre: orchidctl pair "Truss izquierdo"')
+      const role = flags.role ?? 'operate'
+      if (role !== 'operate' && role !== 'design') {
+        throw new Error(`--role es operate o design, no "${role}"`)
+      }
+      const paired = await client.post<
+        Device & { key: string; urls: { url: string }[]; localUrl: string }
+      >('/devices', { name, role })
+      out(
+        flags,
+        () => {
+          // Solo la URL va a stdout, para encadenarla a un generador de QR.
+          const urls = paired.urls.map((door) => door.url)
+          for (const url of urls.length > 0 ? urls : [paired.localUrl]) console.log(url)
+          console.error(`emparejado «${paired.name}» (${paired.role}), id ${paired.id}`)
+          console.error('la llave va en la URL y no se vuelve a enseñar')
+          if (urls.length === 0) {
+            console.error(
+              'la mesa solo escucha en este equipo: arráncala con --listen-all para los móviles',
+            )
+          }
+        },
+        paired,
+      )
+      return 0
+    }
+
+    case 'revoke': {
+      const which = rest.join(' ').trim()
+      if (which === '') throw new Error('revoke necesita un nombre o un id')
+      const { devices } = await client.get<{ devices: Device[] }>('/devices')
+      const matches = devices.filter(
+        (device) => String(device.id) === which || device.name === which,
+      )
+      if (matches.length === 0) throw new Error(`no hay ningún dispositivo «${which}»`)
+      if (matches.length > 1) throw new Error(`«${which}» son ${matches.length}: revoca por id`)
+      const target = matches[0] as Device
+      const result = await client.delete<{ revoked: number; closed: number }>(
+        `/devices/${target.id}`,
+      )
+      console.log(
+        `revocado «${target.name}»${result.closed > 0 ? `, ${result.closed} conexión cerrada` : ''}`,
+      )
       return 0
     }
 

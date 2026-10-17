@@ -284,23 +284,36 @@ void ApiServer::registerRoutes()
 
     /* The kiosk gate: 0 lets the request through, 401 is a failed token, 403
        is an area the mask closed. GETs always pass -- the mask hides levers,
-       not eyes -- and the STRICT token bypasses it entirely: the mask is what
-       a kiosk phone gets, not what the operator's own shell gets. */
+       not eyes. The master key and a design device bypass it entirely: the
+       mask is what a kiosk phone gets, not what the people building the show
+       get. An operate device is held to the mask AND to the operating areas,
+       whatever the mask says, and outside every area to the few routes an
+       operator reaches for in the dark. */
     const auto refused = [this](const QHttpServerRequest &request) -> int {
         if (m_auth.authorize(request) == false)
             return 401;
         if (request.method() == QHttpServerRequest::Method::Get)
             return 0;
 
-        const quint32 mask = m_engine->accessMask();
-        if (mask == EngineHost::AccessAll)
+        const ApiAuth::Caller caller = m_auth.identify(request);
+        if (caller.role == ApiAuth::Role::Master || caller.role == ApiAuth::Role::Design)
             return 0;
-        if (m_auth.authorizeStrict(request))
+
+        const bool operate = caller.role == ApiAuth::Role::Operate;
+        const quint32 mask = effectiveMask(caller);
+        if (mask == EngineHost::AccessAll)
             return 0;
 
         const QString path = request.url().path();
         quint32 area = 0;
-        if (path.startsWith(QStringLiteral("/api/v1/functions")))
+        if (path.startsWith(QStringLiteral("/api/v1/vc/widgets/"))
+            && (path.endsWith(QStringLiteral("/press")) || path.endsWith(QStringLiteral("/level"))))
+        {
+            /* Working a widget is control, not editing: the same press the
+               WebSocket gates on VC control. */
+            area = EngineHost::AccessVcControl;
+        }
+        else if (path.startsWith(QStringLiteral("/api/v1/functions")))
         {
             const bool show = path.contains(QStringLiteral("/tracks"))
                 || path.contains(QStringLiteral("/items"))
@@ -334,12 +347,28 @@ void ApiServer::registerRoutes()
 
         if (area != 0 && (mask & area) == 0)
             return 403;
+
+        if (area == 0 && operate)
+        {
+            /* Everything else that writes -- loading and saving projects,
+               undo, palettes, the patch of a universe -- is building, and an
+               operator's device does not build. These are the exceptions: the
+               levers of a show already built. */
+            static const QStringList operating = {
+                QStringLiteral("/api/v1/blackout"), QStringLiteral("/api/v1/grandmaster"),
+                QStringLiteral("/api/v1/stop"), QStringLiteral("/api/v1/live"),
+                QStringLiteral("/api/v1/script/check"),
+            };
+            if (operating.contains(path) == false)
+                return 403;
+        }
         return 0;
     };
 
     const auto maskForbidden = [] {
         return jsonError(StatusCode::Forbidden,
-                         QStringLiteral("The access mask of this desk closes that area"));
+                         QStringLiteral("The access mask of this desk, or this device's role, "
+                                        "closes that area"));
     };
     Q_UNUSED(denied)
 
@@ -453,7 +482,9 @@ void ApiServer::registerRoutes()
         body["websocket"] = QStringLiteral("/ws");
         body["authRequired"] = m_auth.isRequired();
 
-        const quint32 mask = m_engine->accessMask();
+        const ApiAuth::Caller caller = m_auth.identify(request);
+        body["role"] = ApiAuth::roleName(caller.role);
+        const quint32 mask = effectiveMask(caller);
         QJsonObject access;
         access["fixtures"] = bool(mask & EngineHost::AccessFixtures);
         access["functions"] = bool(mask & EngineHost::AccessFunctions);
@@ -4319,8 +4350,12 @@ void ApiServer::registerRoutes()
         if (denied(request))
             return unauthorized();
 
-        const quint32 mask = m_engine->accessMask();
+        /* The caller's own: an operator's device reads the cage it is in,
+           which is narrower than the desk's. */
+        const ApiAuth::Caller caller = m_auth.identify(request);
+        const quint32 mask = effectiveMask(caller);
         QJsonObject body;
+        body["role"] = ApiAuth::roleName(caller.role);
         body["fixtures"] = bool(mask & EngineHost::AccessFixtures);
         body["functions"] = bool(mask & EngineHost::AccessFunctions);
         body["vcControl"] = bool(mask & EngineHost::AccessVcControl);
@@ -4380,20 +4415,133 @@ void ApiServer::registerRoutes()
         return QHttpServerResponse(response);
     });
 
+    /* Paired devices: every phone with a key of its own and a role, revocable
+       one by one. Master key only, all four -- a device must not be able to
+       pair more of itself, widen its own role or keep a revoked friend in. */
+    m_server->route("/api/v1/devices", QHttpServerRequest::Method::Get,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        QJsonArray list;
+        for (const ApiAuth::Device &device : m_auth.devices())
+            list.append(deviceJson(device));
+
+        QJsonObject body;
+        body["devices"] = list;
+        return QHttpServerResponse(body);
+    });
+
+    m_server->route("/api/v1/devices", QHttpServerRequest::Method::Post,
+                    [this](const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        ApiAuth::Role role = ApiAuth::Role::Operate;
+        if (body.contains("role")
+            && ApiAuth::roleFromName(body.value("role").toString(), role) == false)
+        {
+            return jsonError(StatusCode::BadRequest,
+                             QStringLiteral("\"role\" is design or operate"));
+        }
+
+        ApiAuth::Device made;
+        QByteArray key;
+        QString error;
+        if (m_auth.createDevice(body.value("name").toString(), role, made, key, error) == false)
+            return jsonError(StatusCode::BadRequest, error);
+
+        /* The key, this once. After this response only its hash exists: a
+           phone that loses it is paired again, not looked up. */
+        QJsonObject response = deviceJson(made);
+        response["key"] = QString::fromLatin1(key);
+        response["urls"] = networkDoors(key);
+        response["localUrl"] = QStringLiteral("http://127.0.0.1:%1/#token=%2")
+                                   .arg(m_port)
+                                   .arg(QString::fromLatin1(key));
+        return QHttpServerResponse(response, StatusCode::Created);
+    });
+
+    m_server->route("/api/v1/devices/<arg>", QHttpServerRequest::Method::Patch,
+                    [this](quint32 id, const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+
+        QString name;
+        const QString *nameIn = nullptr;
+        if (body.contains("name"))
+        {
+            name = body.value("name").toString();
+            nameIn = &name;
+        }
+
+        ApiAuth::Role role = ApiAuth::Role::Operate;
+        const ApiAuth::Role *roleIn = nullptr;
+        if (body.contains("role"))
+        {
+            if (ApiAuth::roleFromName(body.value("role").toString(), role) == false)
+            {
+                return jsonError(StatusCode::BadRequest,
+                                 QStringLiteral("\"role\" is design or operate"));
+            }
+            roleIn = &role;
+        }
+
+        QString error;
+        if (m_auth.updateDevice(id, nameIn, roleIn, error) == false)
+        {
+            return jsonError(error == QStringLiteral("No such device")
+                                 ? StatusCode::NotFound : StatusCode::BadRequest,
+                             error);
+        }
+
+        /* A new role takes hold on the next request over HTTP. A socket keeps
+           what it authenticated with, so it is closed: the phone reconnects
+           and comes back as what it is now. */
+        if (roleIn != nullptr)
+            m_feed->closeDevice(id);
+
+        for (const ApiAuth::Device &device : m_auth.devices())
+        {
+            if (device.id == id)
+                return QHttpServerResponse(deviceJson(device));
+        }
+        return jsonError(StatusCode::NotFound, QStringLiteral("No such device"));
+    });
+
+    m_server->route("/api/v1/devices/<arg>", QHttpServerRequest::Method::Delete,
+                    [this](quint32 id, const QHttpServerRequest &request) {
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        QString error;
+        if (m_auth.revokeDevice(id, error) == false)
+        {
+            return jsonError(error == QStringLiteral("No such device")
+                                 ? StatusCode::NotFound : StatusCode::InternalServerError,
+                             error);
+        }
+
+        /* Revoked means out now, not at its next request: a socket that is
+           already open keeps moving lights until it is closed. */
+        QJsonObject response;
+        response["revoked"] = qint64(id);
+        response["closed"] = m_feed->closeDevice(id);
+        return QHttpServerResponse(response);
+    });
+
     /* Remote access, as a thing the operator can see: where this desk can be
        reached, and who is on it right now.
      *
-       The join URLs carry the token ONLY for a caller that presented it. On a
-       masked desk the whole point of the mask is that an untrusted client
-       cannot widen its own cage, and a URL with the token in it is the whole
-       cage handed over. */
+       The join URLs carry no key: pairing a device is what hands one out. */
     m_server->route("/api/v1/remote", QHttpServerRequest::Method::Get,
                     [this, refused, maskForbidden](const QHttpServerRequest &request) {
         if (const int refusal = refused(request))
             return refusal == 403 ? maskForbidden() : unauthorized();
 
-        const bool bearer = m_auth.authorizeStrict(request);
-        const bool tokenInUrl = bearer && m_auth.isRequired();
 
         QJsonObject body;
         body["listenAll"] = m_listenAll;
@@ -4401,43 +4549,10 @@ void ApiServer::registerRoutes()
         body["authRequired"] = m_auth.isRequired();
         body["localUrl"] = QStringLiteral("http://127.0.0.1:%1/").arg(m_port);
 
-        /* Real doors only. With the daemon on loopback these addresses would
-           be URLs that do not answer, and a QR code to nowhere is worse than
-           none -- so a desk that is not listening shows no addresses. */
-        QJsonArray addresses;
-        if (m_listenAll)
-        {
-            for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
-            {
-                const auto flags = iface.flags();
-                if (!(flags & QNetworkInterface::IsUp)
-                    || !(flags & QNetworkInterface::IsRunning)
-                    || (flags & QNetworkInterface::IsLoopBack))
-                    continue;
-
-                for (const QNetworkAddressEntry &entry : iface.addressEntries())
-                {
-                    /* Phones dial IPv4: a link-local IPv6 needs a zone id no
-                       phone keyboard has. */
-                    if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol)
-                        continue;
-
-                    QString url = QStringLiteral("http://%1:%2/")
-                                      .arg(entry.ip().toString())
-                                      .arg(m_port);
-                    if (tokenInUrl)
-                        url += QStringLiteral("#token=%1")
-                                   .arg(QString::fromUtf8(m_auth.token()));
-
-                    QJsonObject address;
-                    address["interface"] = iface.humanReadableName();
-                    address["ip"] = entry.ip().toString();
-                    address["url"] = url;
-                    addresses.append(address);
-                }
-            }
-        }
-        body["addresses"] = addresses;
+        /* No key aboard. Handing out the master key in a QR made every phone
+           that scanned it the owner of the desk; a phone is paired instead
+           (POST /devices) and its URL carries a key of its own. */
+        body["addresses"] = networkDoors();
         body["clients"] = m_feed->clientsJson();
 
         return QHttpServerResponse(body);
@@ -5114,4 +5229,62 @@ void ApiServer::registerRoutes()
         noCache(response);
         return response;
     });
+}
+
+quint32 ApiServer::effectiveMask(const ApiAuth::Caller &caller) const
+{
+    const quint32 desk = m_engine->accessMask();
+    if (caller.role == ApiAuth::Role::Operate)
+        return desk & (EngineHost::AccessVcControl | EngineHost::AccessSimpleDesk);
+    return desk;
+}
+
+QJsonArray ApiServer::networkDoors(const QByteArray &key) const
+{
+    QJsonArray doors;
+    if (m_listenAll == false)
+        return doors;
+
+    for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
+    {
+        const auto flags = iface.flags();
+        if (!(flags & QNetworkInterface::IsUp)
+            || !(flags & QNetworkInterface::IsRunning)
+            || (flags & QNetworkInterface::IsLoopBack))
+            continue;
+
+        for (const QNetworkAddressEntry &entry : iface.addressEntries())
+        {
+            /* Phones dial IPv4: a link-local IPv6 needs a zone id no phone
+               keyboard has. */
+            if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol)
+                continue;
+
+            QString url = QStringLiteral("http://%1:%2/").arg(entry.ip().toString()).arg(m_port);
+            if (key.isEmpty() == false)
+                url += QStringLiteral("#token=%1").arg(QString::fromLatin1(key));
+
+            QJsonObject door;
+            door["interface"] = iface.humanReadableName();
+            door["ip"] = entry.ip().toString();
+            door["url"] = url;
+            doors.append(door);
+        }
+    }
+    return doors;
+}
+
+QJsonObject ApiServer::deviceJson(const ApiAuth::Device &device) const
+{
+    QJsonObject json;
+    json["id"] = qint64(device.id);
+    json["name"] = device.name;
+    json["role"] = ApiAuth::roleName(device.role);
+    json["created"] = device.created.toString(Qt::ISODate);
+    const qint64 seen = m_auth.lastSeen(device.id);
+    json["lastSeen"] = seen > 0 ? QJsonValue(QDateTime::fromMSecsSinceEpoch(seen)
+                                                 .toUTC().toString(Qt::ISODate))
+                                : QJsonValue();
+    json["connections"] = m_feed->connectionsOf(device.id);
+    return json;
 }

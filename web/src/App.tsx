@@ -1120,6 +1120,9 @@ export function App() {
           {!operator &&
             view === 'console' &&
             vc &&
+            /* Closed by the mask -- or by this device's role -- is closed here
+               too: a button the daemon will refuse is a button that lies. */
+            (access.vcEditing || mode !== 'run') &&
             /* One control at a time. Showing "Ordenar" beside "Listo" made it
              read as two separate states, when there is only ever one. */
             (mode === 'run' ? (

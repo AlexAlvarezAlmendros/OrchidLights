@@ -17,7 +17,7 @@ Este documento es para las dos cosas que puede querer un agente aquí:
 ## Tres formas de entrar, y cuál usar
 
 **MCP**, si tu cliente lo habla. Diecinueve herramientas con forma de tarea, no
-ciento cuarenta y un envoltorios de endpoint: con ciento cuarenta y una
+ciento cuarenta y cinco envoltorios de endpoint: con ciento cuarenta y cinco
 herramientas delante el contexto se gasta en elegir.
 
 **Si instalaste el `.deb` de escritorio ya lo tienes**: el servidor MCP y el CLI
@@ -64,7 +64,7 @@ con el `.deb`.
 > Ubuntu 24.04.
 
 Trae tres recursos que conviene leer antes de construir nada: `orchid://guide`
-(esto mismo, que viaja dentro del paquete), `orchid://routes` (las 141
+(esto mismo, que viaja dentro del paquete), `orchid://routes` (las 145
 operaciones en una línea cada una) y `orchid://project` (el proyecto cargado,
 como documento).
 
@@ -196,8 +196,26 @@ curl -H "Authorization: Bearer $TOKEN" http://mesa.local:9998/api/v1/status
 ```
 
 Incluso en loopback, las rutas que llegan al disco o apagan el proceso
-(`/project/open`, `/project/save-as`, `/shutdown`, `PUT /access`) lo exigen
-siempre.
+(`/project/open`, `/project/save-as`, `/shutdown`, `PUT /access`, `/devices`)
+lo exigen siempre.
+
+**Ese token es la llave maestra, y no sale del equipo.** Un móvil entra con
+una llave suya, emparejada con un rol y revocable sola:
+
+```bash
+orchidctl pair "Truss izquierdo"              # operate: consola y mesa simple
+orchidctl pair "iPad de diseño" --role design # todo salvo disco, apagado y máscara
+orchidctl devices
+orchidctl revoke "Truss izquierdo"            # y si estaba conectado, lo echa
+```
+
+`pair` imprime la URL con la llave dentro, que es lo que se convierte en QR; la
+llave no se vuelve a enseñar, porque el daemon solo guarda su hash. Un
+dispositivo de **operador** está dentro de la máscara de kiosko *en el daemon*:
+no crea funciones, no edita la consola, no carga ni guarda proyectos, no
+deshace. Uno de **diseño** construye y se salta la máscara. Ninguno de los dos
+empareja a otros ni toca la máscara. `GET /api/v1/access` dice a cada cliente
+su rol y la jaula en la que está.
 
 ---
 
@@ -212,7 +230,7 @@ está el contrato completo. **Contesta sin token a propósito**: un cliente que
 tiene que autenticarse para enterarse de que tiene que autenticarse es un
 cliente que adivina.
 
-El contrato entero —141 operaciones, con la forma de cada petición y cada
+El contrato entero —145 operaciones, con la forma de cada petición y cada
 respuesta— está en `GET /api/v1/openapi.json`, servido por el propio daemon, y
 en `docs/api/openapi.yaml` en el repositorio. **Léelo antes de inventarte una
 ruta.** `server/test/openapi-smoke.sh` lo compara con la tabla de rutas real en

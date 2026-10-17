@@ -2,9 +2,9 @@
 /**
  * El servidor MCP de OrchidLights.
  *
- * Diecinueve herramientas, no ciento cuarenta y una. El daemon expone una
+ * Diecinueve herramientas, no ciento cuarenta y cinco. El daemon expone una
  * operación por cosa que se puede hacer, que es lo correcto para un API y lo
- * peor posible para un agente: con ciento cuarenta y una herramientas delante,
+ * peor posible para un agente: con ciento cuarenta y cinco herramientas delante,
  * el contexto se gasta en elegir. Aquí hay una por *tarea* —describir el
  * proyecto, aplicarlo, buscar una lámpara, mirar el universo de vuelta— y una
  * sola salida de emergencia, `orchid_request`, para lo que no entre en ninguna.
@@ -576,7 +576,7 @@ server.registerTool(
   {
     title: 'Cualquier otra operación del API',
     description:
-      'Las herramientas de arriba cubren lo que se hace a diario, pero el daemon expone 141 ' +
+      'Las herramientas de arriba cubren lo que se hace a diario, pero el daemon expone 145 ' +
       'operaciones: editar el cuerpo de una escena canal a canal, mover la timeline de un ' +
       'show, crear perfiles de entrada, colocar fixtures en el escenario 3D. Lee el recurso ' +
       '`orchid://routes` para ver todas, o `orchid://contract` para la forma exacta de una, ' +
@@ -630,7 +630,7 @@ server.registerResource(
   'routes',
   'orchid://routes',
   {
-    title: 'Las 141 operaciones, en una línea cada una',
+    title: 'Las 145 operaciones, en una línea cada una',
     description:
       'El índice para orchid_request: método, ruta y qué hace. Mucho más corto que el ' +
       'contrato entero, y suficiente para encontrar la operación que hace falta.',

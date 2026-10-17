@@ -263,6 +263,12 @@ describe('App at boot', () => {
 
     // The console is the one screen a mask can never take away.
     expect(screen.getByRole('button', { name: 'Consola' })).toBeInTheDocument()
+
+    // But editing it can: the daemon refuses it, so the buttons go too.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Editar' })).not.toBeInTheDocument()
+    })
+    expect(screen.queryByRole('button', { name: 'Ordenar' })).not.toBeInTheDocument()
   })
 })
 

@@ -165,7 +165,7 @@ orchidlightsd --check tonight.qxw          # carga, informa y sale
 orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
 ```
 
-**El contrato completo está escrito**: 141 operaciones en OpenAPI 3.1, en
+**El contrato completo está escrito**: 145 operaciones en OpenAPI 3.1, en
 [`docs/api/openapi.yaml`](docs/api/openapi.yaml) y servidas por el propio daemon
 en `GET /api/v1/openapi.json`, para que un cliente lo lea de la mesa que tiene
 delante y no de un repositorio que puede ir por otra versión.
@@ -336,10 +336,10 @@ el runtime son 119 MB y doblaría el peso del bundle por algo que muchos no van 
 usar. El `.deb` recomienda `nodejs`, así que un `apt install` normal lo trae, y
 si falta, el lanzador lo dice en una frase en vez de fallar de forma críptica.
 
-**Diecinueve herramientas, no ciento cuarenta y una.** Una operación por cosa
+**Diecinueve herramientas, no ciento cuarenta y cinco.** Una operación por cosa
 que se puede hacer es lo correcto para un API y lo peor posible para un agente:
-con ciento cuarenta y una herramientas delante, el contexto se gasta en elegir.
-Aquí hay una por *tarea*, más `orchid_request` para las otras ciento veintidós, con
+con ciento cuarenta y cinco herramientas delante, el contexto se gasta en elegir.
+Aquí hay una por *tarea*, más `orchid_request` para las otras ciento veintiséis, con
 el índice de rutas como recurso para encontrarlas.
 
 **Y un CLI**, porque un agente vive en una shell y ya sabe usarla:
@@ -453,6 +453,23 @@ se guarda con permisos `600`. Rotarlo es borrar el archivo. La comparación es e
 tiempo constante, para que nadie lo deduzca byte a byte midiendo cuánto tarda el
 rechazo. `--require-auth` lo exige también en loopback, para máquinas con
 usuarios locales en los que no se confía.
+
+### Una llave por dispositivo
+
+Ese token es la **llave maestra**: abre todo, el disco y el apagado incluidos,
+y no sale del equipo de la mesa. Cada móvil recibe una llave propia al
+emparejarlo desde la pantalla *Remoto* (o con `orchidctl pair`), con un rol:
+
+| Rol | Puede | No puede |
+|---|---|---|
+| **Operar** | Consola, mesa simple, blackout, grand master, parar todo, mesa en vivo — bajo la máscara de kiosko | Crear ni editar nada, cargar ni guardar proyectos, deshacer |
+| **Diseñar** | Toda la mesa, saltándose la máscara | Disco, apagado, máscara y dispositivos |
+
+La llave se enseña una vez, dentro del QR; el daemon guarda su SHA-256 en
+`~/.orchidlights/devices.json` (permisos `600`). Revocar un dispositivo invalida
+su llave en la siguiente petición y **cierra ya** su WebSocket abierto. Las
+URLs de las puertas de red ya no llevan llave: antes llevaban la maestra, y
+escanear el QR hacía dueño de la mesa a cualquiera.
 
 ## Ejecutar como servicio
 

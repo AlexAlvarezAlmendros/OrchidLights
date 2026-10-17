@@ -419,10 +419,34 @@ resumen en el README:
 - [x] PWA instalable — hecha en F2 junto al modo operador.
 - [x] **3D** — escenario con haces que son el DMX, clic en el suelo que apunta
       las móviles, colocar, colgar y girar, y picking por cuerpos (#62, #69–#72).
-- [ ] **Multiusuario con roles.** Lo que hay es token, máscara de kiosko por
-      áreas (#60) y la lista de conexiones vivas con su botón de expulsar (#66).
-      Lo que no hay es distinguir operador de diseñador: quien tiene el token
-      tiene la mesa entera.
+- [x] **Una llave por dispositivo, con rol** (2026-10-17). Había token,
+      máscara de kiosko por áreas (#60) y conexiones vivas con su botón de
+      expulsar (#66) — y un hueco debajo: en una mesa abierta a la red todo
+      cliente llevaba **el único token**, y ese token se saltaba la máscara.
+      La jaula del kiosko la guardaba solo la interfaz, y el QR de la pantalla
+      Remoto repartía la llave maestra a quien lo escanease.
+  - El token de siempre pasa a ser la **llave maestra** y no sale del equipo.
+    Cada móvil se empareja desde *Remoto* o con `orchidctl pair` y recibe una
+    llave propia con un rol: **operar** (consola, mesa simple, blackout, grand
+    master, parar, mesa en vivo, bajo la máscara *en el daemon*) o **diseñar**
+    (toda la mesa, saltándose la máscara, salvo disco, apagado, máscara y
+    dispositivos). Solo la maestra empareja, cambia y revoca.
+  - La llave se enseña una vez, en el QR; `devices.json` guarda su SHA-256 con
+    permisos `600`. Revocar invalida la llave en la siguiente petición y
+    **cierra ya** su WebSocket; cambiar el rol también, para que vuelva a
+    entrar con el nuevo. Los ids no se reutilizan.
+  - Las puertas de red de `/remote` ya no llevan llave.
+  - Y de paso, dos rutas mal clasificadas: pulsar un widget y mover su fader
+    por REST caían en *editar la consola*; son *controlarla*, como ya decía el
+    WebSocket. La interfaz esconde «Editar» y «Ordenar» cuando la máscara los
+    cierra, en vez de ofrecer botones que el daemon va a rechazar.
+  - `devices-smoke.sh`, con un `HOME` temporal: emparejar, el fichero sin
+    llaves, lo que puede y no puede cada rol con y sin kiosko, cambiar el rol,
+    revocar con el socket abierto, reiniciar el daemon, y `orchidctl`.
+  - **Lo que queda igual, a sabiendas:** la ventana de kiosko de la carcasa
+    de escritorio sigue entrando con la maestra, así que en ESE equipo la
+    jaula la guarda la interfaz y el PIN. Darle una llave de operador propia
+    es el paso siguiente.
 
 ---
 
@@ -598,6 +622,7 @@ resumen en el README:
 
 ## 7. Siguiente paso
 
-Revisado el 2026-10-17. La paridad está hecha; lo que queda abierto, por orden:
+Revisado el 2026-10-17. La paridad está hecha y el plan, cerrado. Lo abierto:
 
-1. **Roles** (F8): operador y diseñador con permisos distintos.
+1. **El kiosko de la carcasa con llave de operador**, para que la jaula del
+   propio equipo de la mesa también la guarde el daemon.

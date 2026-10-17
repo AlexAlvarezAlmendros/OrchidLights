@@ -272,6 +272,9 @@ jobs:
       - name: Remote smoke test (doors, keys, and the wire that closes)
         run: ./server/test/remote-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      - name: Devices smoke test (a key per phone, roles the daemon keeps, revoke cuts the wire)
+        run: ./server/test/devices-smoke.sh orchidlightsd server/test/data/vc-frames.qxw
+
       - name: Video smoke test (media without a token, the feed directs)
         run: ./server/test/video-smoke.sh orchidlightsd
 
