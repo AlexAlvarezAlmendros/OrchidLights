@@ -45,9 +45,16 @@ cd mcp && pnpm install && pnpm build
 claude mcp add orchidlights -- node /ruta/a/OrchidLights/mcp/dist/mcp.js
 ```
 
-Con el AppImage los ficheros viajan dentro pero no hay nada en el PATH que
-apunte a ellos: extráelo (`--appimage-extract`) y apunta `ORCHID_MCP_DIR` a
-`squashfs-root/usr/lib/*/sidecar/share/orchidlights/mcp`, o instala el `.deb`.
+Con el AppImage no queda nada en el PATH, así que el propio AppImage responde
+por los dos: `--mcp` es el servidor MCP y `--ctl` es `orchidctl`.
+
+```bash
+claude mcp add orchidlights -- /ruta/a/OrchidLights_amd64.AppImage --mcp
+/ruta/a/OrchidLights_amd64.AppImage --ctl status
+```
+
+La ruta del AppImage es la que se queda fija; el puerto se descubre igual que
+con el `.deb`.
 
 > **Node no viaja en el paquete.** El servidor MCP entero cabe en un fichero de
 > 1 MB, pero el runtime son 119 MB y doblarían el peso del bundle por algo que

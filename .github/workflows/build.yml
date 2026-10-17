@@ -721,6 +721,19 @@ jobs:
               echo "--- daemon.log:"; cat "$HOME/.orchidlights/daemon.log" 2>/dev/null || true
               exit 1
             fi
+            # Y los agentes: el AppImage no deja nada en el PATH, así que
+            # responde él por los dos comandos. Sin puerto en ninguna parte,
+            # como con el .deb: tiene que encontrar ESTA mesa por su cuenta.
+            OUT=$(APPIMAGE_EXTRACT_AND_RUN=1 "'"$AI"'" --ctl status) \
+              || { echo "--ctl falló: $OUT"; exit 1; }
+            echo "$OUT"
+            echo "$OUT" | grep -q "127.0.0.1:$PORT" \
+              || { echo "--ctl habló con otra mesa"; exit 1; }
+            INIT="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"ci\",\"version\":\"0\"}}}"
+            printf "%s\n" "$INIT" \
+              | APPIMAGE_EXTRACT_AND_RUN=1 timeout 60 "'"$AI"'" --mcp \
+              | head -1 | grep -q "\"serverInfo\"" \
+              || { echo "--mcp no contestó al initialize"; exit 1; }
             SHELL_PID=$(ps -o ppid= -p "$DP" | tr -d " ")
             kill -TERM "$SHELL_PID"
             for _ in $(seq 1 40); do

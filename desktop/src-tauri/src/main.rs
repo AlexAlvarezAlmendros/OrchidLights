@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent;
 mod layout;
 mod sidecar;
 
@@ -200,6 +201,9 @@ fn leave_kiosk(
 }
 
 fn main() {
+    // --mcp / --ctl: an agent tool, not a desk. Never returns when asked.
+    agent::hand_over_if_asked();
+
     // A project given on the command line rides along to the daemon.
     let project: Option<PathBuf> = std::env::args()
         .skip(1)

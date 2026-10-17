@@ -525,10 +525,18 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
     fichero mintiendo. El smoke del `.deb` comprueba que los comandos quedan en
     el PATH, con su bit de ejecución, y que hablan con la mesa correcta.
 
-- [ ] **Lo mismo para el AppImage.** Los ficheros viajan dentro, pero nada del
-      PATH apunta a ellos: hay que extraerlo y apuntar `ORCHID_MCP_DIR`. Un
-      `orchidlights-desktop --mcp` que cediera el proceso al lanzador lo
-      arreglaría con una ruta estable.
+- [x] **Lo mismo para el AppImage** (2026-10-17). Un AppImage no deja nada en
+      el PATH, pero su propia ruta no se mueve: `OrchidLights.AppImage --mcp`
+      es el servidor MCP y `--ctl` es `orchidctl`. La carcasa cede el proceso
+      al mismo lanzador que instala el `.deb` **antes** de arrancar Tauri, así
+      que ni abre una segunda ventana ni se la traga la instancia que ya está
+      abierta.
+  - **El `LD_LIBRARY_PATH` del AppRun se queda en el AppImage.** El AppRun lo
+    apunta a las librerías del bundle para el GTK de la carcasa; el lanzador
+    corre el Node del sistema, y un binario del sistema cargando librerías
+    ajenas falla de formas ilegibles. Se quitan solo las entradas del bundle.
+  - El smoke del AppImage en CI pide `--ctl status` sin puerto y comprueba que
+    habla con la mesa que acaba de arrancar, y manda un `initialize` a `--mcp`.
 
 > **Decidido: acceso total, sin rails.** Un agente puede todo lo que puede la
 > web, el rig en directo incluido. La frontera es el token, no una jaula aparte:

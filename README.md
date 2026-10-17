@@ -351,8 +351,9 @@ orchidctl apply show.yaml --save
 orchidctl dmx 1                   # ¿ha llegado la luz?
 ```
 
-Con el AppImage los ficheros viajan dentro pero nada del PATH apunta a ellos:
-extráelo y apunta `ORCHID_MCP_DIR`, o instala el `.deb`.
+Con el AppImage nada queda en el PATH, así que responde él por los dos:
+`OrchidLights_amd64.AppImage --mcp` es el servidor MCP (lo que se registra en
+el agente) y `OrchidLights_amd64.AppImage --ctl status` es `orchidctl status`.
 
 ### El proyecto como un archivo de texto
 
