@@ -45,7 +45,10 @@ pub fn hand_over_if_asked() {
         use std::os::unix::process::CommandExt;
         // exec only returns on failure.
         let error = command.exec();
-        eprintln!("orchidlights: no pude ceder a {}: {error}", launcher.display());
+        eprintln!(
+            "orchidlights: no pude ceder a {}: {error}",
+            launcher.display()
+        );
         std::process::exit(1);
     }
 
@@ -64,7 +67,10 @@ pub fn hand_over_if_asked() {
 /// exist.
 fn find(tool: &str) -> Option<PathBuf> {
     let mut roots = Vec::new();
-    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+    {
         roots.push(dir.join("../lib"));
     }
     if let Some(appdir) = std::env::var_os("APPDIR") {
