@@ -399,11 +399,30 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
   - **No es una edición**: no toca el documento y no sobrevive a una recarga, y el panel lo dice. Soltar baja los canales a cero en vez de dejarlos enganchados.
   - Lo que no mezcla color, o no tiene dímer, se dice con el número — «2 de 4 no mezclan color»— en vez de ofrecer un control que no hace nada.
 
+### Plan de escritorio (F1–F22) ✅
+
+Después de F7 el trabajo siguió un plan propio, de paridad 1:1 con QLC+ 5 y una
+aplicación de escritorio, en ramas `desktop-f1` … `desktop-f22` y PRs #38–#72.
+Cada fase se fusionó con su smoke test en CI; el detalle está en cada PR y el
+resumen en el README:
+
+| Bloque | Contenido |
+|---|---|
+| A | Apagado limpio, auth, carcasa Tauri, ciclo de proyecto, deb + AppImage |
+| B | Grand Master, STOP ALL, Simple Desk con keypad, monitor DMX, dump a escena, entrada externa con feedback |
+| C | Editores 1:1 (chaser/EFX/matrix/script/audio/show), palettes con fanning, consola completa (multipágina, crossfade, XY pad), fixtures a escala de rig, 2D avanzada |
+| D | Undo global por instantáneas, kiosko + máscara de acceso, i18n es/en, ajustes |
+| E | Vídeo con superficies (`/#/surface`) y escenario 3D con picking |
+
 ### F8 — Extras
 
 - [x] PWA instalable — hecha en F2 junto al modo operador.
-- [ ] 3D opcional.
-- [ ] Multiusuario con roles.
+- [x] **3D** — escenario con haces que son el DMX, clic en el suelo que apunta
+      las móviles, colocar, colgar y girar, y picking por cuerpos (#62, #69–#72).
+- [ ] **Multiusuario con roles.** Lo que hay es token, máscara de kiosko por
+      áreas (#60) y la lista de conexiones vivas con su botón de expulsar (#66).
+      Lo que no hay es distinguir operador de diseñador: quien tiene el token
+      tiene la mesa entera.
 
 ---
 
@@ -552,7 +571,7 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 | 2 | **Divergencia con upstream.** Fork duro = no llegan perfiles ni fixes nuevos | Mantener `upstream` como remote y cherry-pickear solo `resources/fixtures/` y `plugins/`, que están poco acoplados a nuestro código |
 | 3 | **Compatibilidad de proyectos.** Hay shows en producción | No tocar el formato `.qxw`. Test de round-trip en CI con proyectos reales |
 | 4 | **Tiempo real en el navegador.** 512 canales × N universos × 50 Hz | Frames binarios, delta encoding, throttle configurable, suscripción por universo |
-| 5 | **Fiabilidad en directo.** Un navegador no es una mesa de luces | El daemon sigue emitiendo aunque el navegador muera. Watchdog. Blackout de pánico por MIDI/OSC, independiente de la capa web |
+| 5 | **Fiabilidad en directo.** Un navegador no es una mesa de luces | El daemon sigue emitiendo aunque el navegador muera. La unidad systemd lo reinicia (`Restart=on-failure`); la carcasa de escritorio, a propósito, **no**: vigila el proceso y dice que el motor se cayó, porque un reinicio callado a mitad de show convierte una catástrofe en un misterio. Blackout y Stop All por MIDI/OSC, independientes de la capa web |
 
 ---
 
@@ -563,18 +582,7 @@ Así que **se parchea el árbol preservado en sitio, nunca se regenera**: el fra
 
 ## 7. Siguiente paso
 
-Instalar el toolchain de Qt 6 y compilar por primera vez:
+Revisado el 2026-10-17. La paridad está hecha; lo que queda abierto, por orden:
 
-```bash
-sudo apt install build-essential cmake ninja-build pkg-config \
-                 qt6-base-dev qt6-httpserver-dev qt6-websockets-dev \
-                 qt6-declarative-dev qt6-multimedia-dev qt6-tools-dev qt6-serialport-dev \
-                 libasound2-dev libusb-1.0-0-dev libftdi1-dev libudev-dev libmad0-dev \
-                 libsndfile1-dev libfftw3-dev
-
-cmake -S . -B build -G Ninja -Dserver=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-QT_QPA_PLATFORM=offscreen ./build/server/src/orchidlightsd ~/Documentos/QLC+/17Julio.qxw
-```
-
-Ese último comando, listando los 22 fixtures del P62 sin abrir ventana, cierra F0.
+1. **Deshacer un `apply` entero de una vez** (F9): `UndoRing` con lotes.
+2. **Roles** (F8): operador y diseñador con permisos distintos.
