@@ -697,6 +697,20 @@ jobs:
             echo "$OUT"
             echo "$OUT" | grep -q "127.0.0.1:$PORT" \
               || { echo "orchidctl habló con otra mesa"; exit 1; }
+            # Y el TLS del paquete, que es lo que usa el asistente: un runner
+            # limpio no tiene el plugin de Qt del sistema, así que aquí solo
+            # cuenta el que viaja en el sidecar. Con una clave falsa Anthropic
+            # contesta 401 si la conexión cifrada llegó a establecerse; sin
+            # plugin no se llega a preguntar y el estado es 0. No gasta nada.
+            curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d "{\"providers\": {\"anthropic\": {\"key\": \"sk-ant-ci-clave-falsa-00000000\"}}}" \
+              "http://127.0.0.1:$PORT/api/v1/ai/settings" > /dev/null \
+              || { echo "no se pudo guardar la clave de prueba"; exit 1; }
+            CHECK=$(curl -sf -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -d "{}" "http://127.0.0.1:$PORT/api/v1/ai/check")
+            echo "$CHECK"
+            echo "$CHECK" | grep -q "\"status\":401" \
+              || { echo "el daemon del paquete no llega por TLS al proveedor"; exit 1; }
             kill -TERM $SHELL_PID
             for _ in $(seq 1 40); do
               kill -0 "$DP" 2>/dev/null || exit 0
