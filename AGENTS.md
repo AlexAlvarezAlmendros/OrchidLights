@@ -17,7 +17,7 @@ Este documento es para las dos cosas que puede querer un agente aquí:
 ## Tres formas de entrar, y cuál usar
 
 **MCP**, si tu cliente lo habla. Diecinueve herramientas con forma de tarea, no
-ciento cuarenta y cinco envoltorios de endpoint: con ciento cuarenta y cinco
+ciento cincuenta envoltorios de endpoint: con ciento cincuenta
 herramientas delante el contexto se gasta en elegir.
 
 **Si instalaste el `.deb` de escritorio ya lo tienes**: el servidor MCP y el CLI
@@ -64,7 +64,7 @@ con el `.deb`.
 > Ubuntu 24.04.
 
 Trae tres recursos que conviene leer antes de construir nada: `orchid://guide`
-(esto mismo, que viaja dentro del paquete), `orchid://routes` (las 145
+(esto mismo, que viaja dentro del paquete), `orchid://routes` (las 150
 operaciones en una línea cada una) y `orchid://project` (el proyecto cargado,
 como documento).
 
@@ -230,7 +230,7 @@ está el contrato completo. **Contesta sin token a propósito**: un cliente que
 tiene que autenticarse para enterarse de que tiene que autenticarse es un
 cliente que adivina.
 
-El contrato entero —145 operaciones, con la forma de cada petición y cada
+El contrato entero —150 operaciones, con la forma de cada petición y cada
 respuesta— está en `GET /api/v1/openapi.json`, servido por el propio daemon, y
 en `docs/api/openapi.yaml` en el repositorio. **Léelo antes de inventarte una
 ruta.** `server/test/openapi-smoke.sh` lo compara con la tabla de rutas real en

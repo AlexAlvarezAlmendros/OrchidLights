@@ -201,6 +201,15 @@ if(appimage)
                 ${QT_PLUGINS_PATH}/platforms/libqminimal.so
             DESTINATION ${PLUGINS_DESTINATION}/platforms
         )
+
+        # The assistant's proxy is the daemon's first outbound HTTPS, and Qt
+        # makes it through this plugin. Without it a bundle answers "TLS not
+        # available" where a source build works. OpenSSL itself is the
+        # system's, like every distribution's libc.
+        install(
+            FILES ${QT_PLUGINS_PATH}/tls/libqopensslbackend.so
+            DESTINATION ${PLUGINS_DESTINATION}/tls
+        )
     else()
     install(
         FILES

@@ -2,6 +2,7 @@ set(module_name "orchidlightsd")
 
 add_executable(${module_name}
     main.cpp
+    aigateway.cpp aigateway.h
     apiauth.cpp apiauth.h
     audiotriggers.cpp audiotriggers.h
     inputrouter.cpp inputrouter.h
@@ -35,6 +36,7 @@ target_link_libraries(${module_name} PRIVATE
     Qt${QT_MAJOR_VERSION}::Gui
     Qt${QT_MAJOR_VERSION}::Qml
     Qt${QT_MAJOR_VERSION}::HttpServer
+    Qt${QT_MAJOR_VERSION}::Network
     Qt${QT_MAJOR_VERSION}::WebSockets
     Qt${QT_MAJOR_VERSION}::Multimedia
     qlcplusengine

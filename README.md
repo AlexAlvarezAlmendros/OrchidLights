@@ -168,7 +168,7 @@ orchidlightsd --check tonight.qxw          # carga, informa y sale
 orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
 ```
 
-**El contrato completo está escrito**: 145 operaciones en OpenAPI 3.1, en
+**El contrato completo está escrito**: 150 operaciones en OpenAPI 3.1, en
 [`docs/api/openapi.yaml`](docs/api/openapi.yaml) y servidas por el propio daemon
 en `GET /api/v1/openapi.json`, para que un cliente lo lea de la mesa que tiene
 delante y no de un repositorio que puede ir por otra versión.
@@ -339,9 +339,9 @@ el runtime son 119 MB y doblaría el peso del bundle por algo que muchos no van 
 usar. El `.deb` recomienda `nodejs`, así que un `apt install` normal lo trae, y
 si falta, el lanzador lo dice en una frase en vez de fallar de forma críptica.
 
-**Diecinueve herramientas, no ciento cuarenta y cinco.** Una operación por cosa
+**Diecinueve herramientas, no ciento cincuenta.** Una operación por cosa
 que se puede hacer es lo correcto para un API y lo peor posible para un agente:
-con ciento cuarenta y cinco herramientas delante, el contexto se gasta en elegir.
+con ciento cincuenta herramientas delante, el contexto se gasta en elegir.
 Aquí hay una por *tarea*, más `orchid_request` para las otras ciento veintiséis, con
 el índice de rutas como recurso para encontrarlas.
 
