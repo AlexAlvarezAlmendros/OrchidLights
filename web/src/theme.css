@@ -2811,8 +2811,12 @@ button.linkish.left {
 /* A frame brings its own children and needs the room to show them -- the
    whole line of it. Sharing a row with loose buttons stretched those buttons
    to the frame's full height: four slabs of nothing beside a frame of twelve
-   looks. A frame is a band of the console, and a band owns its row. */
-.grid > .widget.frame {
+   looks. A frame is a band of the console, and a band owns its row.
+   Nested too: a frame inside a frame's row grid got one 9.5rem cell, and its
+   own grid fitted one column in that -- a palette of fifteen colours drawn as
+   a single tower down the left edge. */
+.grid > .widget.frame,
+.widget.frame .row > .widget.frame {
   grid-column: 1 / -1;
 }
 
@@ -2833,14 +2837,16 @@ button.linkish.left {
 .widget.frame .row > .widget.cuelist,
 .widget.frame .row > .widget.xypad,
 .widget.frame .row > .widget.matrix,
-.widget.frame .row > .widget.audiotriggers {
+.widget.frame .row > .widget.audiotriggers,
+.widget.frame .row > .widget.speeddial {
   grid-column: span 2;
 }
 
 .grid > .widget.cuelist,
 .grid > .widget.xypad,
 .grid > .widget.matrix,
-.grid > .widget.audiotriggers {
+.grid > .widget.audiotriggers,
+.grid > .widget.speeddial {
   grid-column: span 2;
 }
 
