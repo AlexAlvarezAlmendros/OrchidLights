@@ -61,6 +61,13 @@ const ICONS: Record<View, React.ReactNode> = {
       <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" />
     </>
   ),
+  /* A speech bubble with a spark in it: the desk you talk to. */
+  assistant: (
+    <>
+      <path d="M4 5h16v11H10l-4 3.5V16H4z" />
+      <path d="M12 7.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" />
+    </>
+  ),
   /* Waves leaving an antenna: the desk, reachable. */
   remote: (
     <>
@@ -79,9 +86,19 @@ const LABELS: Record<View, string> = {
   plan: 'Planta',
   stage3d: 'Escenario',
   remote: 'Remoto',
+  assistant: 'Asistente',
 }
 
-export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan', 'stage3d', 'remote']
+export const VIEWS: View[] = [
+  'console',
+  'functions',
+  'setup',
+  'desk',
+  'plan',
+  'stage3d',
+  'remote',
+  'assistant',
+]
 
 export function Nav({
   view,
