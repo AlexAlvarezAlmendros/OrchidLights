@@ -17,7 +17,9 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true
+    "noEmit": true,
+
+    "paths": { "@orchid/mcp/*": ["../mcp/src/*"] }
   },
   "include": ["src"]
 }
