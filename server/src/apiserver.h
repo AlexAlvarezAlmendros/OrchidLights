@@ -27,6 +27,7 @@
 #include "apiauth.h"
 
 class QHttpServer;
+class AiGateway;
 class EngineHost;
 class UndoRing;
 class LiveFeed;
@@ -122,6 +123,7 @@ private:
     EngineHost *m_engine = nullptr;
     QHttpServer *m_server = nullptr;
     LiveFeed *m_feed = nullptr;
+    AiGateway *m_ai = nullptr;
     ApiAuth m_auth;
     std::unique_ptr<UndoRing> m_undo;
     quint16 m_port = 0;

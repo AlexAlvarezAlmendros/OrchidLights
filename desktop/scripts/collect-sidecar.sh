@@ -83,6 +83,7 @@ cp -r "$STAGE/usr/lib" "$OUT/lib"
 # install, not for a bundle.
 rm -rf "$OUT/lib/systemd"
 cp -r "$STAGE/usr/plugins/platforms" "$OUT/qtplugins/platforms"
+cp -r "$STAGE/usr/plugins/tls" "$OUT/qtplugins/tls"
 cp -r "$STAGE/lib/qt6/plugins/orchidlights" "$OUT/plugins"
 mv "$OUT/plugins" "$OUT/plugins.tmp"
 mkdir -p "$OUT/plugins"
@@ -128,6 +129,13 @@ find "$OUT/lib" -name 'libqlcplusengine.so*' -exec strip {} \; 2>/dev/null || tr
 # assume, because a silent bundle is the bug this whole script exists to stop.
 [ -f "$OUT/plugins/orchidlights/audio/libsndfileplugin.so" ] || {
     echo "the audio decoder did not make it into the sidecar" >&2
+    exit 1
+}
+
+# The assistant reaches its provider over HTTPS, through Qt's TLS plugin. A
+# bundle without it works everywhere except the one place it is used.
+[ -f "$OUT/qtplugins/tls/libqopensslbackend.so" ] || {
+    echo "the TLS plugin did not make it into the sidecar" >&2
     exit 1
 }
 

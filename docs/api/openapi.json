@@ -90,6 +90,10 @@
   {
    "name": "sistema",
    "description": "Undo global, acceso, clientes remotos y apagado."
+  },
+  {
+   "name": "asistente",
+   "description": "La clave del proveedor de IA y el proxy que la pone en cada petición. La\nclave vive en el daemon y no vuelve nunca a un cliente.\n"
   }
  ],
  "paths": {
@@ -695,6 +699,301 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/v1/ai/settings": {
+   "get": {
+    "tags": [
+     "asistente"
+    ],
+    "summary": "Proveedor, modelo y gasto del asistente — nunca la clave.",
+    "description": "De la clave solo se dice si hay una (`configured`) y sus cuatro últimos\ncaracteres (`keyHint`), y eso solo si mide al menos 16: de una corta,\ncuatro serían media clave.\n",
+    "responses": {
+     "200": {
+      "description": "Los ajustes.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AiSettings"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "asistente"
+    ],
+    "summary": "Configurar el asistente — solo la llave maestra.",
+    "description": "Quien pone la clave decide de qué cuenta gasta cada móvil emparejado,\nasí que solo la maestra la cambia. Se valida entero antes de cambiar\nnada, y se guarda en `~/.orchidlights/ai.json` con permisos `600`.\n\nPor proveedor, `model`, `baseUrl` y `key`. Una `key` ausente se queda\ncomo estaba —lo que devuelve el GET no la lleva, y se puede mandar de\nvuelta tal cual—; una vacía la borra. Un `baseUrl` vacío vuelve al del\nproveedor; uno distinto sirve para OpenRouter, Gemini, Ollama o LM\nStudio.\n",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "provider": {
+          "type": "string",
+          "enum": [
+           "anthropic",
+           "openai"
+          ],
+          "description": "El dialecto que usa el asistente."
+         },
+         "dailyRequests": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Peticiones al día por dispositivo emparejado; 0 es sin tope. La mesa misma no tiene tope."
+         },
+         "providers": {
+          "type": "object",
+          "description": "Por proveedor (`anthropic`, `openai`): `model`, `baseUrl`, `key`.",
+          "additionalProperties": {
+           "type": "object",
+           "properties": {
+            "model": {
+             "type": "string",
+             "description": "El modelo que pone la mesa en cada petición. Vacío deja el que mande el cliente."
+            },
+            "baseUrl": {
+             "type": "string",
+             "description": "http o https."
+            },
+            "key": {
+             "type": "string",
+             "description": "Solo de escritura."
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Los ajustes, como los devuelve el GET.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AiSettings"
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
+  "/api/v1/ai/check": {
+   "post": {
+    "tags": [
+     "asistente"
+    ],
+    "summary": "Probar la clave guardada sin gastar un token.",
+    "description": "Pide al proveedor su lista de modelos con la clave guardada: dice si la\nclave funciona y rellena el selector de modelo. Contesta 200 también\ncuando la clave no vale — la prueba se hizo —, con `ok: false` y lo que\ndijo el proveedor. Un dispositivo de operador no la usa: es montar el\nasistente, no usarlo.\n",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "provider": {
+          "type": "string",
+          "enum": [
+           "anthropic",
+           "openai"
+          ],
+          "description": "Por defecto, el activo."
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "El resultado de la prueba.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "ok": {
+           "type": "boolean"
+          },
+          "provider": {
+           "type": "string",
+           "enum": [
+            "anthropic",
+            "openai"
+           ]
+          },
+          "status": {
+           "type": "integer",
+           "description": "El código HTTP del proveedor; 0 si no se llegó a preguntar."
+          },
+          "models": {
+           "type": "array",
+           "items": {
+            "type": "string"
+           }
+          },
+          "error": {
+           "type": "string",
+           "description": "Las palabras del proveedor, cuando las hay."
+          }
+         }
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     }
+    }
+   }
+  },
+  "/api/v1/ai/proxy/anthropic/v1/messages": {
+   "post": {
+    "tags": [
+     "asistente"
+    ],
+    "summary": "La Messages API de Anthropic, con la clave de la mesa.",
+    "description": "El `baseURL` del SDK de Anthropic es `/api/v1/ai/proxy/anthropic`. El\ncuerpo y la respuesta son los del proveedor, sin traducir; el daemon\nquita la autenticación del cliente, pone la clave guardada, fija\n`model` al de los ajustes y devuelve la respuesta troceada según llega\n—eventos SSE si se pidió `stream`—. Si el cliente corta, se corta\ntambién la petición al proveedor.\n\nSolo esta ruta: ni ficheros, ni lotes, ni administración de la cuenta.\nLos errores del daemon (sin clave, tope diario, proveedor inalcanzable)\nllegan con la forma de error de Anthropic, para que su SDK los entienda.\n",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+         "model": {
+          "type": "string",
+          "description": "Lo sustituye el de los ajustes cuando hay uno."
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "La respuesta del proveedor, tal cual — JSON o `text/event-stream`.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       },
+       "text/event-stream": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "502": {
+      "description": "El proveedor no contestó.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/ai/proxy/openai/chat/completions": {
+   "post": {
+    "tags": [
+     "asistente"
+    ],
+    "summary": "Chat Completions al estilo OpenAI, con la clave de la mesa.",
+    "description": "El `baseURL` del SDK de OpenAI es `/api/v1/ai/proxy/openai`. El mismo\ntrato que la ruta de Anthropic; la clave va en `Authorization`, y si no\nhay ninguna no va nada, que es lo que quiere un modelo local.\n",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+         "model": {
+          "type": "string",
+          "description": "Lo sustituye el de los ajustes cuando hay uno."
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "La respuesta del proveedor, tal cual — JSON o `text/event-stream`.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       },
+       "text/event-stream": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/BadRequest"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "502": {
+      "description": "El proveedor no contestó.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true
+        }
+       }
+      }
      }
     }
    }
@@ -8526,6 +8825,72 @@
      },
      "invertTilt": {
       "type": "boolean"
+     }
+    }
+   },
+   "AiSettings": {
+    "type": "object",
+    "description": "Los ajustes del asistente, sin la clave.",
+    "properties": {
+     "provider": {
+      "type": "string",
+      "enum": [
+       "anthropic",
+       "openai"
+      ]
+     },
+     "dailyRequests": {
+      "type": "integer",
+      "description": "Por dispositivo emparejado y día; 0 es sin tope."
+     },
+     "providers": {
+      "type": "object",
+      "properties": {
+       "anthropic": {
+        "$ref": "#/components/schemas/AiProvider"
+       },
+       "openai": {
+        "$ref": "#/components/schemas/AiProvider"
+       }
+      }
+     },
+     "usage": {
+      "type": "object",
+      "description": "El gasto de hoy, leído del propio proveedor. En memoria; un reinicio lo pone a cero.",
+      "properties": {
+       "day": {
+        "type": "string"
+       },
+       "requests": {
+        "type": "integer"
+       },
+       "inputTokens": {
+        "type": "integer",
+        "description": "Incluye la entrada leída de caché, que es más barata, no gratis."
+       },
+       "outputTokens": {
+        "type": "integer"
+       }
+      }
+     }
+    }
+   },
+   "AiProvider": {
+    "type": "object",
+    "properties": {
+     "model": {
+      "type": "string"
+     },
+     "baseUrl": {
+      "type": "string"
+     },
+     "configured": {
+      "type": "boolean",
+      "description": "Si hay clave."
+     },
+     "keyHint": {
+      "type": "string",
+      "description": "Sus cuatro últimos caracteres, o vacío si es corta o no hay."
      }
     }
    },

@@ -675,13 +675,12 @@ Node aparte:
     estado, las cabeceras y cada trozo con `Transfer-Encoding: chunked`. Los
     eventos llegan al cliente cada 400 ms, no al final.
   - **Si el navegador corta, se corta el proveedor**: un turno abandonado deja
-    de gastar tokens en el acto. El responder guarda un puntero crudo al socket,
-    que Qt borra al desconectar, y Qt 6.4 no lo expone; pero el manejador corre
-    dentro del `readyRead` de ese socket, así que `sender()` lo da —protegido en
-    `QObject` y con `QHttpServer` `final`, se llega por un puntero a miembro—.
-    Con un `QPointer` a él no se escribe en un socket muerto, y su
+    de gastar tokens en el acto. El responder escribe en un socket que Qt borra
+    al desconectar; con un `QPointer` a él no se escribe en uno muerto, y su
     `disconnected` aborta la petición de salida. El proxy sigue sirviendo
-    después.
+    después. (La prueba sacó el socket por `sender()`, con un puntero a miembro
+    porque `QHttpServer` es `final`; al escribirlo de verdad resultó que
+    `QHttpServerResponder::socket()` ya es público en 6.4, y el truco sobró.)
   - Contra `api.anthropic.com` de verdad, sin clave válida: el TLS funciona y el
     401 llega al cliente tal cual, con su JSON, que es lo que el SDK necesita
     para dar un error con tipo.
@@ -808,20 +807,41 @@ que no debe ni pedir.
 
 #### Fases
 
-- [ ] **F10.1 — La clave y el proxy.**
-  - `GET/PUT /ai/settings` y `POST /ai/proxy/{proveedor}/…` con la lista de
-    rutas permitidas, cada handler con su comprobación de rol, documentados
-    en `openapi.yaml`. Sin `UndoGuard`: no editan el documento.
-  - **Tope de gasto en el daemon**: peticiones por dispositivo y día, y los
-    tokens leídos del `usage` de cada respuesta. Una clave compartida con todos
-    los móviles de operador sin tope es una factura esperando a pasar.
-  - El plugin TLS en el sidecar, y su comprobación.
-  - `ai-smoke.sh` contra un **proveedor falso** en local: la clave llega al
-    proveedor y no al cliente, la cabecera del cliente no pasa, una ruta fuera
-    de la lista da 403, cada rol puede lo que dice la tabla, el tope corta, y el
-    streaming llega troceado.
-  - En Ajustes: proveedor, modelo, clave y un botón **Probar** que hace una
-    petición mínima y dice si funciona.
+- [x] **F10.1 — La clave y el proxy** (2026-11-03).
+  - `AiGateway` en el daemon y cinco operaciones (150 en total):
+    `GET/PUT /ai/settings`, `POST /ai/check` y un proxy por dialecto,
+    `POST /ai/proxy/anthropic/v1/messages` y
+    `POST /ai/proxy/openai/chat/completions`. **Las rutas son la lista**: son
+    exactamente las que llama cada SDK con su `baseURL` apuntado al proxy, y
+    cualquier otra —ficheros, lotes, administración— da 404. Sin `UndoGuard`:
+    no editan el documento.
+  - El proxy quita la autenticación del cliente —la llave de la mesa no sale
+    hacia el proveedor— y solo deja pasar `accept`, `anthropic-version` y
+    `anthropic-beta`; pone la clave guardada y **fija el modelo** al de
+    Ajustes, para que un móvil de operador no elija el caro en la cuenta del
+    dueño. Los errores propios —sin clave, tope, proveedor inalcanzable— salen
+    con la forma de error de cada proveedor, para que su SDK los entienda.
+  - **Probar no gasta un token**: pide la lista de modelos con la clave
+    guardada, y esa lista rellena el selector de modelo.
+  - **Tope por dispositivo emparejado y día** (300 por defecto; la mesa misma
+    no tiene), con un 403 y no un 429, porque un SDK reintenta un 429 solo y
+    este no se levanta hasta mañana. El gasto del día se lee del `usage` del
+    propio proveedor, caché incluida; vive en memoria.
+  - `ai.json` con permisos `600` **antes** de escribir la clave. Uno roto se
+    dice en el log y la mesa arranca igual.
+  - El plugin TLS va en el sidecar por la misma regla de CMake que el
+    AppImage, y `collect-sidecar.sh` comprueba que llegó. Probado con el
+    daemon del sidecar contra `api.anthropic.com`.
+  - `ai-smoke.sh`, en CI, contra un proveedor falso: la clave llega y no
+    vuelve, la llave de la mesa y el modelo del cliente no pasan, el stream
+    llega troceado, un cliente que corta corta al proveedor, fuera de la lista
+    no hay nada, un operador pregunta pero no configura, el tope corta, un
+    proveedor caído es un 502 en sus palabras, los ajustes sobreviven a un
+    reinicio y un `ai.json` roto no tumba la mesa.
+  - En Ajustes, solo con la maestra: proveedor, clave —el campo siempre vacío,
+    con sus cuatro últimos caracteres de pista—, modelo, dirección del
+    servicio, tope, **Probar** y el gasto de hoy. Cualquier otro rol ve una
+    línea con cómo está montado.
 - [ ] **F10.2 — El asistente en modo montaje.**
   - Una vista nueva, *Asistente*: conversación, adjuntos y, a cada paso, qué
     herramienta usó y qué cambió.

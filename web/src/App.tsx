@@ -10,6 +10,7 @@ import {
 import type { GrandMasterState } from './api'
 import { Unauthorized } from './api'
 import { type LayoutRows, moveWidget, resolveRows, rowsToLayout } from './arrange'
+import { AssistantSettings } from './asistente'
 import { AudioTriggers } from './audiotriggers'
 import { CueList } from './cuelist'
 import { type Insertion, insertionAt, isNoop, sameInsertion } from './drag'
@@ -2627,6 +2628,8 @@ function Settings({
             <option value="en">English</option>
           </select>
         </label>
+
+        <AssistantSettings />
 
         <p className="hint">
           {/* The daemon's name IS OrchidLights; repeating it read as a stutter. */}

@@ -114,6 +114,32 @@ const EN: Record<string, string> = {
   Revocar: 'Revoke',
   'La URL no lleva llave: empareja el móvil abajo para darle la suya.':
     'The URL carries no key: pair the phone below to give it its own.',
+  Asistente: 'Assistant',
+  Anthropic: 'Anthropic',
+  'Compatible con OpenAI': 'OpenAI-compatible',
+  listo: 'ready',
+  'sin clave': 'no key',
+  'Se configura desde el equipo de la mesa, con su llave maestra.':
+    "It is set up from the desk's own machine, with its master key.",
+  Proveedor: 'Provider',
+  Clave: 'Key',
+  Guardada: 'Stored',
+  'Ninguna (un modelo local no la pide)': 'None (a local model asks for none)',
+  'Pega aquí la clave': 'Paste the key here',
+  Modelo: 'Model',
+  'Dirección del servicio': 'Service address',
+  'Peticiones por dispositivo y día': 'Requests per device per day',
+  'Cuenta para los móviles emparejados; la mesa misma no tiene tope. 0 es sin tope.':
+    'Counts for paired phones; the desk itself has no cap. 0 is no cap.',
+  Probar: 'Test',
+  'Quitar la clave': 'Remove the key',
+  Funciona: 'Works',
+  modelos: 'models',
+  'No funciona': 'Does not work',
+  Hoy: 'Today',
+  peticiones: 'requests',
+  'tokens de entrada': 'input tokens',
+  'de salida': 'output',
 }
 
 export function t(text: string): string {

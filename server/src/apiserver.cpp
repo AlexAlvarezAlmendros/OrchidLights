@@ -31,6 +31,7 @@
 #include <QFileInfo>
 #include <QDir>
 
+#include "aigateway.h"
 #include "apiserver.h"
 #include "enginehost.h"
 #include "levelsource.h"
@@ -101,6 +102,16 @@ namespace
                          QStringLiteral("Send Authorization: Bearer <token>. "
                                         "The token is in the api-token file of the "
                                         "user data directory."));
+    }
+
+    /** The same error, for a handler that answers through its responder --
+     *  the ones that wait on something outside the process. */
+    void writeError(QHttpServerResponder &responder, StatusCode code, const QString &message)
+    {
+        QJsonObject body;
+        body["error"] = message;
+        responder.write(QJsonDocument(body).toJson(QJsonDocument::Compact),
+                        QByteArrayLiteral("application/json"), code);
     }
 
     /** The widget carrying this id, anywhere in the console. */
@@ -219,6 +230,13 @@ bool ApiServer::start(const Options &options, QString &errorMessage)
 
     m_server = new QHttpServer(this);
     m_listenAll = options.listenAll;
+
+    /* A broken ai.json is said and skipped: the desk lights the room whether
+       or not its assistant can start. */
+    m_ai = new AiGateway(this);
+    QString aiError;
+    if (m_ai->load(aiError) == false)
+        qWarning().noquote() << aiError;
 
     registerRoutes();
 
@@ -4414,6 +4432,90 @@ void ApiServer::registerRoutes()
         response["mask"] = qint64(m_engine->accessMask());
         return QHttpServerResponse(response);
     });
+
+    /* The assistant (F10). The provider key lives here and never goes back
+       out: the settings say whether there is one, and the proxy puts it on
+       the request. The handlers that wait on the provider take the responder
+       and hand it to AiGateway, which writes as the answer arrives. */
+    m_server->route("/api/v1/ai/settings", QHttpServerRequest::Method::Get,
+                    [this, denied](const QHttpServerRequest &request) {
+        if (denied(request))
+            return unauthorized();
+
+        return QHttpServerResponse(m_ai->settingsJson());
+    });
+
+    m_server->route("/api/v1/ai/settings", QHttpServerRequest::Method::Put,
+                    [this](const QHttpServerRequest &request) {
+        /* Master key only: whoever sets the key decides whose account every
+           paired phone spends. */
+        if (m_auth.authorizeStrict(request) == false)
+            return unauthorized();
+
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(request.body(), &parseError);
+        if (parseError.error != QJsonParseError::NoError || document.isObject() == false)
+            return jsonError(StatusCode::BadRequest, QStringLiteral("The body is not a JSON object"));
+
+        /* "provider", "dailyRequests" and "providers" are AiGateway::update's
+           to read and check. */
+        QString error;
+        if (m_ai->update(document.object(), error) == false)
+            return jsonError(StatusCode::BadRequest, error);
+
+        return QHttpServerResponse(m_ai->settingsJson());
+    });
+
+    m_server->route("/api/v1/ai/check", QHttpServerRequest::Method::Post,
+                    [this, denied](const QHttpServerRequest &request,
+                                   QHttpServerResponder &&responder) {
+        if (denied(request))
+            return writeError(responder, StatusCode::Unauthorized,
+                              QStringLiteral("Send Authorization: Bearer <token>."));
+
+        /* Setting up the desk's assistant, not using it. */
+        if (m_auth.identify(request).role == ApiAuth::Role::Operate)
+            return writeError(responder, StatusCode::Forbidden,
+                              QStringLiteral("An operator's device does not set up the assistant"));
+
+        AiGateway::Provider provider = m_ai->activeProvider();
+        const QJsonObject body = QJsonDocument::fromJson(request.body()).object();
+        if (body.contains("provider")
+            && AiGateway::providerFromName(body.value("provider").toString(), provider) == false)
+        {
+            return writeError(responder, StatusCode::BadRequest,
+                              QStringLiteral("\"provider\" is anthropic or openai"));
+        }
+
+        QTcpSocket *client = responder.socket();
+        m_ai->check(provider, std::move(responder), client);
+    });
+
+    /* One route per dialect, each the one path its SDK calls: the list IS the
+       allow-list. Any role may ask -- an operator's phone included, which is
+       the point of asking in the middle of a show -- and what an operator may
+       then change is still decided by the routes the answer leads to. A paired
+       device counts against the daily cap; the desk itself does not. */
+    const auto proxy = [this, denied](AiGateway::Provider provider) {
+        return [this, denied, provider](const QHttpServerRequest &request,
+                                        QHttpServerResponder &&responder) {
+            if (denied(request))
+                return writeError(responder, StatusCode::Unauthorized,
+                                  QStringLiteral("Send Authorization: Bearer <token>."));
+
+            const ApiAuth::Caller caller = m_auth.identify(request);
+            const QString who = caller.device != 0 ? QString::number(caller.device) : QString();
+
+            QTcpSocket *client = responder.socket();
+            m_ai->forward(provider, request, std::move(responder), client, who);
+        };
+    };
+
+    m_server->route("/api/v1/ai/proxy/anthropic/v1/messages", QHttpServerRequest::Method::Post,
+                    proxy(AiGateway::Provider::Anthropic));
+
+    m_server->route("/api/v1/ai/proxy/openai/chat/completions", QHttpServerRequest::Method::Post,
+                    proxy(AiGateway::Provider::OpenAi));
 
     /* Paired devices: every phone with a key of its own and a role, revocable
        one by one. Master key only, all four -- a device must not be able to
