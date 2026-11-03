@@ -662,11 +662,17 @@ jobs:
             done
             [ -n "$DP" ] || { echo "no daemon"; exit 1; }
             PORT=$(tr "\0" "\n" < /proc/$DP/cmdline | grep -A1 -- --port | tail -1)
+            # La carcasa abre el daemon a la red (--listen-all), y eso pide la
+            # llave en cada petición, loopback incluido. Sin ella /status da
+            # 401 y curl -f sale con 22: este paso estuvo rojo desde agosto
+            # por eso, no por el paquete. La llave la escribe el daemon al
+            # arrancar, así que se lee dentro del bucle.
             for _ in $(seq 1 100); do
-              curl -sf "http://127.0.0.1:$PORT/api/v1/status" > /dev/null 2>&1 && break
+              TOKEN=$(cat "$HOME/.orchidlights/api-token" 2>/dev/null || true)
+              curl -sf -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/api/v1/status" > /dev/null 2>&1 && break
               sleep 0.3
             done
-            STATUS=$(curl -sf "http://127.0.0.1:$PORT/api/v1/status")
+            STATUS=$(curl -sf -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/api/v1/status")
             echo "$STATUS" | python3 -c "
           import json, sys
           body = json.load(sys.stdin)
@@ -719,13 +725,15 @@ jobs:
             echo "daemon cmdline: $(tr "\0" " " < /proc/$DP/cmdline)"
             PORT=$(tr "\0" "\n" < /proc/$DP/cmdline | grep -A1 -- --port | tail -1)
             echo "port: $PORT"
+            # Con la llave, por lo mismo que en el paso del .deb.
             for _ in $(seq 1 200); do
-              curl -sf "http://127.0.0.1:$PORT/api/v1/status" > /dev/null 2>&1 && break
+              TOKEN=$(cat "$HOME/.orchidlights/api-token" 2>/dev/null || true)
+              curl -sf -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/api/v1/status" > /dev/null 2>&1 && break
               sleep 0.3
             done
-            if ! curl -s "http://127.0.0.1:$PORT/api/v1/status" | grep -q "\"manufacturers\""; then
+            if ! curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/api/v1/status" | grep -q "\"manufacturers\""; then
               echo "the API never answered on $PORT; status says:"
-              curl -s --max-time 3 "http://127.0.0.1:$PORT/api/v1/status" || true
+              curl -s --max-time 3 -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/api/v1/status" || true
               echo; echo "--- ai.log:"; cat /tmp/ai.log
               echo "--- daemon.log:"; cat "$HOME/.orchidlights/daemon.log" 2>/dev/null || true
               exit 1
