@@ -790,6 +790,10 @@ body {
 
 .gate-card {
   width: min(92vw, 24rem);
+  /* Settings grew an assistant section taller than a phone held sideways:
+     the card scrolls inside the dialog instead of running off its top. */
+  max-height: 100%;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
@@ -797,6 +801,37 @@ body {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--surface);
+}
+
+/* The assistant's block in Settings, set apart from the display preferences
+   above it: those are this screen's, these are the desk's. */
+.assistant-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.assistant-settings h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assistant-actions button {
+  flex: 1 1 7rem;
+}
+
+/* .gate-card p is dim and outranks .remote-error: a key that does not work
+   has to read as red. */
+.assistant-settings [role="alert"] {
+  color: var(--danger);
 }
 
 .gate-card h2 {

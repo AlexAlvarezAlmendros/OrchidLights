@@ -485,6 +485,44 @@ export interface Device {
   connections: number
 }
 
+/** The assistant's two dialects: Anthropic's own, and the OpenAI-style chat
+ *  completions that ChatGPT, Gemini, OpenRouter, Ollama and LM Studio speak. */
+export type AiProviderName = 'anthropic' | 'openai'
+
+export interface AiProvider {
+  model: string
+  baseUrl: string
+  /** Whether a key is stored. The key itself never leaves the daemon. */
+  configured: boolean
+  /** Its last four characters, or empty when short or absent. */
+  keyHint: string
+}
+
+export interface AiSettings {
+  provider: AiProviderName
+  /** Requests a paired device may make in a day; 0 is no cap. */
+  dailyRequests: number
+  providers: Record<AiProviderName, AiProvider>
+  usage: { day: string; requests: number; inputTokens: number; outputTokens: number }
+}
+
+/** What PUT /ai/settings takes: per provider, `key` absent keeps it and
+ *  empty removes it. */
+export interface AiSettingsPatch {
+  provider?: AiProviderName
+  dailyRequests?: number
+  providers?: Partial<Record<AiProviderName, { model?: string; baseUrl?: string; key?: string }>>
+}
+
+export interface AiCheck {
+  ok: boolean
+  provider: AiProviderName
+  /** The provider's HTTP status; 0 when it was never asked. */
+  status: number
+  models?: string[]
+  error?: string
+}
+
 /** Thrown on a 401 so the shell can tell "the daemon wants a token" apart
  *  from every other failure and show the connect screen instead of a toast. */
 export class Unauthorized extends Error {
@@ -553,6 +591,24 @@ export const api = {
     }>('/api/v1/remote'),
   kickRemote: (id: number) =>
     json<{ closed: number }>(`/api/v1/remote/clients/${id}`, { method: 'DELETE' }),
+
+  /* The assistant (F10). Settings say whether there is a key, never what it
+     is; changing them takes the master key. */
+  aiSettings: () => json<AiSettings>('/api/v1/ai/settings'),
+  setAiSettings: (patch: AiSettingsPatch) =>
+    json<AiSettings>('/api/v1/ai/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  /** Asks the provider for its models with the stored key: proves the key
+   *  works without spending a token. */
+  checkAi: (provider?: AiProviderName) =>
+    json<AiCheck>('/api/v1/ai/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(provider ? { provider } : {}),
+    }),
 
   /* Paired devices: master key only. A device asking gets a 401, which the
      remote screen reads as "this is not the desk's own machine". */
