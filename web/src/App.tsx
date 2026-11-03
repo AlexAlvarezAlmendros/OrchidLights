@@ -483,6 +483,14 @@ export function App() {
     [],
   )
 
+  /* An Override button latches on one press and releases on the next. Lit
+     means latched -- the daemon reports it as flashing, and `running` above
+     counts flashing -- so the press is the opposite of what is on screen. */
+  const override = useCallback(
+    (id: number) => live.current?.override(id, !running.has(id)),
+    [running],
+  )
+
   /* The two button actions that have no function behind them. Stop-all walks
      the running set through the same stop path a tap uses -- the daemon's
      stop-everything call arrives with F6, and until then this is the honest
@@ -545,6 +553,8 @@ export function App() {
             const list = held.get(baseOf(event)) ?? []
             list.push(widget.functionId)
             held.set(baseOf(event), list)
+          } else if (action === 'Override') {
+            override(widget.functionId)
           } else {
             toggle(widget.functionId)
           }
@@ -573,7 +583,7 @@ export function App() {
       window.removeEventListener('blur', letGo)
       letGo()
     }
-  }, [vc, mode, toggle, flash, buttonAction])
+  }, [vc, mode, toggle, flash, override, buttonAction])
 
   const turnFramePage = useCallback((id: number, page: number) => {
     live.current?.setFramePage(id, page)
@@ -1110,6 +1120,9 @@ export function App() {
           {!operator &&
             view === 'console' &&
             vc &&
+            /* Closed by the mask -- or by this device's role -- is closed here
+               too: a button the daemon will refuse is a button that lies. */
+            (access.vcEditing || mode !== 'run') &&
             /* One control at a time. Showing "Ordenar" beside "Listo" made it
              read as two separate states, when there is only ever one. */
             (mode === 'run' ? (
@@ -1475,6 +1488,7 @@ export function App() {
                   desk={{
                     blackout,
                     onFlash: flash,
+                    onOverride: override,
                     onAction: buttonAction,
                     framePages: sharedPages,
                     onFramePage: turnFramePage,
@@ -1530,6 +1544,8 @@ export function App() {
 interface DeskActions {
   blackout: boolean
   onFlash: (id: number, on: boolean, flags?: { override?: boolean; forceLTP?: boolean }) => void
+  /** Override buttons: latch the scene over the rig, or release it. */
+  onOverride: (id: number) => void
   framePages: Record<number, number>
   onFramePage: (id: number, page: number) => void
   onSideFader: (chaser: number, mode: string, value: number) => void
@@ -2041,6 +2057,26 @@ function Widget({
             }}
             onPointerUp={() => desk.onFlash(id, false)}
             onPointerCancel={() => desk.onFlash(id, false)}
+          >
+            {widget.caption || `#${id}`}
+          </button>
+        )
+      }
+
+      if (action === 'Override') {
+        /* Latched, not held: the daemon keeps the scene over the rig until
+           the next press and reports it as flashing, which `running` counts.
+           Drawn like a toggle because to the operator it is one; what differs
+           is what the engine does with the channels underneath. */
+        return (
+          <button
+            type="button"
+            className="widget button"
+            style={style}
+            data-tint={tint !== undefined}
+            data-running={running.has(id)}
+            aria-pressed={running.has(id)}
+            onClick={() => desk.onOverride(id)}
           >
             {widget.caption || `#${id}`}
           </button>

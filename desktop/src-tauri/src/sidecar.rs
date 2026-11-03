@@ -35,6 +35,11 @@ pub struct Sidecar {
     /// thread can tell "we asked for this" from "it died on us".
     stopping: AtomicBool,
     base: String,
+    /// Where this desk's URL is published for other tools, once it is up.
+    /// Held here rather than at the call sites because `shut_down` is the one
+    /// place every exit converges on, and a file left behind by the path
+    /// somebody forgot is a file that lies.
+    endpoint: Mutex<Option<PathBuf>>,
 }
 
 /// Everything the daemon needs to run outside an installation.
@@ -124,11 +129,44 @@ impl Sidecar {
             child: Mutex::new(Some(child)),
             stopping: AtomicBool::new(false),
             base: format!("http://127.0.0.1:{port}"),
+            endpoint: Mutex::new(None),
         })
     }
 
     pub fn base_url(&self) -> &str {
         &self.base
+    }
+
+    /// Leave this desk's URL where other tools can read it.
+    ///
+    /// The shell asks for 9998 and settles for any free port when that one is
+    /// taken, so anything registered with the port written into it -- an MCP
+    /// server in an agent's config, a script -- would work until the day it
+    /// did not, and then fail by talking to somebody else's desk. One line in
+    /// `~/.orchidlights/desktop-url` and the registration becomes portless:
+    /// written once, right forever.
+    ///
+    /// Called after readiness, never before: a file that names a port nothing
+    /// answers on is worse than no file, because it turns "not running" into
+    /// "running and broken".
+    pub fn publish(&self, user_dir: &Path) {
+        let path = user_dir.join("desktop-url");
+        if let Err(trouble) = std::fs::write(&path, format!("{}\n", self.base)) {
+            // Not fatal: the desk works, only the shortcut is missing.
+            eprintln!(
+                "orchidlights-desktop: no pude publicar la URL en {}: {trouble}",
+                path.display()
+            );
+            return;
+        }
+        *self.endpoint.lock().expect("endpoint lock") = Some(path);
+    }
+
+    /// Take it back. Called from `shut_down`, which every exit goes through.
+    fn withdraw(&self) {
+        if let Some(path) = self.endpoint.lock().expect("endpoint lock").take() {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     /// Wait until the API answers. 200 and 401 both mean "alive" -- a guarded
@@ -192,6 +230,9 @@ impl Sidecar {
     /// functions first" never depends on which way the app closed.
     pub fn shut_down(&self, token: Option<&str>) {
         self.stopping.store(true, Ordering::SeqCst);
+        // First thing, before any of the three early returns below: the moment
+        // the shell decides to stop, the published URL stops being true.
+        self.withdraw();
 
         if let Some(token) = token {
             let asked = ureq::post(&format!("{}/api/v1/shutdown", self.base))

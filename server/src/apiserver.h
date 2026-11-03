@@ -107,6 +107,18 @@ private:
     QStringList recentProjects() const;
     void rememberRecent(const QString &path);
 
+    /** What the caller may touch: the desk's access mask, narrowed for an
+     *  operate device to the console and the desk. */
+    quint32 effectiveMask(const ApiAuth::Caller &caller) const;
+
+    /** Every reachable IPv4 door, as a URL a phone can dial, with `key` in the
+     *  fragment when one is given. Empty when the daemon is on loopback only:
+     *  a QR code to a URL that does not answer is worse than none. */
+    QJsonArray networkDoors(const QByteArray &key = QByteArray()) const;
+
+    /** A paired device as the API shows it: never its key, which is not kept. */
+    QJsonObject deviceJson(const ApiAuth::Device &device) const;
+
     EngineHost *m_engine = nullptr;
     QHttpServer *m_server = nullptr;
     LiveFeed *m_feed = nullptr;

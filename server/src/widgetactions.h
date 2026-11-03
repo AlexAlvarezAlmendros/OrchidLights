@@ -43,17 +43,40 @@ namespace WidgetActions
     void stopFunction(EngineHost *engine, quint32 functionId);
 
     /** The engine's own flash: an overlay that lights without owning the
-     *  function's run state. Override and forceLTP are the button's flags. */
+     *  function's run state. Override and forceLTP are the button's flags.
+     *
+     *  Only a scene has that overlay. Anything else --a chaser, a collection,
+     *  an EFX-- runs while the finger is down and stops on the release, which
+     *  is what a flash means to an operator and what makes a strobe pad
+     *  driven by a chaser possible at all. */
     void flashFunction(EngineHost *engine, quint32 functionId, bool shouldOverride,
                        bool forceLTP);
     void unflashFunction(EngineHost *engine, quint32 functionId);
 
     /**
+     * Lay a scene over the rig and leave it there.
+     *
+     * The flash overlay with override priority and forced LTP, latched until
+     * released: the scene's channels replace what every running function
+     * writes there, HTP included, so a colour palette recolours a running
+     * chaser instead of mixing with it. Inside a solo frame an override is an
+     * overlay on the frame's state, not a state of its own: laying one drops
+     * the other overrides of the frame and leaves its toggles running, and a
+     * toggle starting drops the overlays (see startFunction).
+     *
+     * Only a scene has an overlay; anything else runs and stops as a toggle
+     * would, which at least does something the operator can see.
+     */
+    void overrideFunction(EngineHost *engine, quint32 functionId);
+    void releaseFunction(EngineHost *engine, quint32 functionId);
+
+    /**
      * A button's press with the widget's own action semantics.
      *
      * Toggle acts on the press edge (on) and ignores the release; Flash
-     * follows both edges; Blackout flips on the press edge; StopAll stops
-     * everything, now, on the press edge.
+     * follows both edges; Override latches and releases on alternate press
+     * edges; Blackout flips on the press edge; StopAll stops everything,
+     * now, on the press edge.
      *
      * Returns the widget's RESULTING state: 1 now on, 0 now off, -1 nothing
      * happened (a release a Toggle ignores). Reported from what the press

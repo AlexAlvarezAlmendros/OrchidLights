@@ -168,7 +168,19 @@ namespace
                 const uint channel =
                     attributes.value(QStringLiteral("Channel")).toUInt(&channelOk);
 
-                if (universeOk && channelOk)
+                /* A speed dial names each of its four controls with an ID.
+                   Asked of the dial only: QLC+ 5 writes ID="0" on a button's
+                   or a slider's single binding too, and reading those as dial
+                   controls took the wing off every widget of such a show. */
+                bool idOk = false;
+                const int inputId = attributes.value(QStringLiteral("ID")).toInt(&idOk);
+                if (universeOk && channelOk && idOk
+                    && widget.type == QStringLiteral("speeddial"))
+                {
+                    widget.speedInputs.append(
+                        {inputId, quint32(universe), quint32(channel)});
+                }
+                else if (universeOk && channelOk)
                 {
                     widget.hasInput = true;
                     widget.inputUniverse = quint32(universe);

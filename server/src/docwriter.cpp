@@ -464,29 +464,60 @@ DocWriter::Result DocWriter::addFixtures(Doc *doc, const FixturePlacement &place
     if (placement.gap < 0 || placement.gap > 512)
         return Result::failure(QStringLiteral("Gap must be between 0 and 512"));
 
-    QLCFixtureDef *definition =
-        doc->fixtureDefCache()->fixtureDef(placement.manufacturer, placement.model);
-    if (definition == nullptr)
+    /* "Generic Generic" is not a file in the library: the engine synthesises a
+       dimmer pack of N channels on demand, and the mode name is where N is
+       written ("6 Channel"). Looking it up in the cache therefore fails, and
+       without this branch the API cannot patch the most ordinary fixture there
+       is -- nor rebuild a project that already has one, which is how the gap
+       surfaced.
+
+       Each generic dimmer gets its OWN definition, built by setChannels()
+       below, because Doc deletes a generic def along with its fixture: sharing
+       one across a batch would free it several times. */
+    const bool genericDimmer = placement.manufacturer == KXMLFixtureGeneric
+                               && placement.model == KXMLFixtureGeneric;
+
+    QLCFixtureDef *definition = nullptr;
+    QLCFixtureMode *mode = nullptr;
+    int channels = 0;
+
+    if (genericDimmer)
     {
-        return Result::failure(QStringLiteral("No fixture definition for \"%1 %2\"")
-                                   .arg(placement.manufacturer, placement.model));
+        bool ok = false;
+        channels = placement.mode.section(QChar(' '), 0, 0).toInt(&ok);
+        if (ok == false || channels < 1 || channels > 512)
+        {
+            return Result::failure(
+                QStringLiteral("A generic dimmer's mode says how many channels it has, "
+                               "as in \"6 Channel\"; \"%1\" does not")
+                    .arg(placement.mode));
+        }
     }
-
-    QLCFixtureMode *mode = definition->mode(placement.mode);
-    if (mode == nullptr)
+    else
     {
-        QStringList available;
-        for (const QLCFixtureMode *candidate : definition->modes())
-            available << candidate->name();
+        definition = doc->fixtureDefCache()->fixtureDef(placement.manufacturer, placement.model);
+        if (definition == nullptr)
+        {
+            return Result::failure(QStringLiteral("No fixture definition for \"%1 %2\"")
+                                       .arg(placement.manufacturer, placement.model));
+        }
 
-        return Result::failure(QStringLiteral("\"%1 %2\" has no mode \"%3\". Available: %4")
-                                   .arg(placement.manufacturer, placement.model, placement.mode,
-                                        available.join(QStringLiteral(", "))));
+        mode = definition->mode(placement.mode);
+        if (mode == nullptr)
+        {
+            QStringList available;
+            for (const QLCFixtureMode *candidate : definition->modes())
+                available << candidate->name();
+
+            return Result::failure(QStringLiteral("\"%1 %2\" has no mode \"%3\". Available: %4")
+                                       .arg(placement.manufacturer, placement.model, placement.mode,
+                                            available.join(QStringLiteral(", "))));
+        }
+
+        channels = mode->channels().count();
+        if (channels <= 0)
+            return Result::failure(QStringLiteral("That mode has no channels"));
     }
-
-    const int channels = mode->channels().count();
-    if (channels <= 0)
-        return Result::failure(QStringLiteral("That mode has no channels"));
 
     /* Check the whole batch before placing any of it. A half-applied patch
        leaves the operator with some fixtures placed and no clear idea which. */
@@ -519,7 +550,10 @@ DocWriter::Result DocWriter::addFixtures(Doc *doc, const FixturePlacement &place
     for (int i = 0; i < placement.quantity; i++)
     {
         Fixture *fixture = new Fixture(doc);
-        fixture->setFixtureDefinition(definition, mode);
+        if (genericDimmer)
+            fixture->setChannels(quint32(channels));
+        else
+            fixture->setFixtureDefinition(definition, mode);
         fixture->setUniverse(quint32(universe));
         fixture->setAddress(quint32((placement.address - 1) + (i * stride)));
 

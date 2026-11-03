@@ -1076,6 +1076,24 @@ QJsonObject JsonView::vcWidget(const VcWidget &widget, const Doc *doc,
         json["input"] = input;
     }
 
+    if (widget.speedInputs.isEmpty() == false)
+    {
+        /* The dial's controls, named. Reported because a binding a client
+           cannot see is a binding nobody can check. */
+        static const char *const names[] = {"unknown", "tap", "multiply", "divide", "reset"};
+        QJsonArray controls;
+        for (const VcWidget::SpeedInput &in : widget.speedInputs)
+        {
+            QJsonObject entry;
+            entry["control"] =
+                QString::fromLatin1(names[(in.id >= 1 && in.id <= 4) ? in.id : 0]);
+            entry["universe"] = qint64(in.universe);
+            entry["channel"] = qint64(in.channel);
+            controls.append(entry);
+        }
+        json["speedInputs"] = controls;
+    }
+
     if (widget.key.isEmpty() == false)
         json["key"] = widget.key;
     if (widget.sliderStyle.isEmpty() == false)

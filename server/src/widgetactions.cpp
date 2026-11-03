@@ -19,6 +19,7 @@
 
 #include "widgetactions.h"
 
+#include "collection.h"
 #include "doc.h"
 #include "enginehost.h"
 #include "function.h"
@@ -26,6 +27,25 @@
 #include "levelsource.h"
 #include "mastertimer.h"
 #include "virtualconsole.h"
+
+namespace
+{
+    /* What a press brings up: the function, and for a collection every member
+       it will start, recursively. */
+    void collectStarting(Doc *doc, quint32 functionId, QSet<quint32> &into)
+    {
+        if (into.contains(functionId))
+            return;
+        into.insert(functionId);
+
+        const Function *function = doc->function(functionId);
+        if (function == nullptr || function->type() != Function::CollectionType)
+            return;
+
+        for (quint32 member : static_cast<const Collection *>(function)->functions())
+            collectStarting(doc, member, into);
+    }
+}
 
 void WidgetActions::startFunction(EngineHost *engine, quint32 functionId, quint32 startTime)
 {
@@ -38,12 +58,34 @@ void WidgetActions::startFunction(EngineHost *engine, quint32 functionId, quint3
        picking red should drop blue. Enforced here rather than in any client
        because every transport has to agree about it: if the browser did it
        and the MIDI wing did not, the frame would only be solo for whoever
-       pressed last. */
-    for (quint32 sibling : engine->soloSiblings(functionId))
+       pressed last.
+
+       Enforced for a collection's members too: a member inside a solo frame
+       drags the frame's rule with it, or the frame is solo only for buttons.
+       A look that parks its position scene in the positions frame would
+       otherwise leave the previous position running underneath -- lost on
+       LTP, so invisible, but lit on its pad and one press away from being
+       toggled off instead of on. */
+    QSet<quint32> starting;
+    collectStarting(doc, functionId, starting);
+
+    for (quint32 member : starting)
     {
-        Function *other = doc->function(sibling);
-        if (other != nullptr && other->isRunning())
-            other->stop(FunctionParent::master());
+        for (quint32 sibling : engine->soloSiblings(member))
+        {
+            if (starting.contains(sibling))
+                continue;
+
+            Function *other = doc->function(sibling);
+            if (other != nullptr && other->isRunning())
+                other->stop(FunctionParent::master());
+
+            /* An overlay belongs to the state it was laid over. A look chosen
+               with a palette on top comes up in its own colours; the palette
+               is one press away if it is still wanted. */
+            if (engine->isOverrideLatched(sibling))
+                releaseFunction(engine, sibling);
+        }
     }
 
     function->start(doc->masterTimer(), FunctionParent::master(), startTime);
@@ -62,6 +104,19 @@ void WidgetActions::flashFunction(EngineHost *engine, quint32 functionId,
     Function *function = engine->doc()->function(functionId);
     if (function == nullptr)
         return;
+
+    /* Only a scene has the engine's flash overlay. On anything else --a
+       chaser, a collection, an EFX-- Function::flash lights nothing at all: it
+       flips a flag and emits a signal, so the button reported itself lit over
+       a rig that had not changed. Held is held: run it while the finger is
+       down. That is what an operator means by flash, and it is the difference
+       between a strobe pad that strobes and one that lies. */
+    if (function->type() != Function::SceneType)
+    {
+        startFunction(engine, functionId);
+        return;
+    }
+
     function->flash(engine->doc()->masterTimer(), shouldOverride, forceLTP);
 }
 
@@ -70,7 +125,64 @@ void WidgetActions::unflashFunction(EngineHost *engine, quint32 functionId)
     Function *function = engine->doc()->function(functionId);
     if (function == nullptr)
         return;
+
+    if (function->type() != Function::SceneType)
+    {
+        stopFunction(engine, functionId);
+        return;
+    }
+
     function->unFlash(engine->doc()->masterTimer());
+}
+
+void WidgetActions::overrideFunction(EngineHost *engine, quint32 functionId)
+{
+    Doc *doc = engine->doc();
+    Function *function = doc->function(functionId);
+    if (function == nullptr)
+        return;
+
+    /* Function::flash on anything but a scene flips a flag and lights
+       nothing: the button would show on over a rig that did not change. */
+    if (function->type() != Function::SceneType)
+    {
+        startFunction(engine, functionId);
+        return;
+    }
+
+    if (engine->isOverrideLatched(functionId))
+        return;
+
+    /* Palettes are exclusive among themselves -- picking one drops the one
+       that was up -- and only among themselves: the toggles of the frame
+       are the state the overlay recolours, not something it replaces. */
+    for (quint32 sibling : engine->soloSiblings(functionId))
+    {
+        if (engine->isOverrideLatched(sibling))
+            releaseFunction(engine, sibling);
+    }
+
+    function->flash(doc->masterTimer(), true, true);
+    engine->setOverrideLatched(functionId, true);
+}
+
+void WidgetActions::releaseFunction(EngineHost *engine, quint32 functionId)
+{
+    Doc *doc = engine->doc();
+    Function *function = doc->function(functionId);
+    if (function == nullptr)
+        return;
+
+    if (function->type() != Function::SceneType)
+    {
+        stopFunction(engine, functionId);
+        return;
+    }
+
+    const bool latched = engine->isOverrideLatched(functionId);
+    engine->setOverrideLatched(functionId, false);
+    if (latched)
+        function->unFlash(doc->masterTimer());
 }
 
 int WidgetActions::pressButton(EngineHost *engine, const VcWidget &widget, bool on)
@@ -98,6 +210,28 @@ int WidgetActions::pressButton(EngineHost *engine, const VcWidget &widget, bool 
        toggling on both edges would undo every press when the fader falls. */
     if (on == false)
         return -1;
+
+    if (action == QStringLiteral("Override"))
+    {
+        if (widget.hasFunction == false)
+            return -1;
+
+        Function *function = engine->doc()->function(widget.functionId);
+        if (function == nullptr)
+            return -1;
+
+        /* Up is latched for a scene and running for the fallback. */
+        const bool up = function->type() == Function::SceneType
+                            ? engine->isOverrideLatched(widget.functionId)
+                            : function->isRunning();
+        if (up)
+        {
+            releaseFunction(engine, widget.functionId);
+            return 0;
+        }
+        overrideFunction(engine, widget.functionId);
+        return 1;
+    }
 
     if (action == QStringLiteral("Blackout"))
     {

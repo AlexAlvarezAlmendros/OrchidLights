@@ -1,0 +1,88 @@
+# Un show pequeño, escrito a mano, para probar que el documento funciona.
+#
+#   orchidlightsd --no-output &
+#   orchidctl diff  docs/api/ejemplo-show.yaml    # qué haría
+#   orchidctl apply docs/api/ejemplo-show.yaml    # hacerlo
+#   orchidctl run "Persecución azul" && orchidctl dmx 1
+#
+# Todo va por nombre: los ids los reparte el motor y no se pueden escribir.
+# Los canales también, porque "Dimmer" sobrevive a un cambio de modo y el 6 no.
+
+orchidlights: 1
+
+project:
+  startupFunction: Azul frontal
+
+# El escenario, en UNIDADES: doce metros de ancho por ocho de fondo. Las
+# posiciones de las lámparas, en cambio, van en milímetros contra esta rejilla,
+# y confundir las dos es el error natural. Un lado mide entre 1 y 1000.
+stage:
+  width: 12
+  height: 6
+  depth: 8
+  units: meters
+
+universes:
+  # Se casan por POSICIÓN: éste es el universo 1, el que dicen las fixtures.
+  # Renombrarlo no mueve el rig de sitio.
+  - name: Escenario
+
+    # El patch de salida y de entrada va aquí, y depende de la máquina, así que
+    # este ejemplo no lo trae: los nombres de plugin y de línea salen de
+    # `orchidctl` (o de GET /api/v1/io) LITERALES, y un documento que nombre un
+    # plugin que esta máquina no tiene se rechaza entero antes de tocar nada.
+    #
+    #   output:   {plugin: ArtNet, line: eth0}
+    #   input:    {plugin: MIDI, line: BCF2000, profile: Behringer BCF2000}
+    #   feedback: {plugin: MIDI, line: BCF2000}
+
+fixtures:
+  # Cuatro pares de LED en la barra frontal. Direcciones consecutivas: cada uno
+  # ocupa siete canales en este modo.
+  - {name: Par 1, manufacturer: Stairville, model: LED PAR56, mode: Mode 1, universe: 1, address: 1,
+     stage: {x: 1000, y: 0, z: 5000, rotation: 180}}
+  - {name: Par 2, manufacturer: Stairville, model: LED PAR56, mode: Mode 1, universe: 1, address: 6,
+     stage: {x: 4000, y: 0, z: 5000, rotation: 180}}
+  - {name: Par 3, manufacturer: Stairville, model: LED PAR56, mode: Mode 1, universe: 1, address: 11,
+     stage: {x: 8000, y: 0, z: 5000, rotation: 180}}
+  - {name: Par 4, manufacturer: Stairville, model: LED PAR56, mode: Mode 1, universe: 1, address: 16,
+     stage: {x: 11000, y: 0, z: 5000, rotation: 180}}
+
+  # Y un dímer genérico para la sala. El modo dice cuántos canales tiene: no es
+  # un perfil de la librería, lo sintetiza el motor.
+  - {name: Sala, manufacturer: Generic, model: Generic, mode: 4 Channel, universe: 1, address: 100}
+
+fixtureGroups:
+  - name: Frontales
+    fixtures: [Par 1, Par 2, Par 3, Par 4]
+    size: {width: 4, height: 1}
+
+functions:
+  - name: Azul frontal
+    type: Scene
+    fadeIn: 1000
+    fadeOut: 1000
+    values:
+      - {fixture: Par 1, channel: Blue, value: 255}
+      - {fixture: Par 2, channel: Blue, value: 255}
+      - {fixture: Par 3, channel: Blue, value: 255}
+      - {fixture: Par 4, channel: Blue, value: 255}
+
+  - name: Ámbar frontal
+    type: Scene
+    fadeIn: 1000
+    fadeOut: 1000
+    values:
+      - {fixture: Par 1, channel: Red, value: 255}
+      - {fixture: Par 1, channel: Green, value: 120}
+      - {fixture: Par 4, channel: Red, value: 255}
+      - {fixture: Par 4, channel: Green, value: 120}
+
+  # Un chaser encadena escenas por nombre. Las dos de arriba las crea este mismo
+  # documento, y el plan sabe que van a existir cuando le toque el turno.
+  - name: Persecución azul
+    type: Chaser
+    runOrder: loop
+    steps:
+      - {function: Azul frontal, fadeIn: 500, hold: 1500, fadeOut: 500}
+      - {function: Ámbar frontal, fadeIn: 500, hold: 1500, fadeOut: 500}

@@ -27,6 +27,7 @@ import { keySequenceOf } from './teclas'
 const ACTIONS = [
   { value: 'Toggle', label: 'Alternar' },
   { value: 'Flash', label: 'Flash' },
+  { value: 'Override', label: 'Sobrescribir (pisa el color)' },
   { value: 'Blackout', label: 'Blackout' },
   { value: 'StopAll', label: 'Parar todo' },
 ]
@@ -165,6 +166,14 @@ export function WidgetEditor({
               ))}
             </select>
           </label>
+
+          {widget.action === 'Override' && (
+            <p className="hint">
+              Deja la escena encima de lo que corre, pisando sus canales, hasta la siguiente
+              pulsación: un chaser sigue con su ritmo y solo el color es el de la paleta. Solo
+              escenas; sobre otra función alterna.
+            </p>
+          )}
 
           {widget.action === 'Flash' && (
             <div className="fields">

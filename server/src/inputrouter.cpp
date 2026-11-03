@@ -90,6 +90,15 @@ void InputRouter::rebuild()
                 .append({*widget, Routed::PrevPage});
         }
 
+        /* A speed dial carries four bindings of its own -- tap, multiply,
+           divide, reset -- and no single one. Routed here so a show that runs
+           on tap tempo can actually be tapped. */
+        for (const VcWidget::SpeedInput &control : widget->speedInputs)
+        {
+            m_table[keyOf(control.universe, control.channel)]
+                .append({*widget, Routed::Speed, control.id});
+        }
+
         if (widget->hasInput == false)
             continue;
 
@@ -136,6 +145,16 @@ void InputRouter::onInput(quint32 universe, quint32 channel, uchar value)
     for (const Routed &routed : found.value())
     {
         const VcWidget &widget = routed.widget;
+
+        if (routed.control == Routed::Speed)
+        {
+            /* A tempo control: it acts on the press and ignores the release,
+               like every other momentary gesture on a wing. The tap's whole
+               job is WHEN it arrives, so nothing is coalesced here. */
+            if (rising)
+                m_engine->speedDialControl(widget.id, routed.speedInput);
+            continue;
+        }
 
         if (routed.control != Routed::Main)
         {

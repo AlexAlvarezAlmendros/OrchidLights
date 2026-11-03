@@ -260,6 +260,13 @@ export class Live {
     )
   }
 
+  /** Lay a scene over the rig and leave it there (Override buttons): the same
+   *  overlay as a flash, with override and forced LTP, latched by the daemon
+   *  until released. It comes back as `flashing`, not `running`. */
+  override(id: number, on: boolean): void {
+    this.send({ type: 'function', id, action: on ? 'override' : 'release' })
+  }
+
   setSpeedDial(id: number, milliseconds: number): void {
     this.send({ type: 'speeddial', id, value: milliseconds })
   }

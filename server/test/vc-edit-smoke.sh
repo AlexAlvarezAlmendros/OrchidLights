@@ -303,6 +303,16 @@ assert w['action'] == 'Flash', w
     || fail "a function that does not exist was accepted"
 [ "$(code PATCH "/vc/widgets/$NEW" -d '{"action":"Teleport"}')" = "400" ] \
     || fail "an unknown button action was accepted"
+# Override is this daemon's own action. It has to survive the round trip as
+# written: QLC+ reads it as Toggle, and so would an editor that lost it.
+api PATCH "/vc/widgets/$NEW" -H 'Content-Type: application/json' \
+    -d '{"action":"override"}' > "$WORK/override.json" \
+    || fail "PATCH action Override"
+python3 -c "
+import json
+w = json.load(open('$WORK/override.json'))
+assert w['action'] == 'Override', w
+" || fail "the Override action did not come back as written"
 [ "$(code PATCH /vc/widgets/3 -d '{"action":"Flash"}')" = "400" ] \
     || fail "a label was given a button action"
 # "Grandmaster" stopped being the unknown example the day F14a made it a real

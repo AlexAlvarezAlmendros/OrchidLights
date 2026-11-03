@@ -17,6 +17,8 @@ const RED = 0
 const BLUE = 1
 const GREEN = 2
 const SMOKE = 3 // in a plain frame, so it is not part of anyone's solo
+const CYAN = 6 // Override palettes, in a solo frame nested inside the colours'
+const YELLOW = 7
 
 const failures = []
 function check(name, ok, detail) {
@@ -35,6 +37,7 @@ socket.addEventListener('message', (event) => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const running = () => new Set(functions.filter((f) => f.running).map((f) => f.id))
+const flashing = () => new Set(functions.filter((f) => f.flashing === true).map((f) => f.id))
 
 await new Promise((resolve, reject) => {
   socket.addEventListener('open', resolve)
@@ -96,6 +99,44 @@ try {
     stopped = !running().has(SMOKE)
   }
   check('and stops it at zero', stopped, [...running()].join(','))
+
+  /* Override: an overlay on the frame's state, not a state of its own. The
+     feed has to say so -- a latched palette is flashing, not running, and a
+     client that cannot see it draws a lit button as dark. */
+  const wait = async (predicate) => {
+    for (let i = 0; i < 30; i++) {
+      await sleep(100)
+      if (predicate()) return true
+    }
+    return false
+  }
+  const override = (id, action) => socket.send(JSON.stringify({ type: 'function', id, action }))
+
+  check('red starts again', await start(RED))
+
+  override(CYAN, 'override')
+  check('a palette latches without dropping the look',
+        (await wait(() => flashing().has(CYAN))) && running().has(RED),
+        `running ${[...running()]}, flashing ${[...flashing()]}`)
+
+  override(YELLOW, 'override')
+  check('the next palette replaces the first, and the look survives',
+        (await wait(() => flashing().has(YELLOW) && !flashing().has(CYAN))) && running().has(RED),
+        `running ${[...running()]}, flashing ${[...flashing()]}`)
+
+  check('a new look drops red and the palette both',
+        (await start(BLUE)) && (await wait(() => !running().has(RED) && !flashing().has(YELLOW))),
+        `running ${[...running()]}, flashing ${[...flashing()]}`)
+
+  override(CYAN, 'override')
+  check('cyan latches over blue', await wait(() => flashing().has(CYAN)))
+  override(CYAN, 'release')
+  check('and lets go when released',
+        (await wait(() => !flashing().has(CYAN))) && running().has(BLUE),
+        `running ${[...running()]}, flashing ${[...flashing()]}`)
+
+  socket.send(JSON.stringify({ type: 'function', id: BLUE, action: 'stop' }))
+  await wait(() => running().size === 0)
 } finally {
   socket.close()
 }

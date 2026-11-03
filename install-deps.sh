@@ -32,6 +32,10 @@ PACKAGES=(
     libmad0-dev
     libsndfile1-dev
     libfftw3-dev
+
+    # server/test/openapi-smoke.sh compara el contrato OpenAPI con la tabla de
+    # rutas real, y para eso tiene que leer el YAML.
+    python3-yaml
 )
 
 if [ "${1:-}" = "--appimage" ]; then

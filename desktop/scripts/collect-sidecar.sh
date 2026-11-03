@@ -12,12 +12,17 @@
 #
 #   resources/sidecar/
 #     bin/orchidlightsd
+#     bin/orchidlights-mcp       el lanzador, dos veces con dos nombres
+#     bin/orchidctl
 #     lib/                       engine + Qt6 + icu
 #     qtplugins/platforms/       offscreen + minimal
 #     plugins/orchidlights/      13 output plugins + audio/ decoders
 #     share/orchidlights/        fixtures, gobos, inputprofiles, midi
 #                                templates, modifier templates, rgbscripts,
 #                                web, Sample.qxw
+#     share/orchidlights/mcp/    el servidor MCP y el CLI, un fichero cada uno,
+#                                más AGENTS.md, que el servidor sirve como
+#                                recurso orchid://guide
 #
 # Duplicating that list here instead would be the classic two-copies bug: the
 # AppImage gains a dependency, the desktop bundle silently loses audio.
@@ -35,6 +40,16 @@ trap 'rm -rf "$STAGE"' EXIT
 
 [ -f "$REPO/web/dist/index.html" ] || {
     echo "web/dist is not built; run pnpm build in web/ first" >&2
+    exit 1
+}
+
+# El servidor MCP y el CLI viajan como UN fichero cada uno, no como un
+# node_modules de producción: 25 MB de árbol de enlaces que hay que copiar
+# entero y que se rompe si falta uno, contra un megabyte que no se copia a
+# medias.
+[ -f "$REPO/mcp/dist/bundle/orchidlights-mcp.mjs" ] || {
+    echo "el paquete de agentes no está empaquetado;" >&2
+    echo "corre pnpm install && pnpm bundle en mcp/ primero" >&2
     exit 1
 }
 
@@ -74,6 +89,21 @@ mkdir -p "$OUT/plugins"
 mv "$OUT/plugins.tmp" "$OUT/plugins/orchidlights"
 cp -r "$STAGE/share" "$OUT/share"
 
+# El paquete de agentes. La guía viaja junto a los bundles porque el servidor
+# MCP la sirve como recurso `orchid://guide` y la busca a su lado: un servidor
+# que dice "la guía no viaja con esta instalación" es un servidor al que un
+# agente le pregunta cómo se hacen las cosas y no obtiene respuesta.
+mkdir -p "$OUT/share/orchidlights/mcp"
+cp "$REPO/mcp/dist/bundle/orchidlights-mcp.mjs" \
+   "$REPO/mcp/dist/bundle/orchidctl.mjs" \
+   "$REPO/AGENTS.md" "$OUT/share/orchidlights/mcp/"
+
+# El mismo lanzador con dos nombres: decide cuál correr por el suyo.
+for name in orchidlights-mcp orchidctl; do
+    cp "$REPO/desktop/scripts/orchid-launcher.sh" "$OUT/bin/$name"
+    chmod +x "$OUT/bin/$name"
+done
+
 # The icu glob in the CMake rules is deliberately wide and drags in static
 # archives nothing at runtime can use; a bundle is no place for 80 MB of .a.
 find "$OUT/lib" -name '*.a' -delete
@@ -98,6 +128,16 @@ find "$OUT/lib" -name 'libqlcplusengine.so*' -exec strip {} \; 2>/dev/null || tr
 # assume, because a silent bundle is the bug this whole script exists to stop.
 [ -f "$OUT/plugins/orchidlights/audio/libsndfileplugin.so" ] || {
     echo "the audio decoder did not make it into the sidecar" >&2
+    exit 1
+}
+
+# Y que el lanzador encuentre de verdad lo que tiene al lado. Es una ruta
+# relativa dentro del árbol, y una ruta relativa mal escrita no da error hasta
+# que alguien instala el paquete.
+[ -x "$OUT/bin/orchidlights-mcp" ] \
+    && [ -f "$OUT/share/orchidlights/mcp/orchidlights-mcp.mjs" ] \
+    && [ -f "$OUT/share/orchidlights/mcp/AGENTS.md" ] || {
+    echo "el servidor MCP no llegó al sidecar" >&2
     exit 1
 }
 

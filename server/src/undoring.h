@@ -45,6 +45,11 @@ class EngineHost;
  * The console is inside via MARKERS: the Virtual Console already keeps its
  * own string-swap history in EngineHost, so a console entry here simply
  * delegates to it, keeping one global ordering across both worlds.
+ *
+ * A BATCH folds many edits into one entry: what a client applies as a whole
+ * -- a declarative show document, hundreds of calls -- undoes as a whole, and
+ * takes one slot of the ring instead of eating it. While a batch is open every
+ * entry lands inside it; closing it seals them as one.
  */
 class UndoRing final
 {
@@ -57,7 +62,8 @@ public:
         PaletteScope,
         ConsoleScope,
         MonitorScope,
-        ChannelsScope
+        ChannelsScope,
+        BatchScope      //!< children, applied in order and undone in reverse
     };
 
     struct Item
@@ -73,6 +79,7 @@ public:
         QString label;
         QList<Item> items;
         qint64 stamp = 0;
+        QList<Entry> children;  //!< BatchScope only
     };
 
     explicit UndoRing(EngineHost *engine);
@@ -92,6 +99,22 @@ public:
     /** A console gesture happened; the VC's own history holds the payload. */
     void pushConsoleMarker(const QString &label);
 
+    /* ---- batches -------------------------------------------------------- */
+
+    /** Open a batch. One already open is sealed first: batches do not nest,
+     *  and a client that died mid-batch must not hold the next one hostage. */
+    void beginBatch(const QString &label);
+
+    /** Seal the open batch as one entry. Returns how many edits it holds; 0
+     *  when none was open or it caught nothing, and then nothing is pushed. */
+    int endBatch();
+
+    bool batchOpen() const { return m_batching; }
+
+    /** Forget everything. A loaded project is another document: an entry
+     *  recorded against the previous one would swap its XML into this one. */
+    void clear();
+
     /* ---- apply ---------------------------------------------------------- */
 
     bool canUndo() const { return m_done.isEmpty() == false; }
@@ -107,10 +130,19 @@ public:
 private:
     bool apply(Doc *doc, const Entry &entry, bool forward, QString &error);
 
+    /** Where a new entry goes: the open batch, or the ring. Seals a batch
+     *  that has gone idle first, so edits made after an abandoned batch are
+     *  not folded into it. */
+    QList<Entry> &target();
+    void append(const Entry &entry);
+
     EngineHost *m_engine;
     QList<Entry> m_done;
     QList<Entry> m_undone;
     QElapsedTimer m_clock;
+
+    bool m_batching = false;
+    Entry m_batch;
 };
 
 /**

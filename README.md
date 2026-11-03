@@ -78,7 +78,15 @@ abrir/guardar, asociación de `.qxw`, bandeja con pánico y blackout que hablan
 directo con el daemon, ventanas por contexto (la mesa en un monitor, la
 planta en otro, una superficie de vídeo a pantalla completa en el proyector) y
 los flags `--kiosk` / `--operate`, que cierran la máscara de acceso **en el
-daemon** para que los móviles de la misma mesa obedezcan la misma jaula.
+daemon** para que los móviles de la misma mesa obedezcan la misma jaula. La
+ventana de `--kiosk` entra además con una llave de operador propia, emparejada
+la primera vez y reutilizada después (`~/.orchidlights/kiosk-key`): la jaula
+del propio equipo la guarda también el daemon, no solo la interfaz y el PIN.
+
+Dentro del paquete viaja todo lo que la mesa necesita —el daemon, sus plugins,
+la librería de fixtures, la interfaz— y también **el servidor MCP y `orchidctl`**,
+un fichero de un megabyte cada uno, para que instalar la app deje lista la mesa
+y el agente que la maneja.
 
 ```bash
 cd desktop/src-tauri && cargo tauri dev    # desarrollo
@@ -160,6 +168,24 @@ orchidlightsd --check tonight.qxw          # carga, informa y sale
 orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
 ```
 
+**El contrato completo está escrito**: 145 operaciones en OpenAPI 3.1, en
+[`docs/api/openapi.yaml`](docs/api/openapi.yaml) y servidas por el propio daemon
+en `GET /api/v1/openapi.json`, para que un cliente lo lea de la mesa que tiene
+delante y no de un repositorio que puede ir por otra versión.
+`GET /api/v1` contesta, sin token, qué es esta mesa y dónde está todo lo demás.
+
+Que siga siendo verdad no es cuestión de disciplina: `openapi-smoke.sh` compara
+la spec con la tabla de rutas real **en los dos sentidos** —una ruta nueva sin
+documentar rompe el build, y una documentada que ya no existe, también— y además
+comprueba **campo a campo** que los nombres de cada cuerpo son los que el handler
+lee. Escribiendo la spec eso cazó tres mentiras (`universe` donde iba `fixture`,
+`backgroundColor` donde iba `background`, un `scene` inventado), y ninguna de las
+tres daba error en ninguna parte: un cuerpo con un campo mal nombrado se parsea,
+no encuentra la clave, y sigue.
+
+Para manejar la mesa desde un agente —OpenCode, Claude Code, un script—, el
+camino dorado y las trampas están en [`AGENTS.md`](AGENTS.md).
+
 | | |
 |---|---|
 | `GET /api/v1/status` | versión, librería, plugins cargados, recuentos, funciones en marcha |
@@ -170,6 +196,7 @@ orchidlightsd --no-output tonight.qxw      # motor en marcha, nada sale a la red
 | `POST /api/v1/functions/{id}/stop` | encola la parada |
 | `POST /api/v1/blackout` | para todo y activa blackout |
 | `DELETE /api/v1/blackout` | lo desactiva |
+| `GET /api/v1/universes/{n}/dmx` | lo que sale ahora mismo por el universo, con los canales activos nombrados |
 | `GET /api/v1/project` | proyecto cargado y si tiene cambios sin guardar |
 | `GET /api/v1/projects` | proyectos disponibles en el directorio permitido |
 | `POST /api/v1/project/load/{nombre}` | carga otro proyecto |
@@ -222,7 +249,20 @@ s.send(JSON.stringify({ type: 'auth', token }))
 
 s.send(JSON.stringify({ type: 'subscribe', universes: [1] }))
 s.send(JSON.stringify({ type: 'function', id: 3, action: 'start' }))
+// start · stop · pause · resume · flash · unflash · override · release
 ```
+
+El dial de tempo tiene sus propios mandos externos: `{type: 'speeddial', id,
+value}` pone un tiempo en milisegundos, y desde un ala MIDI el tap y los pads
+de multiplicar, dividir y reset entran por el encaminador de entrada como
+cualquier otro control.
+
+Las acciones sobre una función son las de un botón: `start`/`stop` con la
+semántica de los marcos solo, `flash`/`unflash` la capa momentánea (con
+`override` y `forceLTP` como banderas), y `override`/`release` esa misma capa
+**enganchada**: la escena se queda pisando lo que corre —canales sustituidos,
+no mezclados— hasta que se suelta. Un override enganchado sale como `flashing`
+en el mensaje `functions`, no como `running`.
 
 **Por qué binario:** 512 canales por universo como array JSON de números pesa
 unas diez veces lo mismo para la misma información.
@@ -265,6 +305,109 @@ Un layout guardado nunca oculta un widget que no menciona: lo que no conozca
 aparece igualmente, en su sitio geométrico. Un botón añadido en QLC+ después de
 guardar el orden seguiría siendo visible — esconderlo sería el peor fallo
 posible, porque el operador ni siquiera sabría qué le falta.
+
+## Agentes
+
+Un agente de Claude Code o de OpenCode puede montar un proyecto entero —patch,
+salida DMX, entrada MIDI, el rig colocado en el escenario 3D, escenas, chasers y
+la consola— y también manejarlo en directo. `AGENTS.md` es lo que lee antes de
+tocar nada: las reglas que no se ven, el camino dorado y cómo comprobar el
+trabajo.
+
+**Si instalaste el `.deb` de escritorio, ya lo tienes**: el servidor MCP y
+`orchidctl` viajan dentro del paquete y quedan en el PATH.
+
+```bash
+claude mcp add orchidlights -- orchidlights-mcp
+```
+
+Sin puerto, y no es un descuido: la carcasa pide el 9998 y coge cualquier puerto
+libre si ese está ocupado, así que un registro con el puerto escrito funcionaría
+hasta el día que no —y ese día hablaría con la mesa de otro—. La carcasa deja
+dicho dónde acabó y las dos herramientas lo leen: se registra una vez y vale
+para siempre.
+
+Desde el repositorio, sin instalar nada:
+
+```bash
+cd mcp && pnpm install && pnpm build
+claude mcp add orchidlights -- node "$PWD/dist/mcp.js"
+```
+
+**Node no viaja en el paquete.** El servidor entero cabe en un fichero de 1 MB;
+el runtime son 119 MB y doblaría el peso del bundle por algo que muchos no van a
+usar. El `.deb` recomienda `nodejs`, así que un `apt install` normal lo trae, y
+si falta, el lanzador lo dice en una frase en vez de fallar de forma críptica.
+
+**Diecinueve herramientas, no ciento cuarenta y cinco.** Una operación por cosa
+que se puede hacer es lo correcto para un API y lo peor posible para un agente:
+con ciento cuarenta y cinco herramientas delante, el contexto se gasta en elegir.
+Aquí hay una por *tarea*, más `orchid_request` para las otras ciento veintiséis, con
+el índice de rutas como recurso para encontrarlas.
+
+**Y un CLI**, porque un agente vive en una shell y ya sabe usarla:
+
+```bash
+orchidctl export -o show.yaml     # el proyecto, como documento
+orchidctl diff show.yaml          # qué haría, sin hacerlo
+orchidctl apply show.yaml --save
+orchidctl dmx 1                   # ¿ha llegado la luz?
+```
+
+Con el AppImage nada queda en el PATH, así que responde él por los dos:
+`OrchidLights_amd64.AppImage --mcp` es el servidor MCP (lo que se registra en
+el agente) y `OrchidLights_amd64.AppImage --ctl status` es `orchidctl status`.
+
+### El proyecto como un archivo de texto
+
+Montar un show llamada a llamada son doscientas peticiones en orden, y un fallo
+a mitad deja el proyecto en un estado que no es ni el viejo ni el nuevo. El
+documento declarativo lo convierte en una operación:
+
+```yaml
+orchidlights: 1
+universes:
+  - name: Universe 1
+    output: {plugin: ArtNet, line: eth0}
+    input:  {plugin: MIDI, line: BCF2000, profile: Behringer BCF2000}
+fixtures:
+  - name: Cabeza L
+    manufacturer: Martin
+    model: MAC Aura
+    mode: Standard
+    universe: 1
+    address: 1
+    stage: {x: 2000, y: 500, z: 4000, rotation: 180, invertTilt: true}
+functions:
+  - name: Azul frontal
+    type: Scene
+    values:
+      - {fixture: Cabeza L, channel: Dimmer, value: 255}
+```
+
+**Se direcciona por nombre, nunca por id**, canales incluidos: los ids los
+reparte el motor, así que un documento que hablara de ellos solo se podría
+aplicar sobre el proyecto del que salió. `channel: Dimmer` además sobrevive a un
+cambio de modo, que es donde `channel: 6` deja de significar lo que decía. (Si
+el perfil tiene dos canales llamados igual, el exportador escribe el número:
+ahí el nombre mentiría.)
+
+**Se valida entero antes de tocar nada** —nombres repetidos, referencias a lo
+que no existe, plugins que esta máquina no tiene, modos que ese perfil no
+tiene—, **aplicarlo dos veces no hace nada la segunda**, y **lo que no menciona
+no se borra**: un documento parcial es lo normal, y leer el silencio como «borra
+el resto» es perder un show por omisión.
+
+`export → apply → export` es **punto fijo**, comprobado en CI sobre el
+`Sample.qxw` que distribuye QLC+: 13 fixtures, 114 funciones, **96 escenas valor
+a valor y 13 chasers paso a paso**. Sin eso, exportar y volver a aplicar sería
+una forma elaborada de corromper un show.
+
+Escribir un cliente que usara el API en serio destapó, de paso, tres huecos que
+desde la web no se veían porque la web ya sabía sortearlos: no se podía parchear
+un dímer genérico —la fixture más común que existe—, el `PUT` de un EFX no
+aceptaba la geometría que devolvía su propio `GET`, y la consola no se podía
+operar sin sostener un WebSocket.
 
 ## Latencia
 
@@ -313,6 +456,23 @@ se guarda con permisos `600`. Rotarlo es borrar el archivo. La comparación es e
 tiempo constante, para que nadie lo deduzca byte a byte midiendo cuánto tarda el
 rechazo. `--require-auth` lo exige también en loopback, para máquinas con
 usuarios locales en los que no se confía.
+
+### Una llave por dispositivo
+
+Ese token es la **llave maestra**: abre todo, el disco y el apagado incluidos,
+y no sale del equipo de la mesa. Cada móvil recibe una llave propia al
+emparejarlo desde la pantalla *Remoto* (o con `orchidctl pair`), con un rol:
+
+| Rol | Puede | No puede |
+|---|---|---|
+| **Operar** | Consola, mesa simple, blackout, grand master, parar todo, mesa en vivo — bajo la máscara de kiosko | Crear ni editar nada, cargar ni guardar proyectos, deshacer |
+| **Diseñar** | Toda la mesa, saltándose la máscara | Disco, apagado, máscara y dispositivos |
+
+La llave se enseña una vez, dentro del QR; el daemon guarda su SHA-256 en
+`~/.orchidlights/devices.json` (permisos `600`). Revocar un dispositivo invalida
+su llave en la siguiente petición y **cierra ya** su WebSocket abierto. Las
+URLs de las puertas de red ya no llevan llave: antes llevaban la maestra, y
+escanear el QR hacía dueño de la mesa a cualquiera.
 
 ## Ejecutar como servicio
 

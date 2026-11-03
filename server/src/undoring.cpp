@@ -40,6 +40,12 @@ namespace
     constexpr int RING = 200;
     constexpr qint64 COALESCE_MS = 1000;
 
+    /* A batch that hears nothing for this long was abandoned -- its client
+       died or forgot to close it -- and is sealed before the next edit, so
+       somebody else's work is not folded into it. Generous: a client applying
+       a document waits on its own requests between edits. */
+    constexpr qint64 BATCH_IDLE_MS = 30000;
+
     UndoRing *s_ring = nullptr;
     thread_local UndoGuard *s_current = nullptr;
 
@@ -182,12 +188,13 @@ void UndoRing::push(Scope scope, const QString &label, const QList<Item> &items)
         return;
 
     const qint64 now = m_clock.elapsed();
+    QList<Entry> &list = target();
 
     /* A drag is one gesture: the same edit on the same things within a
        second folds into the previous entry, before kept, after replaced. */
-    if (m_done.isEmpty() == false)
+    if (list.isEmpty() == false)
     {
-        Entry &last = m_done.last();
+        Entry &last = list.last();
         if (last.scope == scope && last.label == label
             && now - last.stamp < COALESCE_MS
             && last.items.count() == items.count())
@@ -206,6 +213,8 @@ void UndoRing::push(Scope scope, const QString &label, const QList<Item> &items)
                 for (int i = 0; i < items.count(); i++)
                     last.items[i].after = items.at(i).after;
                 last.stamp = now;
+                if (m_batching)
+                    m_batch.stamp = now;
                 m_undone.clear();
                 return;
             }
@@ -217,10 +226,7 @@ void UndoRing::push(Scope scope, const QString &label, const QList<Item> &items)
     entry.label = label;
     entry.items = items;
     entry.stamp = now;
-    m_done.append(entry);
-    if (m_done.count() > RING)
-        m_done.removeFirst();
-    m_undone.clear();
+    append(entry);
 }
 
 void UndoRing::pushConsoleMarker(const QString &label)
@@ -234,14 +240,71 @@ void UndoRing::pushConsoleMarker(const QString &label)
     Item marker;
     marker.after = QByteArrayLiteral("console");
     entry.items.append(marker);
-    m_done.append(entry);
-    if (m_done.count() > RING)
+    append(entry);
+}
+
+QList<UndoRing::Entry> &UndoRing::target()
+{
+    if (m_batching && m_clock.elapsed() - m_batch.stamp > BATCH_IDLE_MS)
+        endBatch();
+    return m_batching ? m_batch.children : m_done;
+}
+
+void UndoRing::append(const Entry &entry)
+{
+    target().append(entry);
+    if (m_batching)
+        m_batch.stamp = entry.stamp;
+    else if (m_done.count() > RING)
         m_done.removeFirst();
     m_undone.clear();
 }
 
+void UndoRing::beginBatch(const QString &label)
+{
+    endBatch();
+
+    m_batching = true;
+    m_batch = Entry();
+    m_batch.scope = BatchScope;
+    m_batch.label = label;
+    m_batch.stamp = m_clock.elapsed();
+}
+
+int UndoRing::endBatch()
+{
+    if (m_batching == false)
+        return 0;
+
+    m_batching = false;
+    Entry batch = m_batch;
+    m_batch = Entry();
+
+    const int edits = batch.children.count();
+    if (edits == 0)
+        return 0;
+
+    batch.stamp = m_clock.elapsed();
+    m_done.append(batch);
+    if (m_done.count() > RING)
+        m_done.removeFirst();
+    return edits;
+}
+
+void UndoRing::clear()
+{
+    m_done.clear();
+    m_undone.clear();
+    m_batching = false;
+    m_batch = Entry();
+}
+
 QString UndoRing::undo(Doc *doc, QString &error)
 {
+    /* Undoing half a batch would leave the document in a state that is
+       neither the old one nor the new: seal it, and undo all of it. */
+    endBatch();
+
     if (m_done.isEmpty())
     {
         error = QStringLiteral("Nothing to undo");
@@ -262,6 +325,8 @@ QString UndoRing::undo(Doc *doc, QString &error)
 
 QString UndoRing::redo(Doc *doc, QString &error)
 {
+    endBatch();
+
     if (m_undone.isEmpty())
     {
         error = QStringLiteral("Nothing to redo");
@@ -281,6 +346,30 @@ QString UndoRing::redo(Doc *doc, QString &error)
 
 bool UndoRing::apply(Doc *doc, const Entry &entry, bool forward, QString &error)
 {
+    if (entry.scope == BatchScope)
+    {
+        /* Forward in the order the edits were made, backward in reverse: a
+           scene created and then given values undoes its values first. */
+        const int count = entry.children.count();
+        for (int step = 0; step < count; step++)
+        {
+            const Entry &child = entry.children.at(forward ? step : count - 1 - step);
+            if (apply(doc, child, forward, error))
+                continue;
+
+            /* One child refused: put back the ones this pass already swapped,
+               so the batch stays whole on whichever side it was. */
+            for (int back = step - 1; back >= 0; back--)
+            {
+                QString ignored;
+                apply(doc, entry.children.at(forward ? back : count - 1 - back),
+                      !forward, ignored);
+            }
+            return false;
+        }
+        return true;
+    }
+
     if (entry.scope == ConsoleScope)
     {
         const bool ok = forward ? m_engine->redoConsole() : m_engine->undoConsole();
@@ -406,7 +495,16 @@ QJsonArray UndoRing::history() const
         QJsonObject one;
         one["label"] = entry.label;
         one["scope"] = int(entry.scope);
-        one["items"] = entry.items.count();
+
+        int items = entry.items.count();
+        if (entry.scope == BatchScope)
+        {
+            items = 0;
+            for (const Entry &child : entry.children)
+                items += child.items.count();
+            one["edits"] = entry.children.count();
+        }
+        one["items"] = items;
         list.append(one);
     }
     return list;

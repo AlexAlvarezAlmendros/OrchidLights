@@ -27,6 +27,8 @@
 #include <QHash>
 #include <QSet>
 
+#include "apiauth.h"
+
 class QHttpServer;
 class QWebSocket;
 class EngineHost;
@@ -72,6 +74,13 @@ public:
     /** Close one connection on purpose. False when the id is nobody. */
     bool closeClient(quint32 id);
 
+    /** Close every connection a paired device holds -- revoked, or its role
+     *  changed. Returns how many. */
+    int closeDevice(quint32 deviceId);
+
+    /** How many live connections a paired device holds right now. */
+    int connectionsOf(quint32 deviceId) const;
+
 private slots:
     void onBeat();
     void onNewConnection();
@@ -102,8 +111,12 @@ private:
     struct Client
     {
         bool authenticated = false;
-        /** Presented the real token: the access mask does not apply to it. */
+        /** Presented the master key or a design device's: the access mask does
+         *  not apply to it. */
         bool trusted = false;
+        /** The paired device whose key opened this socket; 0 for none. */
+        quint32 device = 0;
+        ApiAuth::Role role = ApiAuth::Role::Open;
         QSet<quint32> universes;  //!< 0-based engine ids
 
         /** The operator-facing handle. Never reused within a run, so a kick

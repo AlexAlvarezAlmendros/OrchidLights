@@ -26,7 +26,7 @@
     ],
     "category": "Utility",
     "shortDescription": "Mesa de iluminación DMX con interfaz web",
-    "longDescription": "OrchidLights es una mesa de iluminación DMX: motor QLC+ como daemon, interfaz web servida a cualquier dispositivo de la red, y esta aplicación de escritorio como ventana nativa del mismo origen. El daemon, sus plugins de salida, la librería de fixtures y la interfaz viajan dentro del paquete.",
+    "longDescription": "OrchidLights es una mesa de iluminación DMX: motor QLC+ como daemon, interfaz web servida a cualquier dispositivo de la red, y esta aplicación de escritorio como ventana nativa del mismo origen. El daemon, sus plugins de salida, la librería de fixtures y la interfaz viajan dentro del paquete, junto con orchidctl y el servidor MCP con el que un agente puede montar y manejar un show.",
     "resources": {
       "resources/sidecar": "sidecar"
     },
@@ -34,8 +34,14 @@
       "deb": {
         "desktopTemplate": "orchidlights-desktop.desktop",
         "files": {
-          "/usr/share/mime/packages/orchidlights.xml": "../../platforms/linux/orchidlights-mime.xml"
-        }
+          "/usr/share/mime/packages/orchidlights.xml": "../../platforms/linux/orchidlights-mime.xml",
+          "/usr/bin/orchidlights-mcp": "../scripts/orchid-launcher.sh",
+          "/usr/bin/orchidctl": "../scripts/orchid-launcher.sh"
+        },
+        "recommends": [
+          "nodejs"
+        ],
+        "postInstallScript": "deb-postinst.sh"
       },
       "appimage": {
         "bundleMediaFramework": false

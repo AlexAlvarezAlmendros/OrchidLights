@@ -43,11 +43,12 @@ class EngineHost;
  * through the universe's feedback patch, honouring the widget's custom
  * lower/upper values (the MIDI LED's two states).
  *
- * What is routed today: buttons (Toggle/Flash/Blackout/StopAll), sliders, and
- * the Grand Master. A binding on any other widget type is preserved untouched
- * but not yet routed, and the daemon says so on stderr rather than swallowing
- * it -- a binding that exists in the file and does nothing must at least
- * confess.
+ * What is routed today: buttons (Toggle/Flash/Override/Blackout/StopAll),
+ * sliders, a frame's page turners, a speed dial's tap and its multiply,
+ * divide and reset, and the Grand Master. A binding on any other widget type
+ * is preserved untouched but not yet routed, and the daemon says so on stderr
+ * rather than swallowing it -- a binding that exists in the file and does
+ * nothing must at least confess.
  */
 class InputRouter final : public QObject
 {
@@ -78,7 +79,10 @@ private:
     struct Routed
     {
         VcWidget widget;
-        enum Control { Main, NextPage, PrevPage } control = Main;
+        enum Control { Main, NextPage, PrevPage, Speed } control = Main;
+        /** Speed only: which of the dial's controls this wire holds --
+         *  1 tap, 2 multiply, 3 divide, 4 reset. */
+        int speedInput = 0;
     };
 
     /** (input universe << 32 | channel) -> the controls that input moves. */

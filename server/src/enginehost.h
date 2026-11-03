@@ -252,6 +252,18 @@ public:
     bool setSpeedDial(quint32 widgetId, int milliseconds);
 
     /**
+     * A speed dial worked from outside: 1 tap, 2 multiply, 3 divide, 4 reset.
+     *
+     * Tap tempo lives here and not in a client because the dial's value is the
+     * show's, not a screen's: a tap on a MIDI pad and a tap in a browser have
+     * to land on the same number, and the interval that number comes from is
+     * measured between presses the daemon itself saw.
+     *
+     * False when the project has no such dial.
+     */
+    bool speedDialControl(quint32 widgetId, int inputId);
+
+    /**
      * The functions a solo frame says must stop when this one starts.
      *
      * A solo frame is a frame whose contents are mutually exclusive -- the
@@ -264,6 +276,27 @@ public:
      * case.
      */
     QList<quint32> soloSiblings(quint32 functionId) const;
+
+    /**
+     * Overrides latched from the console.
+     *
+     * A latched override is a scene laid over the rig through the engine's
+     * flash overlay -- override priority, forced LTP -- and left there. Its
+     * channels are written after every running function and replace what
+     * HTP would have merged, which is how a colour palette recolours a
+     * running chaser instead of mixing with it. A flash is the same overlay
+     * held by a finger; the set is what tells the two apart when a solo frame
+     * has to decide what to release. Only what is still flashing counts: a
+     * scene somebody unflashed by another road is not latched any more.
+     */
+    bool isOverrideLatched(quint32 functionId) const;
+    void setOverrideLatched(quint32 functionId, bool latched);
+    QList<quint32> latchedOverrides() const;
+
+    /** Drop every latched override. Stop-all does this: the timer's stop
+     *  leaves overlays alone, and a palette that survives the panic button
+     *  keeps recolouring whatever comes next. */
+    void releaseOverrides();
 
     /** How the operator arranged the console, empty when never arranged. */
     QVector<ConsoleLayout::Page> layout() const;
@@ -493,6 +526,16 @@ private:
 
     /** Console sliders in GrandMaster mode: their value IS the GM's. */
     QSet<quint32> m_gmSliders;
+
+    /** Where each speed dial stands right now, and the taps it is averaging.
+     *  Runtime state: the file keeps the dial's resting <Time>, and multiply,
+     *  divide and reset are measured from that. */
+    QHash<quint32, int> m_dialMs;
+    QHash<quint32, qint64> m_dialLastTap;
+    QHash<quint32, QVector<int>> m_dialTaps;
+
+    /** Scenes latched over the rig from Override buttons. */
+    QSet<quint32> m_latchedOverrides;
 
     /** Adjust-mode sliders: widget id -> (function id, attribute index). */
     QHash<quint32, QPair<quint32, int>> m_adjustSliders;

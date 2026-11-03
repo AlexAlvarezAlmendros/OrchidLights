@@ -5,8 +5,8 @@
 #   server/test/remote-smoke.sh [path-to-orchidlightsd] [path-to-project.qxw]
 #
 # Two daemons, two truths. One on --listen-all: /api/v1/remote is closed
-# without the token, and with it names the machine's real doors -- URL with
-# the token aboard -- plus every live WebSocket, each of which can be closed
+# without the token, and with it names the machine's real doors -- URLs with
+# no key aboard -- plus every live WebSocket, each of which can be closed
 # on purpose (the node half watches the close arrive on the wire). One on
 # loopback: no doors at all, because a QR code to a URL that does not answer
 # is worse than none.
@@ -77,13 +77,15 @@ assert state['authRequired'] is True, "listen-all must demand the token"
 assert state['port'] == port, f"port: {state['port']} != {port}"
 assert state['clients'] == [], f"nobody connected yet: {state['clients']}"
 
-# A CI runner has a network interface; a door without the token in its URL
-# would be a lock shown without its key.
+# A CI runner has a network interface. The door carries NO key: the master
+# key in a QR made every phone that scanned it the owner of the desk, and a
+# phone gets a key of its own by pairing (devices-smoke.sh).
 assert len(state['addresses']) >= 1, f"no addresses: {state['addresses']}"
 for door in state['addresses']:
     assert door['url'].startswith('http://'), door['url']
     assert f":{port}/" in door['url'], door['url']
-    assert f"#token={token}" in door['url'], f"the join URL carries no token: {door['url']}"
+    assert 'token=' not in door['url'], f"a door hands out a key: {door['url']}"
+    assert token not in door['url'], f"a door hands out the master key: {door['url']}"
     assert door['ip'] and door['ip'] != '127.0.0.1', f"loopback is not a door: {door['ip']}"
 PY
 

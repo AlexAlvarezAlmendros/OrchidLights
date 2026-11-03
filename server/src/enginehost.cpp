@@ -592,6 +592,9 @@ bool EngineHost::dumpToScene(const QString &name, quint32 sceneId, bool nonZeroO
 
 void EngineHost::stopEverything(int fadeMs)
 {
+    /* Not a running function, so the timer's stop-all would leave it up. */
+    releaseOverrides();
+
     if (fadeMs > 0)
         m_doc->masterTimer()->fadeAndStopAll(fadeMs);
     else
@@ -634,6 +637,10 @@ void EngineHost::newProject()
     m_redo.clear();
     m_doc->resetModified();
 
+    m_latchedOverrides.clear();
+    m_dialMs.clear();
+    m_dialLastTap.clear();
+    m_dialTaps.clear();
     emit projectReplaced();
 }
 
@@ -929,6 +936,10 @@ bool EngineHost::loadProject(const QString &fileName, QString &errorMessage)
 
     /* Announced either way: a load that failed cleared the document, and a
        client still showing the old show is showing something that is gone. */
+    m_latchedOverrides.clear();
+    m_dialMs.clear();
+    m_dialLastTap.clear();
+    m_dialTaps.clear();
     emit projectReplaced();
 
     return ok;
@@ -1030,6 +1041,9 @@ bool EngineHost::setSpeedDial(quint32 widgetId, int milliseconds)
                     function->setDuration(scaled(target.duration));
             }
 
+            /* Where the dial stands now, so multiply and divide start from the
+               value somebody actually set and not from the file's. */
+            m_dialMs.insert(widgetId, milliseconds);
             return true;
         }
 
@@ -1038,6 +1052,122 @@ bool EngineHost::setSpeedDial(quint32 widgetId, int milliseconds)
     }
 
     return false;
+}
+
+bool EngineHost::speedDialControl(quint32 widgetId, int inputId)
+{
+    VcWidget root;
+    if (VirtualConsole::parse(m_preserved.sections, root) == false)
+        return false;
+
+    const VcWidget *dial = nullptr;
+    QVector<const VcWidget *> pending{&root};
+    while (pending.isEmpty() == false && dial == nullptr)
+    {
+        const VcWidget *widget = pending.takeLast();
+        if (widget->id == widgetId && widget->type == QStringLiteral("speeddial"))
+            dial = widget;
+        for (const VcWidget &child : widget->children)
+            pending.append(&child);
+    }
+
+    if (dial == nullptr)
+        return false;
+
+    /* The file's resting position is what reset goes back to. */
+    const int base = dial->speedMs > 0 ? dial->speedMs : 1000;
+    int milliseconds = m_dialMs.value(widgetId, base);
+
+    switch (inputId)
+    {
+    case 1:
+    {
+        /* Tap. Two presses make an interval; the value is the average of the
+           last few, so one shaky tap does not throw the show off. A gap
+           outside the musical range starts a new count instead of averaging
+           in the pause -- taps three minutes apart are not a tempo. */
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const qint64 previous = m_dialLastTap.value(widgetId, 0);
+        m_dialLastTap.insert(widgetId, now);
+
+        const qint64 gap = now - previous;
+        if (previous == 0 || gap < 100 || gap > 3000)
+        {
+            m_dialTaps.remove(widgetId);
+            return true;
+        }
+
+        QVector<int> &taps = m_dialTaps[widgetId];
+        taps.append(int(gap));
+        while (taps.size() > 4)
+            taps.removeFirst();
+
+        qint64 total = 0;
+        for (int interval : taps)
+            total += interval;
+        milliseconds = int(total / taps.size());
+        break;
+    }
+    case 2:
+        milliseconds *= 2;      // half speed: everything takes twice as long
+        break;
+    case 3:
+        milliseconds /= 2;      // double speed
+        break;
+    case 4:
+        milliseconds = base;
+        m_dialTaps.remove(widgetId);
+        m_dialLastTap.remove(widgetId);
+        break;
+    default:
+        return false;
+    }
+
+    const int floor = qMax(dial->speedMin, 50);
+    const int ceiling = dial->speedMax > floor ? dial->speedMax : 60000;
+    return setSpeedDial(widgetId, qBound(floor, milliseconds, ceiling));
+}
+
+bool EngineHost::isOverrideLatched(quint32 functionId) const
+{
+    if (m_latchedOverrides.contains(functionId) == false)
+        return false;
+
+    /* The set records intent; the engine records fact. A scene unflashed
+       behind our back -- a flash button on the same scene let go, say -- is
+       not latched, whatever the set remembers. */
+    const Function *function = m_doc->function(functionId);
+    return function != nullptr && function->flashing();
+}
+
+void EngineHost::setOverrideLatched(quint32 functionId, bool latched)
+{
+    if (latched)
+        m_latchedOverrides.insert(functionId);
+    else
+        m_latchedOverrides.remove(functionId);
+}
+
+QList<quint32> EngineHost::latchedOverrides() const
+{
+    QList<quint32> latched;
+    for (quint32 id : m_latchedOverrides)
+    {
+        if (isOverrideLatched(id))
+            latched.append(id);
+    }
+    return latched;
+}
+
+void EngineHost::releaseOverrides()
+{
+    for (quint32 id : latchedOverrides())
+    {
+        Function *function = m_doc->function(id);
+        if (function != nullptr)
+            function->unFlash(m_doc->masterTimer());
+    }
+    m_latchedOverrides.clear();
 }
 
 QList<quint32> EngineHost::soloSiblings(quint32 functionId) const
