@@ -19,6 +19,7 @@ import { RemotePanel } from './remote'
 vi.mock('./api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./api')>()),
   api: {
+    access: vi.fn(),
     remote: vi.fn(),
     kickRemote: vi.fn(),
     devices: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('./api', async (importOriginal) => ({
   },
 }))
 
+const access = vi.mocked(api.access)
 const remote = vi.mocked(api.remote)
 const kickRemote = vi.mocked(api.kickRemote)
 const devices = vi.mocked(api.devices)
@@ -87,8 +89,23 @@ beforeEach(() => {
   /* Reset wipes the queued one-shot answers a previous test left behind. */
   vi.resetAllMocks()
   localStorage.clear()
+  access.mockResolvedValue(asRole('master'))
   devices.mockResolvedValue({ devices: [] })
 })
+
+/** What GET /access says to a caller: the desk's whole mask, and its role. */
+function asRole(role: 'open' | 'master' | 'design' | 'operate') {
+  return {
+    role,
+    fixtures: true,
+    functions: true,
+    vcControl: true,
+    vcEditing: true,
+    simpleDesk: true,
+    show: true,
+    io: true,
+  }
+}
 
 function stubClipboard(writeText: (text: string) => Promise<void>) {
   Object.defineProperty(navigator, 'clipboard', {
@@ -325,6 +342,21 @@ describe('paired devices', () => {
     await screen.findByText(/se emparejan desde el equipo de la mesa/)
     expect(screen.queryByRole('button', { name: 'Emparejar' })).toBeNull()
   })
+
+  it.each(['open', 'design', 'operate'] as const)(
+    'does not even ask for the list as %s, so no 401 lands in the console',
+    async (role) => {
+      remote.mockResolvedValue(state())
+      access.mockResolvedValue(asRole(role))
+      const { rerender } = render(<RemotePanel revision={0} />)
+
+      await screen.findByText(/se emparejan desde el equipo de la mesa/)
+      // And not on the refetch a connection coming or going triggers either.
+      rerender(<RemotePanel revision={1} />)
+      await screen.findByText(/se emparejan desde el equipo de la mesa/)
+      expect(devices).not.toHaveBeenCalled()
+    },
+  )
 
   it('revokes on the second press, never the first', async () => {
     remote.mockResolvedValue(state())

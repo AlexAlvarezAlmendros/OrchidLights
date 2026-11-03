@@ -90,11 +90,22 @@ function DevicesSection({ revision, listening }: { revision: number; listening: 
   const [arming, setArming] = useState<number | null>(null)
 
   const refresh = useCallback(() => {
+    /* Ask who this is before asking for the list. Only the master key may
+       read it, and a 401 is logged by the browser whatever the code does with
+       it: on every revision bump, a device's console filled with errors for a
+       door it was always going to find shut. The 401 path stays for a daemon
+       too old to say its caller's role. */
     api
-      .devices()
-      .then((next) => {
-        setDevices(next.devices)
-        setMasterOnly(false)
+      .access()
+      .then((access) => {
+        if (access.role !== undefined && access.role !== 'master') {
+          setMasterOnly(true)
+          return
+        }
+        return api.devices().then((next) => {
+          setDevices(next.devices)
+          setMasterOnly(false)
+        })
       })
       .catch((cause: unknown) => {
         if (cause instanceof Unauthorized) setMasterOnly(true)

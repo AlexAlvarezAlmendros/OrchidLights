@@ -93,8 +93,12 @@ ws.onmessage = (event) => {
   ) {
     /* The access-mask chapter PROVOKES a 403 on purpose; the browser logs
        every non-2xx resource. That one expected line is not an error. */
-    if (message.params.entry.text.includes('status of 403') === false)
-      consoleErrors.push(message.params.entry.text)
+    /* With its URL: "status of 401" three times, and nothing else, sent a
+       failure hunting through every screen for which request it was. */
+    if (message.params.entry.text.includes('status of 403') === false) {
+      const { text, url } = message.params.entry
+      consoleErrors.push(url ? `${text} (${new URL(url).pathname})` : text)
+    }
   }
 
   /* JavaScript dialogs get answered, the way the human they are for would.
