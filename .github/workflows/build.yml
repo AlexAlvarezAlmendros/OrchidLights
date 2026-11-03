@@ -409,6 +409,12 @@ jobs:
           # rendered four of them were on screen.
           ./server/test/ui-smoke.sh orchidlightsd resources/samples/Sample.qxw
 
+      # The assistant end to end: the real Anthropic SDK in Chrome, streaming
+      # through the daemon's proxy, its tools writing to the desk -- against a
+      # provider that plays the model from a script, so no token is spent.
+      - name: Smoke test - the assistant builds what it says, through the proxy
+        run: ./server/test/ai-ui-smoke.sh orchidlightsd
+
       - name: Smoke test - an unresolvable fixture is reported, not swallowed
         run: |
           set -euo pipefail

@@ -3830,3 +3830,200 @@ button.primary:disabled {
   gap: 0.35rem;
   align-items: center;
 }
+
+/* ---- The assistant's conversation -------------------------------------- */
+
+/* A column that fills the screen: the log scrolls, the composer stays under
+   the thumb. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 52rem;
+  margin: 0 auto;
+  min-height: calc(100dvh - 9rem);
+}
+
+.chat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.9rem;
+}
+
+.chat-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.chat-head button {
+  margin-left: auto;
+}
+
+.chat-log {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.chat-intro {
+  max-width: 34rem;
+  line-height: 1.5;
+}
+
+.chat-item {
+  padding: 0.7rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  line-height: 1.5;
+}
+
+.chat-item p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What the person said sits on the right and carries the accent, so a long
+   turn of tool steps never hides where the question was. */
+.chat-item[data-role="persona"] {
+  align-self: flex-end;
+  max-width: 85%;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.chat-thinking {
+  margin-bottom: 0.4rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.chat-thinking summary {
+  cursor: pointer;
+}
+
+/* A tool step: one quiet line, its input a tap away. Quiet because there are
+   many of them; never hidden, because they are the changes. */
+.chat-tool {
+  border-left: 3px solid var(--border);
+  padding: 0.25rem 0 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.chat-tool[data-estado="corriendo"] {
+  border-left-color: var(--accent);
+}
+
+.chat-tool[data-estado="fallo"] {
+  border-left-color: var(--danger);
+}
+
+.chat-tool summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+}
+
+.chat-tool-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chat-tool pre {
+  max-height: 18rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.chat-changes {
+  margin: 0.4rem 0 0;
+  padding-left: 1rem;
+}
+
+.chat-changes [data-kind="create"] {
+  color: var(--live);
+}
+
+.chat-changes [data-kind="delete"] {
+  color: var(--danger);
+}
+
+.chat-notice {
+  display: block;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.chat-attachments img {
+  height: 64px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.chat-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.4rem;
+}
+
+.chat-file {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+/* Held at the bottom of the screen while the log scrolls behind it. */
+.chat-composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0 0.4rem;
+  background: var(--bg);
+}
+
+.chat-composer textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  padding: 0.6rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.chat-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.chat-actions button {
+  min-height: 44px;
+  min-width: 7rem;
+}
+
+.chat-empty {
+  justify-content: center;
+}

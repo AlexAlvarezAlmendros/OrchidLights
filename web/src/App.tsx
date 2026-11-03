@@ -38,6 +38,7 @@ import { Setup } from './setup'
 import { leaveKiosk, resolveClose, takePendingOpen, toggleFullscreen } from './shell'
 
 const Stage3D = lazy(() => import('./stage3d'))
+const Conversacion = lazy(() => import('./conversacion'))
 import { RemotePanel } from './remote'
 import { Slider } from './slider'
 import { keySequenceOf, typingSomewhere } from './teclas'
@@ -875,6 +876,8 @@ export function App() {
       planta: 'plan',
       remoto: 'remote',
       remote: 'remote',
+      asistente: 'assistant',
+      assistant: 'assistant',
     }
     const segment = window.location.hash
       .replace(/^#/, '')
@@ -1045,6 +1048,8 @@ export function App() {
             ...(access.fixtures ? (['plan'] as View[]) : []),
             ...(access.fixtures ? (['stage3d'] as View[]) : []),
             ...(access.io ? (['remote'] as View[]) : []),
+            /* Building a show takes both: the patch and the functions. */
+            ...(access.fixtures && access.functions ? (['assistant'] as View[]) : []),
           ]}
           onView={(target) => {
             setView(target)
@@ -1426,6 +1431,12 @@ export function App() {
         ) : view === 'remote' ? (
           <main className="console">
             <RemotePanel revision={remoteRev} />
+          </main>
+        ) : view === 'assistant' ? (
+          <main className="console">
+            <Suspense fallback={<p className="hint">Cargando el asistente…</p>}>
+              <Conversacion />
+            </Suspense>
           </main>
         ) : view === 'plan' ? (
           <main className="console">

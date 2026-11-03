@@ -140,6 +140,34 @@ const EN: Record<string, string> = {
   peticiones: 'requests',
   'tokens de entrada': 'input tokens',
   'de salida': 'output',
+  Adjuntar: 'Attach',
+  Aplicar: 'Apply',
+  'Configura el proveedor y la clave en Ajustes para empezar.':
+    'Set the provider and the key in Settings to start.',
+  'Cuéntale qué hay en la sala y qué quieres: fotos del espacio, el plano, qué foco va en cada sitio. Monta el proyecto aquí delante; los cambios se deshacen con ↶. Guardar es tuyo.':
+    'Tell it what is in the room and what you want: photos of the space, the plan, which lamp goes where. It builds the project here in front of you; changes are undone with ↶. Saving is yours.',
+  'El asistente no está configurado en esta mesa. Se hace desde su equipo, con la llave maestra.':
+    "The assistant is not set up on this desk. That is done from the desk's machine, with its master key.",
+  Ensayar: 'Rehearse',
+  'Entradas y salidas': 'Inputs and outputs',
+  Enviar: 'Send',
+  Error: 'Error',
+  'Este proveedor no lee PDF: exporta el plano como imagen.':
+    'This provider does not read PDF: export the plan as an image.',
+  'Leer el DMX': 'Read the DMX',
+  Librería: 'Library',
+  'Mapa del universo': 'Universe map',
+  Mensaje: 'Message',
+  Mirar: 'Look',
+  'Mirar el proyecto': 'Look at the project',
+  'Nueva conversación': 'New conversation',
+  'Otro proveedor o modelo: conversación nueva.': 'Another provider or model: new conversation.',
+  'Parado.': 'Stopped.',
+  Parar: 'Stop',
+  'Probar con luz': 'Test with light',
+  'Qué quieres montar o cambiar…': 'What do you want to build or change…',
+  Razonamiento: 'Reasoning',
+  'trabajando…': 'working…',
 }
 
 export function t(text: string): string {
