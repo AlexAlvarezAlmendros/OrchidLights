@@ -609,6 +609,266 @@ resumen en el README:
 > quien da el token da la mesa. Lo que sí hay es undo — cada lote es una entrada
 > — y `dryRun`, que es la diferencia entre ensayar y aprender rompiendo.
 
+---
+
+### F10 — Asistente: montar y retocar el show hablando
+
+> F9 convirtió el proyecto en un documento que un agente de fuera —Claude Code,
+> OpenCode— puede leer, ensayar y aplicar. Pero quien ilumina una boda no tiene
+> una terminal con Claude Code: tiene la mesa, un móvil, cuatro fotos de la sala
+> y un plano en PDF. F10 mete el agente **dentro** de la mesa: le das las fotos,
+> el plano y qué es cada foco, y monta el proyecto delante de ti; luego le pides
+> cambios.
+>
+> Y el momento que más importa es el propio evento. «Calienta los washes de la
+> pista» a las 23:40 no puede significar abrir el portátil, y menos aún un
+> pestañeo en la sala. Pedir un cambio en directo tiene que ser seguro **por
+> construcción**, no por lo bien que se porte el modelo.
+
+**Decidido (2026-11-03):**
+
+- **La clave vive en el daemon** y el daemon hace de proxy hacia el proveedor.
+  Nunca vuelve a un cliente: un móvil emparejado usa el asistente sin verla.
+- **En directo, lo seguro se aplica solo y lo demás espera.** Lo que no afecta
+  a nada que esté corriendo entra en la mesa sin preguntar; lo que toca algo en
+  marcha, el patch, la consola existente o borra, espera un OK con vista previa
+  en ciego.
+- **Pide cualquiera con rol; aplica diseño o maestra.** Un móvil de operador
+  puede pedir cambios y ver la propuesta, pero no aplica nada —ni lo seguro—:
+  su petición espera a un dispositivo de diseño o a la maestra. Configurar la
+  clave, el modelo y el tope de gasto, solo la maestra.
+
+#### Dónde vive cada pieza, y por qué
+
+**El bucle del agente corre en la web.** No en el daemon y no en un proceso
+Node aparte:
+
+- El motor del documento —exportar, diff, validar entero, aplicar como un
+  undo— ya está escrito en TypeScript en `mcp/src/spec`, probado como punto
+  fijo contra el Sample de QLC+, y solo usa `fetch`: corre en el navegador tal
+  cual. Reescribirlo en C++ sería el bug clásico de las dos copias.
+- Un proceso Node pediría Node en tiempo de ejecución, que a propósito no viaja
+  en el paquete (F9). El asistente funcionaría en el `.deb` con `nodejs` y no
+  en un AppImage pelado ni en una Raspberry sin él.
+- **Lo que se paga:** el bucle vive en la pestaña. Cerrarla para el turno en
+  curso. Se acepta porque cada aplicación es atómica —se valida entero y es una
+  sola entrada de undo—, así que lo que se pierde es el turno, nunca medio show;
+  y la conversación vive en el daemon (F10.3), así que reabrir continúa.
+
+**El daemon guarda la clave y hace de proxy**, sin entender de modelos:
+
+- `~/.orchidlights/ai.json`, permisos `600`, como `api-token` y `devices.json`.
+  `GET /api/v1/ai/settings` dice qué proveedor y qué modelo, y de la clave solo
+  `configured` y sus cuatro últimos caracteres.
+- `POST /api/v1/ai/proxy/{proveedor}/…` reenvía el cuerpo al proveedor, **quita
+  la cabecera de autenticación que traiga el cliente y pone la suya**. Con una
+  **lista de rutas permitidas** —`/v1/messages` en Anthropic,
+  `/chat/completions` en los compatibles con OpenAI—: un proxy que reenviase
+  cualquier ruta con la clave del dueño sería un relé abierto a su cuenta,
+  ficheros y administración incluidos.
+- **Respuesta en streaming**, comprobado (2026-11-03). Un turno largo sin
+  streaming roza los timeouts, así que se probó antes de planear nada encima,
+  con un proxy mínimo en Qt 6.4 entre `curl` y un proveedor falso que suelta un
+  evento cada 400 ms:
+  - El manejador recibe el `QHttpServerResponder` por valor, lo **mueve** a un
+    objeto que vive lo que la `QNetworkReply`, y escribe a mano la línea de
+    estado, las cabeceras y cada trozo con `Transfer-Encoding: chunked`. Los
+    eventos llegan al cliente cada 400 ms, no al final.
+  - **Si el navegador corta, se corta el proveedor**: un turno abandonado deja
+    de gastar tokens en el acto. El responder guarda un puntero crudo al socket,
+    que Qt borra al desconectar, y Qt 6.4 no lo expone; pero el manejador corre
+    dentro del `readyRead` de ese socket, así que `sender()` lo da —protegido en
+    `QObject` y con `QHttpServer` `final`, se llega por un puntero a miembro—.
+    Con un `QPointer` a él no se escribe en un socket muerto, y su
+    `disconnected` aborta la petición de salida. El proxy sigue sirviendo
+    después.
+  - Contra `api.anthropic.com` de verdad, sin clave válida: el TLS funciona y el
+    401 llega al cliente tal cual, con su JSON, que es lo que el SDK necesita
+    para dar un error con tipo.
+  - Atado a Qt 6.4: una versión que cambie el responder lo rompe, y por eso
+    `ai-smoke.sh` comprueba el troceado y el corte, no solo la respuesta.
+- **TLS en el paquete.** Es la primera petición saliente del daemon, y Qt la
+  hace con el plugin `tls/libqopensslbackend.so`. Si no viaja en el sidecar,
+  el asistente funciona en el árbol de fuentes y falla en el `.deb` con «TLS
+  not available»: `collect-sidecar.sh` lo copia y **lo comprueba**, como ya
+  hace con el decodificador de audio.
+
+**Dos adaptadores de proveedor, en TypeScript:**
+
+- **Anthropic** (Messages API), con el SDK oficial `@anthropic-ai/sdk`
+  apuntado al proxy con `baseURL`. Modelo por defecto: **Claude Opus 5.5**
+  (`claude-opus-5-5`), con `effort` explícito —su valor por defecto es
+  `medium`— y elegible otro en Ajustes.
+- **Compatible con OpenAI** (Chat Completions), con el SDK oficial `openai`
+  y el mismo truco. Cubre ChatGPT, Gemini por su endpoint compatible,
+  OpenRouter y modelos locales con **Ollama o LM Studio**, que es la única
+  forma de tener asistente en una sala sin internet.
+- La calidad del modelo no sostiene la seguridad: validar, clasificar el riesgo
+  y decidir qué se aplica solo lo hace **nuestro código**, no el prompt. Un
+  modelo local flojo da peores propuestas, no un directo roto.
+- Los SDKs y el asistente entero van en un **chunk aparte**, como el 3D: quien
+  no lo abre no los descarga.
+
+#### Lo que ve el modelo
+
+El proyecto de la boda exportado ocupa **210 KB, unos 60–70k tokens**, y el
+99 % son valores de escena. Mandarlo entero en cada turno es caro y lento, así
+que el modelo ve:
+
+- **Instrucciones fijas** —las reglas de `AGENTS.md` que muerden (nombres y no
+  ids, canales desde 0 y direcciones desde 1, plugins literales, HTP y las
+  paletas `override`, marcos solo anidados), el formato del documento y las
+  reglas de cada modo— y **la lista de herramientas, siempre en el mismo
+  orden**. Son el prefijo que se cachea: un byte distinto ahí lo invalida todo.
+- **Un índice del proyecto**: fixtures con modo, dirección y sitio, grupos,
+  funciones por nombre, tipo, carpeta y si corren, el árbol de la consola con
+  textos y colores, y el escenario. Unos pocos miles de tokens, y el detalle de
+  algo concreto se pide con una herramienta.
+- **El estado que cambia** —entrar en modo evento, qué está corriendo— como
+  mensajes de sistema a mitad de conversación, que en los modelos de Anthropic
+  que los admiten no rompen la caché; en los demás, como nota en el turno del
+  usuario.
+- **Conversación de solo añadir.** Editar un turno anterior invalida el
+  razonamiento guardado de los modelos actuales; para eventos largos, la
+  compactación del proveedor o recortar resultados de herramientas viejos, no
+  reescribir la historia.
+
+#### Las herramientas
+
+Pocas y con forma de tarea, como las 19 del MCP, de las que se reutilizan las
+descripciones donde coinciden:
+
+| Herramienta | Qué hace | En evento |
+|---|---|---|
+| `ver_proyecto` | El índice | ✓ |
+| `ver` | Una fixture, función, grupo o widget entero, en forma de documento | ✓ |
+| `buscar_en_libreria` · `modos` | Fabricante, modelo y modo **exactos**, con sus canales | ✓ |
+| `mapa_universo` | Direcciones libres y ocupadas | ✓ |
+| `proponer` | Un documento parcial → validación entera, plan y clase de riesgo de cada cambio. **Nunca escribe** | ✓ |
+| `aplicar` | Aplica lo propuesto como un lote de undo | Solo lo que el código clasifica como seguro |
+| `probar` | Arranca una función unos segundos y lee el DMX de vuelta | ✗ |
+| `leer_dmx` | El universo después del grand master | ✓ |
+
+En modo evento el agente **no tiene** herramientas de directo: ni arrancar ni
+parar, ni blackout, ni `/live`, ni abrir, guardar o deshacer. Y nunca guarda
+por su cuenta, en ningún modo: guardar es del humano (regla 2 de `AGENTS.md`).
+
+#### Lo que le das
+
+- **Fotos y planos** desde la cámara del móvil o desde archivo, reducidas en el
+  navegador antes de salir —una foto de 12 MP no tiene que cruzar el wifi de la
+  sala como 6 MB de base64—.
+- **Planos en PDF:** Anthropic los lee tal cual; para los compatibles con
+  OpenAI se rasteriza la página. Esto segundo, después.
+- **La escala la pregunta, no la supone.** El escenario va en metros y las
+  posiciones en milímetros: si el plano no trae escala, el agente pide una
+  medida conocida («¿cuánto mide la pista de ancho?») antes de colocar nada.
+  Igual con la dirección DMX y el modo de cada foco: si no se ven, se preguntan.
+- Las imágenes se guardan con la conversación en el daemon, para seguir desde
+  otro dispositivo sin volver a subirlas, y **fuera del `.qxw`**, que no se toca.
+
+#### Modo evento: qué es «seguro»
+
+Lo decide el código a partir del plan de `proponer`, del conjunto de funciones
+corriendo y de su **cierre por dependencias**: un chaser en marcha arrastra las
+escenas de sus pasos, una colección a sus miembros, un show a sus pistas.
+
+| Cambio | Clase | En evento |
+|---|---|---|
+| Función nueva, grupo nuevo, widget nuevo **al final** de su marco, posición en el escenario | nuevo | Se aplica solo |
+| Editar una función que ni corre ni usa nada de lo que corre | quieto | Se aplica solo |
+| Fixture nueva en direcciones libres y fuera de grupos en uso | nuevo | Se aplica solo |
+| Editar algo que corre o que usa lo que corre | en marcha | Espera tu OK |
+| Cambiar un widget que ya existe: texto, color, función, entrada MIDI, tecla, sitio | consola | Espera: es la mesa que el operador tiene bajo los dedos |
+| Dirección, modo o universo de una fixture; entrada o salida de un universo | patch | Espera |
+| Borrar | borra | Espera siempre; `prune` no existe en evento |
+
+- Lo seguro entra como **una** entrada de undo y lo anuncia un aviso con su
+  botón de deshacer: «Asistente: 3 escenas y 3 botones en COLOR · Deshacer».
+- Los widgets nuevos van al final de su marco, y la cuadrícula fluye en orden
+  del documento: **ningún botón que ya estaba cambia de sitio**.
+- Lo que espera queda como **propuesta**: la lista de cambios en palabras, con
+  su clase, y la vista previa en ciego (F10.5).
+- **Al aplicar se vuelve a calcular el plan.** Entre proponer y aplicar pueden
+  pasar diez minutos, un undo y una edición a mano; si el plan nuevo no es el
+  que se aprobó, se vuelve a enseñar en vez de aplicar otra cosa.
+
+#### Permisos
+
+| | Maestra | Diseño | Operar |
+|---|---|---|---|
+| Configurar proveedor, modelo, clave y tope | ✓ | ✗ | ✗ |
+| Abrir el asistente y pedir | ✓ | ✓ | ✓ |
+| Modo montaje: aplica según avanza y prueba con luz | ✓ | ✓ | ✗ |
+| En evento: lo seguro se aplica solo | ✓ | ✓ | ✗ — todo queda como propuesta |
+| Aplicar o descartar propuestas | ✓ | ✓ | ✗ |
+
+Y una casilla más en la **máscara del kiosko**, *Asistente*, para un kiosko
+que no debe ni pedir.
+
+#### Fases
+
+- [ ] **F10.1 — La clave y el proxy.**
+  - `GET/PUT /ai/settings` y `POST /ai/proxy/{proveedor}/…` con la lista de
+    rutas permitidas, cada handler con su comprobación de rol, documentados
+    en `openapi.yaml`. Sin `UndoGuard`: no editan el documento.
+  - **Tope de gasto en el daemon**: peticiones por dispositivo y día, y los
+    tokens leídos del `usage` de cada respuesta. Una clave compartida con todos
+    los móviles de operador sin tope es una factura esperando a pasar.
+  - El plugin TLS en el sidecar, y su comprobación.
+  - `ai-smoke.sh` contra un **proveedor falso** en local: la clave llega al
+    proveedor y no al cliente, la cabecera del cliente no pasa, una ruta fuera
+    de la lista da 403, cada rol puede lo que dice la tabla, el tope corta, y el
+    streaming llega troceado.
+  - En Ajustes: proveedor, modelo, clave y un botón **Probar** que hace una
+    petición mínima y dice si funciona.
+- [ ] **F10.2 — El asistente en modo montaje.**
+  - Una vista nueva, *Asistente*: conversación, adjuntos y, a cada paso, qué
+    herramienta usó y qué cambió.
+  - El motor del documento compartido entre `mcp/` y `web/` —un alias de Vite
+    a `mcp/src`, o un paquete del workspace—, sin copiarlo.
+  - Los dos adaptadores y las herramientas. Cada turno que escribe es un lote
+    de undo.
+  - Tests con respuestas del proveedor grabadas: el bucle, la validación de la
+    entrada de cada herramienta y que una entrada truncada se devuelve como
+    error y no se ejecuta.
+  - **Un conjunto fijo de pedidos para medirlo** —«cuatro PAR LED RGBW en el
+    truss frontal», el plano de la boda con sus siete focos— y el documento
+    resultante comparado con lo esperado. Sin eso, cambiar el prompt o el modelo
+    es probar a ciegas.
+- [ ] **F10.3 — Conversaciones y propuestas en el daemon.**
+  - Hilos de solo añadir en `~/.orchidlights/assistant/<proyecto>/`, con sus
+    imágenes; empezar en el portátil y seguir desde el móvil.
+  - Cola de propuestas: quien pide la crea, diseño o maestra la aplica o la
+    descarta, y el WebSocket avisa a los dispositivos de diseño de que hay una
+    esperando. Es lo que hace que un operador pueda pedir.
+- [ ] **F10.4 — Modo evento.**
+  - El interruptor, y lo que cambia: herramientas de directo fuera, `aplicar`
+    solo con lo seguro.
+  - La clasificación de la tabla, con el cierre por dependencias, y sus tests:
+    cada fila con su caso, y el caso feo de un chaser en marcha cuyo paso 3 es
+    la escena que se pide cambiar.
+  - Aviso con deshacer para lo que entra solo; propuesta para lo que espera;
+    replanificar al aplicar.
+  - Después, si hace falta: **«aplicar cuando pare»** para lo que solo espera
+    porque está en marcha.
+- [ ] **F10.5 — Vista previa en ciego en el 3D.**
+  - `Stage3D` ya pinta a partir de un `Record<number, Uint8Array>`: se le da el
+    universo calculado desde el borrador en vez del que llega por el WebSocket.
+    Escenas exactas, chasers paso a paso; EFX, matrices RGB y shows no se
+    previsualizan, y la vista lo dice en vez de enseñar algo falso.
+  - Marcada **CIEGO** de forma que nadie la confunda con la sala.
+
+#### Lo que no hace, dicho aquí
+
+- **No crea perfiles de fixture.** Si un foco no está entre los 1.735 de la
+  librería, lo dice y propone un genérico (dímer, RGB, RGBW) con los canales que
+  le digas.
+- **No ve la sala en directo.** Ve las fotos que le das, no una cámara.
+- **No edita el cuerpo de un Show**, por la misma razón que el documento no lo
+  lleva.
+- **No guarda.** Ni en montaje.
+
 ## 5. Riesgos
 
 
@@ -619,6 +879,10 @@ resumen en el README:
 | 3 | **Compatibilidad de proyectos.** Hay shows en producción | No tocar el formato `.qxw`. Test de round-trip en CI con proyectos reales |
 | 4 | **Tiempo real en el navegador.** 512 canales × N universos × 50 Hz | Frames binarios, delta encoding, throttle configurable, suscripción por universo |
 | 5 | **Fiabilidad en directo.** Un navegador no es una mesa de luces | El daemon sigue emitiendo aunque el navegador muera. La unidad systemd lo reinicia (`Restart=on-failure`); la carcasa de escritorio, a propósito, **no**: vigila el proceso y dice que el motor se cayó, porque un reinicio callado a mitad de show convierte una catástrofe en un misterio. Blackout y Stop All por MIDI/OSC, independientes de la capa web |
+| 6 | **El asistente inventa.** Una dirección DMX, un modelo de foco que suena bien, la escala de un plano | El documento se valida entero antes de tocar nada (F9); la librería da nombres exactos; las instrucciones piden preguntar en vez de suponer; y en evento lo que no es seguro espera a un humano |
+| 7 | **Gasto sin control.** Una clave compartida con todos los móviles de operador | Tope por dispositivo y día en el daemon, gasto visible en Ajustes, modelo elegible |
+| 8 | **Sin internet en la sala.** | El asistente se degrada y la mesa no: nada del directo pasa por el proveedor. Y admite modelos locales (Ollama, LM Studio) |
+| 9 | **La clave se escapa.** | No sale del daemon; el proxy solo reenvía las rutas de la lista; ni los logs ni las respuestas llevan cabeceras de autenticación |
 
 ---
 
@@ -629,7 +893,10 @@ resumen en el README:
 
 ## 7. Siguiente paso
 
-Revisado el 2026-10-17. La paridad está hecha y el plan, cerrado: no queda
-nada abierto en este documento. Lo siguiente es fusionar la rama `agentes` y
-ver la CI completa —el `.deb`, el AppImage y la interfaz en Chrome solo se
-prueban allí— antes de abrir un plan nuevo.
+Revisado el 2026-11-03. La paridad está hecha y F9 cerrada. Lo abierto es
+**F10, el asistente**, pendiente de revisión. Antes de empezarla, lo que ya
+decía esta sección: fusionar la rama `agentes` y ver la CI completa —el `.deb`,
+el AppImage y la interfaz en Chrome solo se prueban allí—, para que F10 salga
+de una rama nueva sobre `main` y no sobre trabajo sin comprobar. La prueba de
+streaming del proxy, que decidía la forma de todo lo demás, ya está hecha y
+salió bien.
