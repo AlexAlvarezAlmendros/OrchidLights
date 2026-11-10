@@ -19,7 +19,7 @@ endif()
 
 if(server)
     add_definitions(-DORCHID_SERVER)
-    set(APPVERSION "0.1.0 GIT")
+    set(APPVERSION "0.2.0 GIT")
 elseif(qmlui)
     add_definitions(-DQMLUI)
     set(APPVERSION "5.3.0 GIT")

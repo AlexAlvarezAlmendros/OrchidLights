@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(orchidlights VERSION 0.1.0 LANGUAGES C CXX)
+project(orchidlights VERSION 0.2.0 LANGUAGES C CXX)
 
 option(qmlui "Build the legacy QLC+ 5 QML UI (frozen, slated for removal)" OFF)
 option(server "Build the OrchidLights headless engine daemon + web API" OFF)

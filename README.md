@@ -20,10 +20,15 @@ No es un mando a distancia de una aplicación de escritorio. **Es la aplicación
 
 ## Estado
 
+**Versión 0.2.0** — descargas en
+[Releases](https://github.com/AlexAlvarezAlmendros/OrchidLights/releases).
+
 **Paridad funcional 1:1 con QLC+ 5 completada** (fases F1–F22 del plan de
 escritorio, cada una fusionada con su smoke test en CI). El daemon controla
 luces de verdad, la web es una consola completa y la carcasa de escritorio
-existe. Lo que queda fuera está dicho en los PRs que lo recortan.
+existe. Desde la 0.1.0, la mesa se deja montar por un agente, trae un asistente
+dentro y tiene una interfaz rediseñada. Lo que queda fuera está dicho en los PRs
+que lo recortan.
 
 | Bloque | Contenido | Estado |
 |---|---|---|
@@ -32,6 +37,11 @@ existe. Lo que queda fuera está dicho en los PRs que lo recortan.
 | C | Editores 1:1 (chaser/EFX/matrix/script/audio/show), palettes con fanning, Virtual Console completa (multipágina, crossfade, XY pad), fixtures a escala de rig (remap, panel RGB, import), 2D avanzada | ✅ |
 | D | Undo global por instantáneas, kiosk + máscara de acceso, i18n es/en, ajustes | ✅ |
 | E | Vídeo con superficies (`/#/surface`) y escenario 3D con picking | ✅ |
+| F | **0.2.0** · Agentes: contrato OpenAPI, el proyecto como documento (`export`, `diff`, `apply`), servidor MCP y `orchidctl` dentro del paquete | ✅ |
+| G | **0.2.0** · Puertas de red a la vista, una llave por dispositivo con rol y revocable, kiosko enjaulado por el daemon, undo por lotes | ✅ |
+| H | **0.2.0** · Escenario 3D editable (colocar, colgar y girar, con gizmo y `G`/`R`) y luz aditiva que nace, muere y aterriza en el suelo | ✅ |
+| I | **0.2.0** · El asistente: monta el show desde una conversación, con fotos y planos, y la clave del proveedor se queda en la mesa | 🟡 Montaje hecho; conversaciones entre dispositivos y modo evento, en camino |
+| J | **0.2.0** · Rediseño: barra lateral y cinco pestañas, hojas en vez de diálogos del sistema, deshacer en vez de preguntar, cuatro temas | ✅ |
 
 ## La interfaz
 
@@ -49,11 +59,34 @@ Las filas se agrupan por **alineación del borde superior, no por solapamiento**
 Un fader de 400 px cruza todas las bandas de botones que tiene al lado, así que
 bajo una regla de solapamiento se los traga a todos y el layout colapsa.
 
-Dos temas, ambos oscuros. **`blackout`** es rojo y ámbar a baja luminancia para
-usar durante un pase: la visión nocturna tarda veinte minutos en recuperarse y
-una pantalla blanca entre cajas le cuesta el escenario al operador. Anula los
-colores del show, que se eligieron para focos y no para una pantalla que se mira
-a oscuras.
+Una cosa importante por sitio, y siempre en el mismo. La barra del show tiene
+tres grupos fijos —qué show es, qué deja hacer esta pantalla, y el directo—, y
+el último nunca se mueve: la mano que busca BLACKOUT a oscuras busca un sitio, no
+una etiqueta. En el portátil hay una barra lateral con *Directo* y *Montaje* que
+se pliega a iconos; en el móvil, cinco pestañas y la tira de directo encima.
+Las preguntas se hacen en hojas dibujadas por la propia mesa, nunca con los
+diálogos del sistema, y lo que se puede deshacer no se pregunta: borrar una
+función o un universo avisa con un «Deshacer» a mano. En una pantalla táctil los
+faders son **relativos**: el valor sigue lo que se mueve el dedo desde donde
+estaba, y un toque a mitad de recorrido ya no manda la sala al máximo.
+
+Cuatro temas, uno por cada luz de sala, en *Ajustes > Apariencia*:
+
+- **Claro**, para montar el show en una oficina o de día. El suelo de la planta
+  y el 3D siguen a oscuras, porque una lámpara blanca encendida no se ve sobre
+  blanco.
+- **Gris**, para la media luz, con la luz de trabajo encendida.
+- **Oscuro**, para la función. Es el que sale por defecto.
+- **Pase**, solo con el primario rojo, para usar durante un pase: la visión
+  nocturna tarda veinte minutos en recuperarse y una pantalla blanca entre cajas
+  le cuesta el escenario al operador. Anula los colores del show, que se
+  eligieron para focos y no para una pantalla que se mira a oscuras, y trae un
+  atenuador propio por debajo del mínimo de la pantalla. `Ctrl+Alt+P` entra y
+  sale, y al salir vuelve al tema que había.
+
+El contraste de cada texto sobre cada fondo se mide en un test, en los cuatro
+temas, y la mesa respeta las preferencias del sistema: menos movimiento, menos
+transparencia, más contraste y colores forzados.
 
 Todo control mide **44 px como mínimo**, porque esto se usa sin mirar. Los
 once tipos de widget de QLC+ se dibujan y actúan: botones con flash y
@@ -409,6 +442,42 @@ un dímer genérico —la fixture más común que existe—, el `PUT` de un EFX 
 aceptaba la geometría que devolvía su propio `GET`, y la consola no se podía
 operar sin sostener un WebSocket.
 
+## El asistente
+
+Quien ilumina una boda no tiene una terminal con Claude Code: tiene la mesa, un
+móvil, cuatro fotos de la sala y un plano en PDF. La pantalla **Asistente** mete
+el agente dentro de la mesa: le cuentas qué hay, con fotos y planos, y monta el
+proyecto delante de ti —patch, escenario, escenas, chasers y consola—, enseñando
+cada paso según ocurre: «Aplicar · Ha aplicado +1 fixture, +1 función», con lo
+que mandó a un toque. Luego le pides cambios. `Ctrl+K` lo abre desde cualquier
+pantalla.
+
+**La clave se queda en la mesa.** El daemon la guarda en
+`~/.orchidlights/ai.json` (permisos `600`) y hace de proxy hacia el proveedor:
+quita la cabecera de autenticación que traiga el cliente y pone la suya, solo en
+las rutas que el SDK de cada proveedor llama de verdad. Un móvil emparejado usa
+el asistente sin verla nunca. La respuesta llega en streaming, y si el navegador
+corta, el daemon corta al proveedor: un turno abandonado deja de gastar en el
+acto.
+
+Habla con **Anthropic** y con cualquier servidor **compatible con OpenAI**,
+también uno local como Ollama o LM Studio, que no necesita clave. Proveedor,
+clave, modelo y un tope de peticiones al día por dispositivo se configuran en
+*Ajustes*, y solo con la llave maestra.
+
+Por dentro usa el mismo motor del documento que `orchidctl`, el que la CI
+comprueba como punto fijo, y no una copia. Tiene nueve herramientas —mirar el
+proyecto, la librería, el mapa de un universo, las entradas y salidas, proponer,
+aplicar, probar y leer el DMX—, valida cada entrada antes de ejecutarla, y
+**cada aplicación es una sola entrada de deshacer**. No guarda: guardar sigue
+siendo cosa tuya.
+
+`server/test/ai-ui-smoke.sh` lo prueba en Chrome de punta a punta, en CI y sin
+gastar un token, con un proveedor falso que hace de modelo. Lo que falta está en
+el ROADMAP (F10.3 a F10.5): las conversaciones compartidas entre dispositivos,
+el modo evento —lo seguro se aplica solo y lo demás espera un OK— y la vista
+previa en ciego en el 3D.
+
 ## Latencia
 
 El compromiso de F2 es **≤ 50 ms de *tap* a DMX**. Medido con
@@ -461,7 +530,7 @@ usuarios locales en los que no se confía.
 
 Ese token es la **llave maestra**: abre todo, el disco y el apagado incluidos,
 y no sale del equipo de la mesa. Cada móvil recibe una llave propia al
-emparejarlo desde la pantalla *Remoto* (o con `orchidctl pair`), con un rol:
+emparejarlo desde *Ajustes > Dispositivos* (o con `orchidctl pair`), con un rol:
 
 | Rol | Puede | No puede |
 |---|---|---|
