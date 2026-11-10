@@ -3,14 +3,15 @@
  *
  * three.js against the same truths every other screen uses -- the plan's
  * millimetres (F18 gave them a height), the fixture list's types, and the
- * live DMX frames. Meshes come from the daemon (the .dae files QLC+ 5
- * ships); a type without one gets a primitive, said plainly by looking
- * different rather than by being invisible.
+ * live DMX frames. The bodies are modelled in code, one per kind of fixture
+ * (fixtures3d.ts): a moving head whose yoke really pans and whose head
+ * really tilts, and a PAR that does not look like a strobe.
  *
  * The beams speak a GENERIC angle model (pan 0..255 over 360°, tilt leaning
  * up to 90° off straight down) because the definitions' physical degrees are
  * not in the plan payload; the fine calibration arrives when they are. The
- * inverted flags apply here exactly as on the plan's needles.
+ * inverted flags apply here exactly as on the plan's needles. A lamp left on
+ * the floor stands on its base and throws UP: the same model, upside down.
  *
  * Two hands, told apart by a button. RUNNING the show: a tap chooses movers,
  * a click on the floor aims them. EDITING the rig (the Editar toggle): a
@@ -24,29 +25,38 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
-import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { type FixtureState, type PlanFixture, type PlanState, api } from './api'
+import {
+  type BeamUniforms,
+  type FixtureModel,
+  buildBeam,
+  buildFixture,
+  glowTexture,
+} from './fixtures3d'
 import { t } from './i18n'
 import { aimOf, colourOf } from './plan'
 
-const MESH_BY_TYPE: Record<string, string> = {
-  'Moving Head': 'moving_head.dae',
-  Scanner: 'scanner.dae',
-  Strobe: 'strobe.dae',
-  Smoke: 'smoke.dae',
-  Hazer: 'hazer.dae',
-  'Color Changer': 'par.dae',
-  Dimmer: 'par.dae',
-}
+/** How far a beam that meets no floor is drawn before the haze gives up. */
+const FREE_THROW = 7
+/** Below this height (mm) a lamp with no hang of its own is standing on the
+ *  boards, not hanging a hand above them. */
+const FLOOR_HEIGHT = 150
 
 interface Rigged {
   fixture: PlanFixture
   steerable: boolean
   root: THREE.Group
-  beam: THREE.Mesh
-  beamPivot: THREE.Group
-  /** Every material that paints the body, for live glow and selection. */
-  bodyMaterials: THREE.MeshStandardMaterial[]
+  /** Between the placement and the body: turns the lamp over when it
+   *  stands on the floor instead of hanging. */
+  mount: THREE.Group
+  grounded: boolean
+  model: FixtureModel
+  beam: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>
+  /** The bloom around a lamp you are looking into. */
+  halo: THREE.Sprite
+  /** The colour it gives right now, kept so no frame allocates one. */
+  colour: THREE.Color
   /** The light landing on the floor, placed each frame from the beam. */
   pool: THREE.Mesh
   /** The run-mode mark under a fixture chosen for aiming. */
@@ -186,8 +196,24 @@ export function Stage3D({
     renderer.setSize(width, height)
     /* Nothing shines through the stage: a 6 m beam from a 3.5 m truss used
        to keep going below the floor as a spike out of the underworld. */
-    renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)]
+    /* A hair BELOW the boards: a plane at exactly zero cut the floor itself
+       along its own rounding errors, a static of pinholes that only showed
+       once the floor had light enough to differ from the void behind it. */
+    renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.02)]
     element.appendChild(renderer.domElement)
+
+    /* Something for metal and glass to reflect. A black body on a black
+       stage is only ever seen by its highlights; without a room around it
+       the truss clamps and lenses are holes. Ligera does without. */
+    const reflections = quality === 'high'
+    let roomLight: THREE.WebGLRenderTarget | null = null
+    if (reflections) {
+      const pmrem = new THREE.PMREMGenerator(renderer)
+      roomLight = pmrem.fromScene(new RoomEnvironment(), 0.04)
+      scene.environment = roomLight.texture
+      scene.environmentIntensity = 0.55
+      pmrem.dispose()
+    }
 
     /* The canvas follows its container: a resized window used to keep the
        first frame's size forever. */
@@ -229,7 +255,8 @@ export function Stage3D({
     /* The camera stays in the venue: never under the stage (a black void
        that reads as a crash), never inside a lamp, never lost in orbit. */
     controls.maxPolarAngle = Math.PI * 0.495
-    controls.minDistance = 1.5
+    /* Close enough to read a lamp's back panel, now that it has one. */
+    controls.minDistance = 0.7
     controls.maxDistance = Math.max(stageW, stageD) * 6
     controls.update()
     controlsRef.current = controls
@@ -241,7 +268,9 @@ export function Stage3D({
 
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(stageW, stageD),
-      new THREE.MeshStandardMaterial({ color: 0x181a20, roughness: 0.9 }),
+      /* The boards stay dark: the room that gives the lamps their
+         highlights must not turn a stage into a car park. */
+      new THREE.MeshStandardMaterial({ color: 0x181a20, roughness: 0.9, envMapIntensity: 0.2 }),
     )
     floor.rotation.x = -Math.PI / 2
     floor.name = 'floor'
@@ -276,28 +305,6 @@ export function Stage3D({
     edge.position.y = 0.005
     scene.add(edge)
 
-    /* A beam is brightest at the lens and dies in the air: a vertical
-       alpha gradient, painted once and worn by every cone. */
-    const fadeCanvas = document.createElement('canvas')
-    fadeCanvas.width = 1
-    fadeCanvas.height = 64
-    const fadeCtx = fadeCanvas.getContext('2d')
-    if (fadeCtx !== null) {
-      /* flipY: canvas y=0 lands on uv.y=1, which on a cone is the APEX --
-         the lens. Stop 0 is therefore the FLOOR end. Learned by shipping it
-         inverted: beams that grew brighter with distance. */
-      /* alphaMap reads the GREEN channel, not the alpha: painted as opaque
-         greyscale, or the fade silently does not exist (it shipped invisible
-         once as white-with-alpha -- green 255 everywhere). */
-      const gradient = fadeCtx.createLinearGradient(0, 0, 0, 64)
-      gradient.addColorStop(0, 'rgb(12,12,12)')
-      gradient.addColorStop(0.35, 'rgb(80,80,80)')
-      gradient.addColorStop(1, 'rgb(255,255,255)')
-      fadeCtx.fillStyle = gradient
-      fadeCtx.fillRect(0, 0, 1, 64)
-    }
-    const beamFade = new THREE.CanvasTexture(fadeCanvas)
-
     /* The pool's soft heart: a radial falloff, so the light lands as light
        and not as a grey dinner plate with a machined edge. */
     const poolCanvas = document.createElement('canvas')
@@ -317,25 +324,23 @@ export function Stage3D({
     }
     const poolFade = new THREE.CanvasTexture(poolCanvas)
 
-    /* The rig. Meshes load async; a box stands in until each lands. */
-    const loader = new ColladaLoader()
-    const meshCache = new Map<string, Promise<THREE.Object3D | null>>()
-    const meshFor = (type: string | undefined): Promise<THREE.Object3D | null> => {
-      const file = type !== undefined ? MESH_BY_TYPE[type] : undefined
-      if (file === undefined) return Promise.resolve(null)
-      let cached = meshCache.get(file)
-      if (cached === undefined) {
-        cached = new Promise((resolve) => {
-          loader.load(
-            `/api/v1/meshes/fixtures/${file}`,
-            (collada) => resolve(collada?.scene ?? null),
-            undefined,
-            () => resolve(null),
-          )
-        })
-        meshCache.set(file, cached)
-      }
-      return cached.then((object) => (object === null ? null : object.clone(true)))
+    /* Hanging or standing. A lamp at floor height with no hang of its own
+       is turned over onto its base, and the machines that never hang (smoke,
+       haze, fans) are simply set down on their feet. */
+    const applyMount = (node: Rigged) => {
+      const fixture = node.fixture
+      const blueprint = node.model.blueprint
+      const onFloor =
+        (fixture.z ?? 0) < FLOOR_HEIGHT &&
+        (fixture.rotationX ?? 0) === 0 &&
+        (fixture.rotationZ ?? 0) === 0
+      node.grounded = onFloor && blueprint.gain > 0
+      node.mount.rotation.x = node.grounded ? Math.PI : 0
+      node.mount.position.y = !onFloor
+        ? 0
+        : node.grounded
+          ? blueprint.top * node.model.scale
+          : -blueprint.bottom * node.model.scale
     }
 
     const applyPlacement = (node: Rigged) => {
@@ -350,102 +355,57 @@ export function Stage3D({
         (-(fixture.rotation ?? 0) * Math.PI) / 180,
         ((fixture.rotationZ ?? 0) * Math.PI) / 180,
       )
+      applyMount(node)
     }
 
+    const haloMap = glowTexture()
+
     const rigOne = (fixture: PlanFixture) => {
-      const type = fixtures.find((x) => x.id === fixture.id)?.type
+      const state = fixtures.find((x) => x.id === fixture.id)
       const steerable = fixture.roles.pan !== undefined || fixture.roles.tilt !== undefined
 
       const root = new THREE.Group()
       root.name = `fixture-${fixture.id}`
+      const mount = new THREE.Group()
+      root.add(mount)
 
-      const bodyMaterials: THREE.MeshStandardMaterial[] = []
-      const bodyMaterial = () => {
-        /* Bright enough to find and click on a dark stage; remembered so the
-           paint loop can make the head glow its live colour and the selection
-           wear the accent. */
-        const material = new THREE.MeshStandardMaterial({ color: 0x646c7a, emissive: 0x171a20 })
-        bodyMaterials.push(material)
-        return material
-      }
-      /* The click's one honest target. The root also carries a six-metre
-         beam cone and a plumb line, and a raycast against the whole tree
-         let an invisible cone STEAL its neighbour's clicks -- the reported
-         "I click one lamp and another answers". */
-      const bodyGroup = new THREE.Group()
-      bodyGroup.name = 'body'
-      root.add(bodyGroup)
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.3), bodyMaterial())
-      bodyGroup.add(body)
-      void meshFor(type).then((mesh) => {
-        if (mesh === null) return
-        /* The .dae files declare <unit meter="1"/> and the loader honours
-           it: they arrive in metres. One body language for the whole rig:
-           their own near-black materials made every mesh an invisibility
-           cloak on this stage. */
-        bodyMaterials.length = 0
-        mesh.traverse((part) => {
-          if ((part as THREE.Mesh).isMesh) {
-            ;(part as THREE.Mesh).material = bodyMaterial()
-          }
-        })
-        bodyGroup.remove(body)
-        bodyGroup.add(mesh)
-      })
+      /* The body is the click's one honest target (its group is named
+         'body'); the beam and the halo hang inside it and refuse raycasts,
+         so lit air never answers for a lamp. */
+      const model = buildFixture(
+        {
+          type: state?.type,
+          roles: fixture.roles,
+          heads: state?.heads ?? fixture.heads,
+          physical: state?.physical,
+        },
+        { reflections },
+      )
+      mount.add(model.body)
 
-      /* The beam: a cone hanging from a pivot so pan spins and tilt leans
-         exactly like the generic model says. Its width speaks the fixture's
-         kind -- a blinder is a wall of light, not a needle -- and the smoke
-         machines get none: fog is not a beam. */
-      const beamPivot = new THREE.Group()
-      beamPivot.name = `beam-${fixture.id}`
-      const length = 6
-      const narrow = type === 'Moving Head' || type === 'Scanner'
-      const beamless = type === 'Smoke' || type === 'Hazer'
-      const beam = new THREE.Mesh(
-        new THREE.ConeGeometry(narrow ? 0.55 : 1.5, length, 24, 1, true),
-        new THREE.MeshBasicMaterial({
+      /* The beam hangs from the HEAD, so pan and tilt carry it exactly as
+         they carry the lens. */
+      const beam = buildBeam(model)
+      model.head.add(beam)
+
+      /* The hot lens: light SOURCES, and looking into one blooms. */
+      const reach = Math.max(model.blueprint.emitRadius[0], model.blueprint.emitRadius[1])
+      const halo = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: haloMap,
           color: 0xffffff,
           transparent: true,
           opacity: 0,
-          side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending,
           depthWrite: false,
-          /* Light ADDS. Under normal blending a white beam was a milky grey
-             veil that turned DARK wherever a body sat behind it -- an
-             anti-light. Additive can only ever brighten, which is the one
-             physical truth a beam has. */
-          blending: THREE.AdditiveBlending,
-          /* Brightest at the lens, dying in the air; and exempt from the
-             fog -- a beam IS the haze catching light. */
-          alphaMap: beamFade,
           fog: false,
-          /* No depth test: a body inside the volume used to punch a DARK
-             hole in the light (it hid the cone's back wall). Light glows
-             over what it bathes -- that is what previz beams do. */
-          depthTest: false,
         }),
       )
-      /* Cone apex at the fixture, spreading down. */
-      beam.position.y = -length / 2
-      beam.visible = !beamless
-      beamPivot.add(beam)
-
-      /* The hot lens: light SOURCES, and the source must be the brightest
-         pixel on the head. */
-      const lens = new THREE.Mesh(
-        new THREE.SphereGeometry(0.09, 12, 12),
-        new THREE.MeshBasicMaterial({
-          color: 0xffffff,
-          transparent: true,
-          opacity: 0,
-          blending: THREE.AdditiveBlending,
-          fog: false,
-          depthTest: false,
-        }),
-      )
-      lens.name = 'lens'
-      beamPivot.add(lens)
-      root.add(beamPivot)
+      halo.scale.setScalar(Math.max(0.22, Math.min(0.9, reach * model.scale * 4.5)))
+      halo.position.y = -(model.blueprint.emitY * model.scale + 0.015)
+      halo.raycast = () => undefined
+      halo.visible = false
+      model.head.add(halo)
 
       /* Where the light lands: a disc the paint loop drops on the floor at
          the beam's intersection, sized by throw distance. */
@@ -500,9 +460,12 @@ export function Stage3D({
         fixture,
         steerable,
         root,
+        mount,
+        grounded: false,
+        model,
         beam,
-        beamPivot,
-        bodyMaterials,
+        halo,
+        colour: new THREE.Color(0xffffff),
         pool,
         ring,
         dropLine,
@@ -575,6 +538,7 @@ export function Stage3D({
         .setPlanPosition(node.fixture.id, patch)
         .then(() => {
           Object.assign(node.fixture, patch)
+          applyMount(node)
         })
         .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
     })
@@ -650,6 +614,9 @@ export function Stage3D({
           scene.remove(node.root)
           scene.remove(node.pool)
           scene.remove(node.ring)
+          node.model.dispose()
+          node.beam.material.dispose()
+          node.halo.material.dispose()
           rig.current.delete(id)
         }
       },
@@ -694,6 +661,7 @@ export function Stage3D({
     let alive = true
     const down = new THREE.Vector3()
     const lampWorld = new THREE.Vector3()
+    const eye = new THREE.Vector3()
     const beamQuat = new THREE.Quaternion()
     const warmth = new THREE.Color(1, 0.93, 0.82)
     const worldUp = new THREE.Vector3(0, 1, 0)
@@ -705,80 +673,108 @@ export function Stage3D({
     const paint = () => {
       if (!alive) return
       for (const node of rig.current.values()) {
-        const colour = colourOf(node.fixture, framesRef.current)
-        const material = node.beam.material as THREE.MeshBasicMaterial
+        const { model, beam, halo } = node
+        const blueprint = model.blueprint
+        const uniforms = beam.material.uniforms as unknown as BeamUniforms
         const poolMaterial = node.pool.material as THREE.MeshBasicMaterial
-        const lens = node.beamPivot.getObjectByName('lens') as THREE.Mesh | undefined
-        const lensMaterial = lens?.material as THREE.MeshBasicMaterial | undefined
-        if (colour === null) {
-          material.opacity = 0
-          poolMaterial.opacity = 0
-          if (lensMaterial !== undefined) lensMaterial.opacity = 0
-        } else {
-          material.color = new THREE.Color(colour)
+        const haloMaterial = halo.material
+
+        const colour = colourOf(node.fixture, framesRef.current)
+        const lit = colour !== null && blueprint.gain > 0
+        if (colour !== null) {
+          node.colour.set(colour)
           /* An intensity-only fixture is a halogen lamp, and halogen is not
              studio white: a touch of warmth, like the planta's halo is not. */
           const roles = node.fixture.roles
           if (roles.red === undefined && roles.cyan === undefined && roles.white === undefined) {
-            material.color.multiply(warmth)
+            node.colour.multiply(warmth)
           }
-          material.opacity = 0.5
-          if (lensMaterial !== undefined) {
-            lensMaterial.color = material.color
-            lensMaterial.opacity = 0.95
-          }
-        }
-        const aim = aimOf(node.fixture, framesRef.current)
-        if (aim !== null) {
-          node.beamPivot.rotation.y = (-aim.angle * Math.PI) / 180
-          node.beamPivot.rotation.x = (aim.lean * 90 * Math.PI) / 180
         }
 
-        /* Where the light lands. The beam's own axis, intersected with the
-           floor: the pool sits there, stretched into an ellipse by an oblique
-           throw; and the CONE now ENDS at the floor -- clipped geometry seen
-           from above used to survive as phantom wedges on the boards. */
-        if (colour !== null && node.beam.visible) {
-          node.beamPivot.getWorldQuaternion(beamQuat)
+        /* The generic model, worn by real joints: the yoke pans about the
+           vertical, the head tilts inside it. A lamp standing on the floor
+           is the same lamp turned over, so its pan runs the other way. */
+        const aim = aimOf(node.fixture, framesRef.current)
+        if (aim !== null) {
+          const pan = (aim.angle * Math.PI) / 180
+          model.yoke.rotation.y = node.grounded ? Math.PI - pan : pan
+          model.head.rotation.x = (-aim.lean * 90 * Math.PI) / 180
+        }
+
+        beam.visible = lit
+        halo.visible = lit
+        if (model.lens !== null) {
+          if (lit) model.lens.emissive.copy(node.colour)
+          else model.lens.emissive.setHex(0x000000)
+        }
+        if (!lit) {
+          poolMaterial.opacity = 0
+        } else {
+          /* Where the light lands. The beam's own axis, from the lens,
+             intersected with the floor: the pool sits there, stretched into
+             an ellipse by an oblique throw, and the beam ENDS at the floor. */
+          model.head.getWorldQuaternion(beamQuat)
           down.set(0, -1, 0).applyQuaternion(beamQuat)
-          node.root.getWorldPosition(lampWorld)
+          const emit = blueprint.emitY * model.scale
+          model.head.getWorldPosition(lampWorld).addScaledVector(down, emit)
+
+          let throwLength = FREE_THROW
           if (down.y < -0.15 && lampWorld.y > 0.05) {
-            const throwLength = Math.min(14, lampWorld.y / -down.y)
-            const reach = Math.max(0.08, Math.min(1, throwLength / 6))
-            node.beam.scale.set(1, reach, 1)
-            node.beam.position.y = (-6 * reach) / 2
+            throwLength = Math.min(14, lampWorld.y / -down.y)
             node.pool.position.set(
               lampWorld.x + down.x * throwLength,
               0.01,
               lampWorld.z + down.z * throwLength,
             )
-            const radius = Math.max(0.3, 0.1 * throwLength)
+            /* The pool is as wide as the beam that made it. */
+            const across = uniforms.uTop.value.x + uniforms.uSlope.value.x * throwLength
+            const along = uniforms.uTop.value.y + uniforms.uSlope.value.y * throwLength
+            const radius = Math.max(0.2, Math.sqrt(across * along) * 1.15)
             const stretch = Math.min(2.5, 1 / Math.max(0.3, -down.y))
             node.pool.scale.set(radius, radius * stretch, 1)
             poolQuatY.setFromAxisAngle(worldUp, Math.atan2(down.x, down.z))
             node.pool.quaternion.copy(poolQuatY).multiply(poolQuatFlat)
-            poolMaterial.color = material.color
+            poolMaterial.color.copy(node.colour)
             poolMaterial.opacity = Math.max(0.22, 0.5 - throwLength * 0.03)
+            uniforms.uEnd.value = 0.12
           } else {
-            node.beam.scale.set(1, 1, 1)
-            node.beam.position.y = -3
+            /* Thrown at the sky or along the boards: it dies in the air. */
             poolMaterial.opacity = 0
+            uniforms.uEnd.value = 0
           }
+          uniforms.uLength.value = throwLength
+          uniforms.uColor.value.copy(node.colour)
+
+          /* From inside a beam there is no near wall to see, only the far
+             one: the same single layer of light, from the other side. */
+          model.head.worldToLocal(eye.copy(cam.position))
+          const depth = -eye.y - emit
+          const across = uniforms.uTop.value.x + uniforms.uSlope.value.x * depth
+          const along = uniforms.uTop.value.y + uniforms.uSlope.value.y * depth
+          const inside =
+            depth > 0 && depth < throwLength && (eye.x / across) ** 2 + (eye.z / along) ** 2 < 1
+          beam.material.side = inside ? THREE.BackSide : THREE.FrontSide
+
+          /* The bloom belongs to whoever the lamp is pointed at: full when
+             you look down its barrel, a rim of spill from the side, nothing
+             from behind. */
+          eye.copy(cam.position).sub(lampWorld).normalize()
+          const facing = Math.max(0, down.dot(eye))
+          haloMaterial.color.copy(node.colour)
+          haloMaterial.opacity = 0.03 + 0.9 * facing * facing
         }
 
-        /* The head glows what it gives; the chosen wear the accent; the
-           selected element wears it brighter. All through emissive, so the
-           daylight shape stays readable underneath. */
+        /* The chosen wear the accent; the selected element wears it too.
+           Through emissive, so the body's own surfaces stay readable
+           underneath; a lit lamp spills a breath of its colour on itself. */
         const isSelected = editingRef.current && selectedRef.current === node.fixture.id
         const isChosen = !editingRef.current && chosenRef.current.includes(node.fixture.id)
-        for (const bodyMaterial of node.bodyMaterials) {
-          if (isSelected || isChosen) {
-            bodyMaterial.emissive.setHex(0x4a3a99)
-          } else if (colour !== null) {
-            bodyMaterial.emissive.copy(material.color).multiplyScalar(0.35)
-          } else {
-            bodyMaterial.emissive.setHex(0x171a20)
-          }
+        if (isSelected || isChosen) {
+          model.shell.emissive.setHex(0x4a3a99)
+        } else if (lit) {
+          model.shell.emissive.copy(node.colour).multiplyScalar(0.012)
+        } else {
+          model.shell.emissive.setHex(0x06070a)
         }
         node.ring.visible = isChosen
         if (isChosen) {
@@ -824,9 +820,10 @@ export function Stage3D({
       beamAngles: (id: number) => {
         const node = rig.current.get(id)
         if (node === undefined) return null
+        const turned = (node.model.yoke.rotation.y * 180) / Math.PI
         return {
-          pan: (-node.beamPivot.rotation.y * 180) / Math.PI,
-          tilt: (node.beamPivot.rotation.x * 180) / Math.PI,
+          pan: node.grounded ? 180 - turned : turned,
+          tilt: (-node.model.head.rotation.x * 180) / Math.PI,
         }
       },
       aimAt,
@@ -895,6 +892,12 @@ export function Stage3D({
       gizmo.detach()
       gizmo.dispose()
       controls.dispose()
+      for (const node of rig.current.values()) {
+        node.model.dispose()
+        node.beam.material.dispose()
+        node.halo.material.dispose()
+      }
+      roomLight?.dispose()
       renderer.dispose()
       element.removeChild(renderer.domElement)
       rig.current.clear()
