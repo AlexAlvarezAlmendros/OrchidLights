@@ -25,6 +25,10 @@ export function setLang(lang: Lang): void {
 /** Spanish is the key itself: the app's own strings are the dictionary. */
 const EN: Record<string, string> = {
   Consola: 'Console',
+  Directo: 'Live',
+  Montaje: 'Build',
+  'Mostrar la barra lateral': 'Show the sidebar',
+  'Plegar la barra lateral': 'Collapse the sidebar',
   Funciones: 'Functions',
   Patch: 'Patch',
   Mesa: 'Desk',
@@ -64,6 +68,8 @@ const EN: Record<string, string> = {
   Desconectar: 'Disconnect',
   'Copiar URL': 'Copy URL',
   Copiada: 'Copied',
+  Claro: 'Light',
+  Gris: 'Grey',
   Oscuro: 'Dark',
   Pase: 'Show',
   Ajustes: 'Settings',
@@ -144,8 +150,8 @@ const EN: Record<string, string> = {
   Aplicar: 'Apply',
   'Configura el proveedor y la clave en Ajustes para empezar.':
     'Set the provider and the key in Settings to start.',
-  'Cuéntale qué hay en la sala y qué quieres: fotos del espacio, el plano, qué foco va en cada sitio. Monta el proyecto aquí delante; los cambios se deshacen con ↶. Guardar es tuyo.':
-    'Tell it what is in the room and what you want: photos of the space, the plan, which lamp goes where. It builds the project here in front of you; changes are undone with ↶. Saving is yours.',
+  'Cuéntale qué hay en la sala y qué quieres: fotos del espacio, el plano, qué foco va en cada sitio. Monta el proyecto aquí delante; los cambios se deshacen con Deshacer, arriba. Guardar es tuyo.':
+    'Tell it what is in the room and what you want: photos of the space, the plan, which lamp goes where. It builds the project here in front of you; changes are undone with Undo, at the top. Saving is yours.',
   'El asistente no está configurado en esta mesa. Se hace desde su equipo, con la llave maestra.':
     "The assistant is not set up on this desk. That is done from the desk's machine, with its master key.",
   Ensayar: 'Rehearse',

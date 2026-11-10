@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { type FixtureState, type PaletteState, api } from './api'
+import { Icon } from './icons'
 
 const TYPES = [
   { value: 'Dimmer', label: 'Dimmer' },
@@ -130,7 +131,7 @@ export function Palettes({
                 aria-label={`Borrar ${palette.name}`}
                 onClick={() => run(() => api.removePalette(palette.id))}
               >
-                ✕
+                <Icon name="close" size={18} />
               </button>
             </div>
 

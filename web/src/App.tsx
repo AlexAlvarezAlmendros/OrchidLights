@@ -30,25 +30,27 @@ import { type Connection, Live } from './live'
 import { BpmDock, GrandMasterDock, StopAll } from './maestro'
 import { MatrixWidget } from './matrix'
 import { Mesa } from './mesa'
+import { Montaje } from './montaje'
 import { Nav } from './nav'
 import { Plan } from './plan'
-import { ProjectMenu } from './proyecto'
+import { type MenuExtra, ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
 import { leaveKiosk, resolveClose, takePendingOpen, toggleFullscreen } from './shell'
 
 const Stage3D = lazy(() => import('./stage3d'))
 const Conversacion = lazy(() => import('./conversacion'))
+import { Icon } from './icons'
 import { RemotePanel } from './remote'
 import { Slider } from './slider'
 import { keySequenceOf, typingSomewhere } from './teclas'
+import { CHROME, type Theme, storeTheme, storedTheme, togglePass } from './tema'
 import { getToken, setToken } from './token'
+import { Segmented, Sheet, Toast, type ToastState, dialogo, useMedia } from './ui'
 import type { View } from './views'
 import { DumpButton } from './volcado'
 import { CREATABLE, placeBelow } from './widgets'
 import { XYPad } from './xypad'
-
-type Theme = 'stage' | 'blackout'
 
 /** The arrangement a project actually carries. A page without rows is what a
  *  reset leaves in the daemon's memory: for the screen it is the same as no
@@ -85,9 +87,7 @@ export function App() {
   const [page, setPage] = useState(0)
   // Persisted: an operator picks blackout mode once, at the start of the night,
   // and should not have to find the button again on every page load.
-  const [theme, setTheme] = useState<Theme>(
-    () => (localStorage.getItem('orchid.theme') as Theme | null) ?? 'stage',
-  )
+  const [theme, setTheme] = useState<Theme>(storedTheme)
   const [error, setError] = useState<string | null>(null)
   /* The daemon's word, not this client's memory of pressing the button:
      seeded from /status and kept fresh by the feed, so a blackout engaged
@@ -102,7 +102,12 @@ export function App() {
   /* One transient line for things that went wrong out-of-band -- a rejected
      WS command, a lost connection. A press that does nothing and says nothing
      teaches the operator the desk is broken. */
-  const [toast, setToast] = useState<string | null>(null)
+  /* A bare string is an error -- most of the desk reports trouble that way --
+     and an error stays until it is read. News comes as an object, with an
+     optional way back: "Función borrada · Deshacer". */
+  const [toast, setToast] = useState<string | ToastState | null>(null)
+  const notify = (text: string, action?: ToastState['action']) =>
+    setToast({ text, kind: 'info', ...(action ? { action } : {}) })
   /* The daemon wants a token this client does not hold. Not an error state: a
      phone arriving at a --listen-all desk by bare URL lands here by design,
      types the token once, and never sees this again. */
@@ -183,6 +188,26 @@ export function App() {
     io: true,
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /* A phone's bar: what does not fit moves to the show's menu. */
+  const compact = useMedia('(max-width: 899px)')
+  /* The sidebar folded to its icons, by choice, and remembered. */
+  const [sidebarFolded, setSidebarFolded] = useState(
+    () => window.localStorage.getItem('orchid.sidebar') === 'rail',
+  )
+  useEffect(() => {
+    window.localStorage.setItem('orchid.sidebar', sidebarFolded ? 'rail' : 'full')
+  }, [sidebarFolded])
+  /* On a phone the levels live in a sheet that rises over the console. */
+  const [levelsOpen, setLevelsOpen] = useState(false)
+  /* The pass's own dimmer: a black veil over everything, for when the
+     screen's lowest brightness is still too much light in the wings. */
+  const [dim, setDim] = useState(
+    () => Number(window.localStorage.getItem('orchid.dim') ?? '0') || 0,
+  )
+  useEffect(() => {
+    window.localStorage.setItem('orchid.dim', String(dim))
+    document.documentElement.style.setProperty('--dim', String(dim))
+  }, [dim])
   const [scale, setScale] = useState(
     () => Number(window.localStorage.getItem('orchid.scale') ?? '1') || 1,
   )
@@ -246,11 +271,16 @@ export function App() {
        impossible to lose. The pull consumes, so mount+ping never double-open. */
     const claim = () => {
       takePendingOpen()
-        .then((path) => {
+        .then(async (path) => {
           if (path === null) return
           if (
             dirty &&
-            !window.confirm('Hay cambios sin guardar que se perderán. ¿Abrir igualmente?')
+            !(await dialogo.confirmar({
+              title: 'Hay cambios sin guardar',
+              message: 'Se perderán si abres el otro proyecto.',
+              confirm: 'Abrir igualmente',
+              destructive: true,
+            }))
           )
             return
           return api.openProjectPath(path)
@@ -283,14 +313,6 @@ export function App() {
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [dirty])
-
-  /* A toast is a moment, not a state: it clears itself so the next problem is
-     legible, and touching nothing else. */
-  useEffect(() => {
-    if (toast === null) return
-    const timer = setTimeout(() => setToast(null), 6000)
-    return () => clearTimeout(timer)
-  }, [toast])
 
   useEffect(() => {
     const feed = new Live({
@@ -460,7 +482,9 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    localStorage.setItem('orchid.theme', theme)
+    storeTheme(theme)
+    /* In the pass the browser's own chrome must be as black as the page. */
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', CHROME[theme])
   }, [theme])
 
   const running = useMemo(
@@ -901,6 +925,35 @@ export function App() {
     return () => window.removeEventListener('wheel', onWheel, { capture: true })
   }, [])
 
+  /* Ctrl+Alt+P: the pass, without looking for it. A hand already on the
+     keyboard in the dark should not have to find a menu to protect its eyes;
+     and out of it, back to the theme the room was in. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey && event.altKey) || event.key.toLowerCase() !== 'p') return
+      event.preventDefault()
+      setTheme(togglePass)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  /* Ctrl+K (⌘K on a Mac): the assistant, from anywhere. It works on what
+     is on screen, so the way to it should not depend on which screen that is. */
+  const assistantAllowed = access.fixtures && access.functions
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return
+      if (!assistantAllowed || operator || kiosk || typingSomewhere(event)) return
+      event.preventDefault()
+      setView('assistant')
+      setMode('run')
+      setSelected(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [assistantAllowed, operator, kiosk])
+
   /* Ctrl+F11: the shell's own fullscreen. In a browser this quietly does
      nothing, which is honest -- F11 already exists there. */
   useEffect(() => {
@@ -1031,33 +1084,83 @@ export function App() {
     window.localStorage.removeItem('orchid.operator')
   }, [])
 
+  const connectionLabel =
+    connection === 'open'
+      ? 'en vivo'
+      : connection === 'closed'
+        ? 'sin conexión'
+        : connection === 'auth'
+          ? 'esperando la llave'
+          : 'conectando'
+  const offline = connection === 'closed'
+
+  /* What the access mask leaves on offer, in one list the sidebar, the tabs
+     and the Montaje screen all read. */
+  const visibleViews: View[] = [
+    'console',
+    ...(access.functions ? (['functions'] as View[]) : []),
+    ...(access.io || access.fixtures ? (['setup'] as View[]) : []),
+    ...(access.simpleDesk ? (['desk'] as View[]) : []),
+    ...(access.fixtures ? (['plan'] as View[]) : []),
+    ...(access.fixtures ? (['stage3d'] as View[]) : []),
+    ...(access.io ? (['remote'] as View[]) : []),
+    /* Building a show takes both: the patch and the functions. */
+    ...(access.fixtures && access.functions ? (['assistant'] as View[]) : []),
+  ]
+
+  const goTo = (target: View) => {
+    setView(target)
+    setMode('run')
+    setSelected(null)
+  }
+
+  /* The console's one mode control: shown where the daemon would honour it. */
+  const modes =
+    !operator && view === 'console' && vc !== null && (access.vcEditing || mode !== 'run')
+
+  /* What a phone's bar cannot hold goes into the show's menu. */
+  const extras: MenuExtra[] = compact
+    ? [
+        ...(modes
+          ? (
+              [
+                ['run', 'Consola: tocar'],
+                ['arrange', 'Consola: ordenar'],
+                ['edit', 'Consola: editar'],
+              ] as const
+            ).map(([value, label]) => ({
+              label,
+              checked: mode === value,
+              disabled: value !== 'run' && !access.vcEditing,
+              run: () => {
+                setMode(value)
+                if (value === 'run') setSelected(null)
+              },
+            }))
+          : []),
+        ...(!operator && !kiosk ? [{ label: 'Modo operador', run: enterOperator }] : []),
+        ...(!kiosk ? [{ label: t('Ajustes'), run: () => setSettingsOpen(true) }] : []),
+      ]
+    : []
+
   return (
-    <div className="app" data-operator={operator}>
-      {/* Where you are, down the left with room and across the bottom without.
+    <div
+      className="app"
+      data-operator={operator}
+      data-kiosk={kiosk}
+      data-sidebar={sidebarFolded ? 'rail' : 'full'}
+      data-levels-open={levelsOpen}
+    >
+      {/* Where you are: a sidebar with room, five tabs under the thumb without.
           Gone in operator mode, along with everything else that is not the
           console. */}
       {!operator && !kiosk && (
         <Nav
           view={view}
-          theme={theme}
-          visible={[
-            'console',
-            ...(access.functions ? (['functions'] as View[]) : []),
-            ...(access.io || access.fixtures ? (['setup'] as View[]) : []),
-            ...(access.simpleDesk ? (['desk'] as View[]) : []),
-            ...(access.fixtures ? (['plan'] as View[]) : []),
-            ...(access.fixtures ? (['stage3d'] as View[]) : []),
-            ...(access.io ? (['remote'] as View[]) : []),
-            /* Building a show takes both: the patch and the functions. */
-            ...(access.fixtures && access.functions ? (['assistant'] as View[]) : []),
-          ]}
-          onView={(target) => {
-            setView(target)
-            setMode('run')
-            setSelected(null)
-          }}
-          onTheme={() => setTheme(theme === 'stage' ? 'blackout' : 'stage')}
-          onSettings={() => setSettingsOpen(true)}
+          visible={visibleViews}
+          onView={goTo}
+          collapsed={sidebarFolded}
+          onCollapse={() => setSidebarFolded((folded) => !folded)}
         />
       )}
 
@@ -1065,158 +1168,215 @@ export function App() {
         <Settings
           theme={theme}
           scale={scale}
+          dim={dim}
+          devices={access.io}
           onTheme={setTheme}
           onScale={setScale}
+          onDim={setDim}
+          onDevices={() => {
+            setSettingsOpen(false)
+            goTo('remote')
+          }}
           onClose={() => setSettingsOpen(false)}
         />
       )}
 
-      {/* Everything that is not the rail. One column, so the shell is a grid of
-          exactly two things and nothing else has to declare where it lives. */}
+      {/* Everything that is not the navigation. */}
       <div className="screen">
+        {/* Three groups, always in the same order and the same place: what show
+            this is, what this screen lets you do, and the live controls. The
+            last group never moves -- the hand that reaches for BLACKOUT in the
+            dark reaches for a place, not a label. */}
         <header className="showbar">
-          {/* What is loaded and whether it is alive -- the two things worth a
-            permanent place. The name is the show, not the product: an operator
-            with three shows on one daemon needs to know which one is up. */}
-          <div className="showbar-id">
+          <div className="tb-group tb-identity">
             <ProjectMenu
               name={project?.name.replace(/\.qxw$/i, '') || 'OrchidLights'}
               dirty={dirty}
+              pass={theme === 'blackout'}
+              onPass={() => setTheme(togglePass)}
+              extras={extras}
               onError={setToast}
             />
-            <span>
-              {fixtures.length} fixtures
-              {dirty ? ' · sin guardar' : ''}
+            {/* Unsaved is a dot beside the name, the way a document says so on
+                a Mac. The words are there for whoever cannot see the dot. */}
+            {dirty && (
+              <span className="dirty-dot" title="Sin guardar">
+                <span className="visually-hidden">sin guardar</span>
+              </span>
+            )}
+            {/* Connected is the normal state, and the normal state takes no
+                room: a dot. Losing the desk is not normal, and gets the banner
+                under the bar. */}
+            <span className="status" data-state={connection} title={connectionLabel}>
+              <span className="dot" aria-hidden="true" />
+              <span className="visually-hidden">{connectionLabel}</span>
             </span>
+            {!kiosk && !compact && (
+              <button
+                type="button"
+                className="icon-button tb-settings"
+                aria-label={t('Ajustes')}
+                title={t('Ajustes')}
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Icon name="gear" />
+              </button>
+            )}
           </div>
 
-          <DumpButton
-            count={dump.count}
-            bare={dump.bare}
-            functions={functions}
-            onError={setToast}
-            onDone={setToast}
-          />
-          <GrandMasterDock
-            state={grandMaster}
-            learning={lastInput}
-            onState={setGrandMaster}
-            onError={setToast}
-          />
-
-          <span className="chip" data-state={connection}>
-            <span className="dot" />
-            {connection === 'open'
-              ? 'en vivo'
-              : connection === 'closed'
-                ? 'sin conexión'
-                : connection}
-          </span>
-          {running.size > 0 && <span className="chip">{running.size} en marcha</span>}
-
-          <span className="spacer" />
-
-          {operator ? (
-            <Unlock onUnlock={leaveOperator} />
-          ) : (
-            <button type="button" onClick={enterOperator} title="Solo la consola, sin edición">
-              Operador
-            </button>
-          )}
-          {!operator &&
-            view === 'console' &&
-            vc &&
-            /* Closed by the mask -- or by this device's role -- is closed here
-               too: a button the daemon will refuse is a button that lies. */
-            (access.vcEditing || mode !== 'run') &&
-            /* One control at a time. Showing "Ordenar" beside "Listo" made it
-             read as two separate states, when there is only ever one. */
-            (mode === 'run' ? (
-              <>
-                <button type="button" onClick={() => setMode('arrange')}>
-                  Ordenar
-                </button>
-                <button type="button" onClick={() => setMode('edit')}>
-                  Editar
-                </button>
-              </>
-            ) : (
-              <>
-                {mode === 'arrange' && layout !== null && (
-                  <button
-                    type="button"
-                    onClick={resetLayout}
-                    title="Olvida el orden guardado y vuelve al del proyecto"
-                  >
-                    Orden original
-                  </button>
-                )}
+          <div className="tb-accessory">
+            <div className="tb-group tb-context">
+              {modes && !compact && (
+                <Segmented
+                  label="Modo de la consola"
+                  value={mode}
+                  options={[
+                    { value: 'run', label: 'Tocar', title: 'Los botones disparan sus funciones' },
+                    {
+                      value: 'arrange',
+                      label: 'Ordenar',
+                      title: 'Mover widgets sin dispararlos',
+                      disabled: !access.vcEditing,
+                    },
+                    {
+                      value: 'edit',
+                      label: 'Editar',
+                      title: 'Cambiar lo que hace cada widget',
+                      disabled: !access.vcEditing,
+                    },
+                  ]}
+                  onChange={(next) => {
+                    setMode(next)
+                    if (next === 'run') setSelected(null)
+                  }}
+                />
+              )}
+              {modes && mode === 'arrange' && layout !== null && (
                 <button
                   type="button"
-                  aria-pressed={true}
-                  onClick={() => {
-                    setMode('run')
-                    setSelected(null)
+                  onClick={resetLayout}
+                  title="Olvida el orden guardado y vuelve al del proyecto"
+                >
+                  Orden original
+                </button>
+              )}
+              {!kiosk && (
+                <>
+                  <button
+                    type="button"
+                    disabled={!ring.undo}
+                    onClick={undo}
+                    title="Deshacer (Ctrl+Z) — todo edit, consola incluida"
+                    aria-label="Deshacer"
+                    className="icon-button"
+                  >
+                    <Icon name="undo" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    disabled={!ring.redo}
+                    onClick={redo}
+                    title="Rehacer (Ctrl+Mayús+Z)"
+                    aria-label="Rehacer"
+                  >
+                    <Icon name="redo" />
+                  </button>
+                </>
+              )}
+              {/* Reachable whenever there is something to save, on every screen,
+                  and the one prominent action in the bar when it is. */}
+              {dirty && (
+                <button type="button" className="primary" onClick={persist}>
+                  Guardar
+                </button>
+              )}
+              <DumpButton
+                count={dump.count}
+                bare={dump.bare}
+                functions={functions}
+                onError={setToast}
+                onDone={(text) => notify(text)}
+              />
+              {operator ? (
+                <Unlock onUnlock={leaveOperator} />
+              ) : (
+                !kiosk &&
+                !compact && (
+                  <button
+                    type="button"
+                    className="tb-operator"
+                    onClick={enterOperator}
+                    title="Solo la consola, sin edición"
+                  >
+                    <Icon name="lock" size={18} />
+                    <span>Operador</span>
+                  </button>
+                )
+              )}
+              {kiosk && (
+                <button
+                  type="button"
+                  title={t('Salir del kiosko')}
+                  onClick={async () => {
+                    const pin = await dialogo.preguntar({
+                      title: t('Salir del kiosko'),
+                      label: 'PIN',
+                      confirm: 'Salir',
+                      secret: true,
+                    })
+                    if (pin !== null) void leaveKiosk(pin)
                   }}
                 >
-                  Listo · {mode === 'arrange' ? 'ordenando' : 'editando'}
+                  {t('Salir del kiosko')}
                 </button>
-              </>
-            ))}
-          <button
-            type="button"
-            disabled={!ring.undo}
-            onClick={undo}
-            title="Deshacer (Ctrl+Z) — todo edit, consola incluida"
-          >
-            ↶
-          </button>
-          <button type="button" disabled={!ring.redo} onClick={redo} title="Rehacer (Ctrl+Mayús+Z)">
-            ↷
-          </button>
-          {/* Reachable whenever there is something to save. It used to hide
-              outside the console's edit modes, which left every other screen
-              -- patch a fixture, edit a function -- with the "sin guardar"
-              notice and no way to act on it. */}
-          {dirty && (
-            <button type="button" onClick={persist}>
-              Guardar
-            </button>
-          )}
-          {kiosk && (
+              )}
+            </div>
+
+            <div className="tb-group tb-transport">
+              <BpmDock beatTick={beatTick} />
+              <StopAll running={running.size} onError={setToast} />
+            </div>
+          </div>
+
+          <div className="tb-group tb-live">
+            <GrandMasterDock
+              state={grandMaster}
+              learning={lastInput}
+              onState={setGrandMaster}
+              onError={setToast}
+            />
             <button
               type="button"
-              title={t('Salir del kiosko')}
-              onClick={() => {
-                const pin = window.prompt('PIN')
-                void leaveKiosk(pin)
-              }}
+              className="danger tb-blackout"
+              data-active={blackout}
+              aria-pressed={blackout}
+              onClick={() =>
+                api.blackout(!blackout).then(
+                  (state) => setBlackout(state.blackout),
+                  (e: unknown) => setToast(e instanceof Error ? e.message : String(e)),
+                )
+              }
             >
-              {t('Salir del kiosko')}
+              {blackout ? 'SALIR DE BLACKOUT' : 'BLACKOUT'}
             </button>
-          )}
-          <BpmDock beatTick={beatTick} />
-          <StopAll running={running.size} onError={setToast} />
-          <button
-            type="button"
-            className="danger"
-            data-active={blackout}
-            aria-pressed={blackout}
-            onClick={() =>
-              api.blackout(!blackout).then(
-                (state) => setBlackout(state.blackout),
-                (e: unknown) => setToast(e instanceof Error ? e.message : String(e)),
-              )
-            }
-          >
-            {blackout ? 'SALIR DE BLACKOUT' : 'BLACKOUT'}
-          </button>
+          </div>
         </header>
 
+        {/* Losing the desk is the one state that must not be missed: the whole
+            width, in the danger colour, saying what is being done about it. */}
+        {offline && (
+          <div className="offline" role="alert">
+            <Icon name="warning" size={18} />
+            <span>Sin conexión con la mesa · reintentando</span>
+          </div>
+        )}
+
         {toast !== null && (
-          <p className="toast" role="alert">
-            {toast}
-          </p>
+          <Toast
+            toast={typeof toast === 'string' ? { text: toast, kind: 'error' } : toast}
+            onClose={() => setToast(null)}
+          />
         )}
 
         {/* A crash left edits newer than the file. Offered, never auto-loaded:
@@ -1257,15 +1417,16 @@ export function App() {
         )}
 
         {/* Closing the desktop window over unsaved edits. Guardar y salir is
-            first because it is almost always the answer; Cancelar leaves
+            the default because it is almost always the answer; Cancelar leaves
             everything exactly as it was. */}
         {closeAsk && (
-          <dialog className="gate" open aria-label="Cerrar con cambios sin guardar">
-            <div className="gate-card">
-              <h2>Hay cambios sin guardar</h2>
-              <p>¿Guardar el proyecto antes de salir?</p>
+          <Sheet label="Cerrar con cambios sin guardar" size="s" onClose={() => setCloseAsk(false)}>
+            <h2>Hay cambios sin guardar</h2>
+            <p>¿Guardar el proyecto antes de salir?</p>
+            <div className="sheet-actions" data-stack="true">
               <button
                 type="button"
+                className="primary"
                 onClick={() =>
                   api.saveProject().then(
                     () => resolveClose(),
@@ -1278,23 +1439,29 @@ export function App() {
               >
                 Guardar y salir
               </button>
-              <button type="button" onClick={() => resolveClose()}>
+              <button type="button" className="destructive" onClick={() => resolveClose()}>
                 Salir sin guardar
               </button>
               <button type="button" onClick={() => setCloseAsk(false)}>
                 Cancelar
               </button>
             </div>
-          </dialog>
+          </Sheet>
         )}
 
-        {/* Full-screen on purpose: nothing behind it works without the token,
-            and a console that half-renders and half-refuses reads as broken
-            rather than as locked. */}
+        {/* Nothing behind it works without the token, and a console that
+            half-renders and half-refuses reads as broken rather than as
+            locked -- so this one cannot be waved away. */}
         {needToken && (
-          <dialog className="gate" open aria-label="Conectar con la mesa">
+          <Sheet
+            label="Conectar con la mesa"
+            size="s"
+            className="gate"
+            dismissable={false}
+            onClose={() => undefined}
+          >
             <form
-              className="gate-card"
+              className="sheet-form"
               onSubmit={(event) => {
                 event.preventDefault()
                 const field = event.currentTarget.elements.namedItem('token') as HTMLInputElement
@@ -1318,9 +1485,13 @@ export function App() {
                 placeholder="Token"
                 aria-label="Token de acceso"
               />
-              <button type="submit">Conectar</button>
+              <div className="sheet-actions">
+                <button type="submit" className="primary">
+                  Conectar
+                </button>
+              </div>
             </form>
-          </dialog>
+          </Sheet>
         )}
 
         {view === 'console' && (pages.length > 1 || framePages > 1) && (
@@ -1410,7 +1581,15 @@ export function App() {
           </div>
         )}
 
-        {view === 'desk' ? (
+        {view === 'build' ? (
+          <main className="console">
+            <Montaje
+              visible={visibleViews}
+              counts={{ functions: functions.length, fixtures: fixtures.length }}
+              onView={goTo}
+            />
+          </main>
+        ) : view === 'desk' ? (
           <main className="console">
             <Mesa
               fixtures={fixtures}
@@ -1461,6 +1640,7 @@ export function App() {
               levels={groupLevels}
               onLevel={setGroupLevel}
               onChanged={reloadFixtures}
+              onDeleted={(what) => notify(what, { label: 'Deshacer', run: () => void undo() })}
             />
           </main>
         ) : view === 'functions' ? (
@@ -1474,6 +1654,7 @@ export function App() {
               onToggle={toggle}
               onTransport={transport}
               onChanged={reloadFunctions}
+              onDeleted={(what) => notify(what, { label: 'Deshacer', run: () => void undo() })}
             />
           </main>
         ) : (
@@ -1527,7 +1708,11 @@ export function App() {
                   selecting={mode === 'edit'}
                   selected={selected}
                   onSelect={setSelected}
+                  levelsOpen={levelsOpen}
+                  onLevelsOpen={setLevelsOpen}
                 />
+              ) : functions.length === 0 && fixtures.length === 0 && !error ? (
+                <EmptyDesk visible={visibleViews} onView={goTo} />
               ) : (
                 <FunctionList functions={functions} onToggle={toggle} />
               )}
@@ -1591,7 +1776,12 @@ function Surface({
   selected,
   onSelect,
   desk,
+  levelsOpen,
+  onLevelsOpen,
 }: {
+  /** On a phone the levels are a sheet over the console: open or folded. */
+  levelsOpen: boolean
+  onLevelsOpen: (open: boolean) => void
   rows: Row[]
   running: Set<number>
   allFunctions: FunctionState[]
@@ -1703,8 +1893,20 @@ function Surface({
         </div>
 
         {levelGroups.length > 0 && (
-          <aside className="levels" aria-label="Niveles">
-            <h2 className="section">Niveles</h2>
+          <aside className="levels" aria-label="Niveles" data-open={levelsOpen}>
+            {/* With room this is a heading over a column. On a phone it is the
+                handle of a sheet: a tap raises the faders over the console and
+                another puts them away, so a fader is never more than one touch
+                from the hand holding the phone. */}
+            <button
+              type="button"
+              className="levels-handle"
+              aria-expanded={levelsOpen}
+              onClick={() => onLevelsOpen(!levelsOpen)}
+            >
+              <h2 className="section">Niveles</h2>
+              <Icon name={levelsOpen ? 'chevronDown' : 'chevronUp'} size={18} />
+            </button>
             {levelGroups.map((group, index) => (
               <div className="levels-group" key={group.title ?? `levels-${index}`}>
                 {/* Only worth a caption when there is more than one group to
@@ -1896,6 +2098,23 @@ function Widget({
     '--grow': grow,
     ...(tint ? { '--tint': tint } : {}),
   } as React.CSSProperties
+  /* A running card fills with its own colour, so the screen shows what the
+     rig is doing. Whether the words on that fill are dark or light depends on
+     the colour, and only arithmetic can say which. */
+  const lit = litOnLight(tint)
+
+  /* Pressed and not yet answered: the card says so the instant the finger
+     lands, and stops saying it when the daemon's word arrives -- or after a
+     second and a half, when it plainly is not coming. */
+  const fid = widget.functionId
+  const isOn = fid !== undefined && running.has(fid)
+  const [pendingFrom, setPendingFrom] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (pendingFrom === null) return
+    const timer = setTimeout(() => setPendingFrom(null), 1500)
+    return () => clearTimeout(timer)
+  }, [pendingFrom])
+  const pending = pendingFrom !== null && pendingFrom === isOn
 
   /* Where the finger went down, and whether it has gone anywhere since. In a
      ref because a drag that re-rendered on every pixel would drop frames on the
@@ -2028,6 +2247,7 @@ function Widget({
           className="widget button"
           style={style}
           data-tint={tint !== undefined}
+          data-on-light={lit}
           data-running={active}
           aria-pressed={active}
           onClick={() => desk.onAction(action)}
@@ -2050,6 +2270,7 @@ function Widget({
             className="widget button"
             style={style}
             data-tint={tint !== undefined}
+            data-on-light={lit}
             data-running={running.has(id)}
             aria-pressed={running.has(id)}
             onPointerDown={(e) => {
@@ -2086,9 +2307,14 @@ function Widget({
             className="widget button"
             style={style}
             data-tint={tint !== undefined}
+            data-on-light={lit}
+            data-pending={pending}
             data-running={running.has(id)}
             aria-pressed={running.has(id)}
-            onClick={() => desk.onOverride(id)}
+            onClick={() => {
+              setPendingFrom(isOn)
+              desk.onOverride(id)
+            }}
           >
             {widget.caption || `#${id}`}
           </button>
@@ -2101,9 +2327,14 @@ function Widget({
           className="widget button"
           style={style}
           data-tint={tint !== undefined}
+          data-on-light={lit}
+          data-pending={pending}
           data-running={running.has(id)}
           aria-pressed={running.has(id)}
-          onClick={() => onToggle(id)}
+          onClick={() => {
+            setPendingFrom(isOn)
+            onToggle(id)
+          }}
         >
           {widget.caption || `#${id}`}
         </button>
@@ -2436,7 +2667,7 @@ function ClockFace({ widget, style }: { widget: VcWidget; style: React.CSSProper
       <span className="clock-face num">{face}</span>
       {(widget.schedules?.length ?? 0) > 0 && (
         <span className="chip num" title="Programaciones de la agenda (corren en el daemon)">
-          ⏰ {widget.schedules?.length}
+          <Icon name="clock" size={14} /> {widget.schedules?.length}
         </span>
       )}
     </div>
@@ -2485,6 +2716,56 @@ function Fader({
         onChange={(e) => widget.id !== undefined && onChange(widget.id, Number(e.target.value))}
       />
     </label>
+  )
+}
+
+/**
+ * A desk with nothing on it yet. Not a blank console with an apology, but the
+ * three steps that make one, each a button that goes to where it is done.
+ */
+function EmptyDesk({ visible, onView }: { visible: View[]; onView: (view: View) => void }) {
+  const steps: { view: View; title: string; detail: string }[] = [
+    {
+      view: 'setup',
+      title: 'Patchea tus focos',
+      detail: 'Elige los modelos y dales una dirección DMX.',
+    },
+    { view: 'functions', title: 'Crea una escena', detail: 'Un look: qué canales, a qué valor.' },
+    {
+      view: 'console',
+      title: 'Ponla en un botón',
+      detail: 'Ordenar y Editar, aquí en la consola.',
+    },
+  ]
+  return (
+    <section className="empty-desk" aria-label="Mesa vacía">
+      <h1 className="screen-title">Una mesa vacía</h1>
+      <p className="hint">Tres pasos y el show tiene algo que tocar.</p>
+      <ol className="list" data-inset="true">
+        {steps
+          .filter((step) => visible.includes(step.view))
+          .map((step, index) => (
+            <li key={step.view}>
+              <button type="button" className="list-row" onClick={() => onView(step.view)}>
+                <span className="step-number num" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <span className="list-text">
+                  <strong>{step.title}</strong>
+                  <span>{step.detail}</span>
+                </span>
+                <Icon name="chevronRight" size={18} />
+              </button>
+            </li>
+          ))}
+      </ol>
+      {visible.includes('assistant') && (
+        <p className="hint">
+          O cuéntaselo al Asistente (Ctrl+K) y que lo monte él: «seis PAR LED en el universo 1 y una
+          escena azul».
+        </p>
+      )}
+    </section>
   )
 }
 
@@ -2569,7 +2850,13 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
       onPointerLeave={stop}
       onPointerCancel={stop}
     >
-      {held > 0 ? 'Suelta para cancelar…' : 'Operador 🔒'}
+      {held > 0 ? (
+        'Suelta para cancelar…'
+      ) : (
+        <>
+          <Icon name="lock" size={18} /> Operador
+        </>
+      )}
     </button>
   )
 }
@@ -2578,18 +2865,30 @@ function Unlock({ onUnlock }: { onUnlock: () => void }) {
  * The settings the reference keeps in its UI dialog: theme, scale, language
  * -- and About, because a bug report without a version is a riddle. All
  * local to this device: two phones on one desk can disagree about language.
+ *
+ * Grouped the way a settings screen is read: how this screen looks, which
+ * devices reach the desk, the assistant, and what this is.
  */
 function Settings({
   theme,
   scale,
+  dim,
+  devices,
   onTheme,
   onScale,
+  onDim,
+  onDevices,
   onClose,
 }: {
   theme: Theme
   scale: number
+  dim: number
+  /** Whether this device may see the paired devices at all. */
+  devices: boolean
   onTheme: (theme: Theme) => void
   onScale: (scale: number) => void
+  onDim: (dim: number) => void
+  onDevices: () => void
   onClose: () => void
 }) {
   const [about, setAbout] = useState<{ version?: string; name?: string } | null>(null)
@@ -2602,27 +2901,74 @@ function Settings({
   }, [])
 
   return (
-    <dialog className="gate" open aria-label={t('Ajustes')}>
-      <div className="gate-card">
+    <Sheet label={t('Ajustes')} size="m" onClose={onClose}>
+      <header className="sheet-head">
         <h2>{t('Ajustes')}</h2>
+        <button type="button" className="primary" onClick={onClose}>
+          Listo
+        </button>
+      </header>
 
-        <label className="field">
+      <section className="settings-group" aria-label="Apariencia">
+        <h3>Apariencia</h3>
+        <div className="field">
           <span>{t('Tema')}</span>
-          <select value={theme} onChange={(e) => onTheme(e.target.value as Theme)}>
-            <option value="stage">{t('Pase')}</option>
-            <option value="blackout">{t('Oscuro')}</option>
-          </select>
-        </label>
+          <Segmented
+            label={t('Tema')}
+            value={theme}
+            options={[
+              {
+                value: 'light',
+                label: t('Claro'),
+                title: 'Para montar con luz: una oficina, de día',
+              },
+              {
+                value: 'grey',
+                label: t('Gris'),
+                title: 'Para la media luz: con la luz de trabajo encendida',
+              },
+              { value: 'stage', label: t('Oscuro'), title: 'Para la función, a oscuras' },
+              {
+                value: 'blackout',
+                label: t('Pase'),
+                title: 'Solo rojo, para no perder la vista en la oscuridad (Ctrl+Alt+P)',
+              },
+            ]}
+            onChange={onTheme}
+          />
+        </div>
 
-        <label className="field">
+        {/* Below the screen's own minimum: a black veil over everything. It
+            only matters in the pass, so that is where it is offered. */}
+        {theme === 'blackout' && (
+          <label className="field">
+            <span className="field-head">
+              Atenuar
+              <span className="num">{Math.round(dim * 100)}%</span>
+            </span>
+            <Slider
+              min={0}
+              max={60}
+              step={5}
+              value={Math.round(dim * 100)}
+              aria-label="Atenuar la pantalla"
+              onChange={(e) => onDim(Number(e.target.value) / 100)}
+            />
+          </label>
+        )}
+
+        <div className="field">
           <span>{t('Escala')}</span>
-          <select value={String(scale)} onChange={(e) => onScale(Number(e.target.value))}>
-            <option value="0.85">85%</option>
-            <option value="1">100%</option>
-            <option value="1.15">115%</option>
-            <option value="1.3">130%</option>
-          </select>
-        </label>
+          <Segmented
+            label={t('Escala')}
+            value={String(scale)}
+            options={['0.85', '1', '1.15', '1.3'].map((value) => ({
+              value,
+              label: `${Math.round(Number(value) * 100)}%`,
+            }))}
+            onChange={(value) => onScale(Number(value))}
+          />
+        </div>
 
         <label className="field">
           <span>{t('Idioma')}</span>
@@ -2639,20 +2985,52 @@ function Settings({
             <option value="en">English</option>
           </select>
         </label>
+      </section>
 
-        <AssistantSettings />
+      {devices && (
+        <section className="settings-group" aria-label={t('Dispositivos')}>
+          <ul className="list" data-inset="true">
+            <li>
+              <button type="button" className="list-row" onClick={onDevices}>
+                <Icon name="devices" />
+                <span className="list-text">
+                  <strong>{t('Dispositivos')}</strong>
+                  <span>Móviles y tabletas que llegan a la mesa, y cómo emparejar uno</span>
+                </span>
+                <Icon name="chevronRight" size={18} />
+              </button>
+            </li>
+          </ul>
+        </section>
+      )}
 
-        <p className="hint">
-          {/* The daemon's name IS OrchidLights; repeating it read as a stutter. */}
-          OrchidLights{about?.version ? ` · ${about.version}` : ''} · Apache-2.0 · motor QLC+ (fork)
-        </p>
+      <AssistantSettings />
 
-        <div className="gate-actions">
-          <button type="button" onClick={onClose}>
-            Listo
-          </button>
-        </div>
-      </div>
-    </dialog>
+      <p className="hint about">
+        {/* The daemon's name IS OrchidLights; repeating it read as a stutter. */}
+        OrchidLights{about?.version ? ` · ${about.version}` : ''} · Apache-2.0 · motor QLC+ (fork)
+      </p>
+    </Sheet>
   )
+}
+
+/**
+ * Whether a running card's fill is light enough to need dark words on it.
+ *
+ * The fill is the card's colour mixed three to one with the screen's own
+ * text colour -- what `.widget.button[data-running="true"]` paints -- so the
+ * same mix is done here, in the same space (sRGB, the space CSS color-mix
+ * uses by default), and its luminance decides. Above 0.18, white text falls
+ * under 4.5:1. A card with no colour of its own fills with the live green.
+ */
+export function litOnLight(tint: string | undefined): boolean {
+  const base = /^#[0-9a-f]{6}$/i.test(tint ?? '') ? (tint as string) : '#38d9a9'
+  const text = [0xeb, 0xed, 0xf1]
+  const channel = (i: number) => {
+    const c = Number.parseInt(base.slice(1 + i * 2, 3 + i * 2), 16)
+    const mixed = (0.75 * c + 0.25 * (text[i] as number)) / 255
+    return mixed <= 0.03928 ? mixed / 12.92 : ((mixed + 0.055) / 1.055) ** 2.4
+  }
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2)
+  return luminance > 0.18
 }

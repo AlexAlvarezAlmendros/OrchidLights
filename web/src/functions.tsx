@@ -21,9 +21,11 @@ import {
   type FunctionUsage,
   api,
 } from './api'
+import { Icon } from './icons'
 import { Palettes } from './paletas'
 import { ShowTimeline } from './show'
 import { Slider } from './slider'
+import { Sheet, dialogo } from './ui'
 
 /** The seven EFX patterns the engine has. Fixed, unlike the RGB algorithms,
  *  which are scripts and are asked for at runtime. */
@@ -60,7 +62,10 @@ export function Functions({
   onToggle,
   onTransport,
   onChanged,
+  onDeleted,
 }: {
+  /** A function was removed: the shell offers the way back. */
+  onDeleted?: (what: string) => void
   functions: FunctionState[]
   fixtures: FixtureState[]
   running: Set<number>
@@ -76,6 +81,9 @@ export function Functions({
   const [selected, setSelected] = useState<number | null>(null)
   const [type, setType] = useState('Scene')
   const [name, setName] = useState('')
+  /* Making a function is a moment, not a fixture of the screen: most visits
+     here are to find one and run or edit it, so the form waits in a sheet. */
+  const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -122,160 +130,23 @@ export function Functions({
   const current = functions.find((f) => f.id === selected) ?? null
 
   return (
-    <section className="setup">
-      {error && <p className="editor-error">{error}</p>}
+    <section className="setup functions-screen" data-detail={current !== null}>
+      <div className="fn-list">
+        {error && <p className="editor-error">{error}</p>}
 
-      <div className="fields">
-        <label className="field grow-field">
-          <span>Buscar</span>
-          <input
-            value={search}
-            placeholder="Nombre de función"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Filtrar</span>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-            <option value="">Todas</option>
-            {TYPES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          aria-pressed={selecting}
-          onClick={() => {
-            setSelecting((on) => !on)
-            setChecked(new Set())
-          }}
-        >
-          Selección
-        </button>
-      </div>
-
-      {selecting && (
-        <div className="fields batch-bar">
-          <span className="chip num">{checked.size} elegidas</span>
+        <div className="fields">
           <label className="field grow-field">
-            <span>Nombre base / carpeta</span>
+            <span>Buscar</span>
             <input
-              value={batchName}
-              placeholder="Tema o Bolo/Sábado"
-              onChange={(e) => setBatchName(e.target.value)}
+              value={search}
+              placeholder="Nombre de función"
+              onChange={(e) => setSearch(e.target.value)}
             />
           </label>
-          <button
-            type="button"
-            disabled={checked.size === 0 || batchName.trim() === ''}
-            title="«Tema» sobre 3 funciones da Tema 1, Tema 2, Tema 3"
-            onClick={() => {
-              const base = batchName.trim()
-              const ids = functions.filter((f) => checked.has(f.id)).map((f) => f.id)
-              run(async () => {
-                let ordinal = 1
-                for (const id of ids) {
-                  await api.patchFunction(id, { name: `${base} ${ordinal}` })
-                  ordinal++
-                }
-              }).catch(() => undefined)
-            }}
-          >
-            Renombrar numerando
-          </button>
-          <button
-            type="button"
-            disabled={checked.size === 0}
-            title="Crea un botón en la consola por cada función elegida, en un marco nuevo"
-            onClick={() => {
-              const ids = functions.filter((f) => checked.has(f.id)).map((f) => f.id)
-              run(async () => {
-                const frame = await api.addWidget({
-                  type: 'frame',
-                  caption: batchName.trim() || 'Botonera',
-                  geometry: { x: 0, y: 0, width: 460, height: 220 },
-                })
-                let column = 0
-                for (const id of ids) {
-                  const fn = functions.find((f) => f.id === id)
-                  await api.addWidget({
-                    type: 'button',
-                    parent: Number(frame.id),
-                    caption: fn?.name ?? `#${id}`,
-                    functionId: id,
-                    geometry: {
-                      x: (column % 4) * 110,
-                      y: Math.floor(column / 4) * 70,
-                      width: 100,
-                      height: 60,
-                    },
-                  })
-                  column++
-                }
-              }).catch(() => undefined)
-            }}
-          >
-            Crear botonera
-          </button>
-          <button
-            type="button"
-            disabled={checked.size === 0}
-            title="Un marco con un fader de playback por función elegida: nivel = intensidad de la función"
-            onClick={() => {
-              const ids = [...checked]
-              run(async () => {
-                const frame = await api.addWidget({
-                  type: 'frame',
-                  caption: batchName.trim() || 'Faders',
-                  geometry: { x: 0, y: 240, width: 460, height: 240 },
-                })
-                let column = 0
-                for (const id of ids) {
-                  const fn = functions.find((f) => f.id === id)
-                  await api.addWidget({
-                    type: 'slider',
-                    parent: Number(frame.id),
-                    caption: fn?.name ?? `#${id}`,
-                    functionId: id,
-                    geometry: {
-                      x: column * 90,
-                      y: 0,
-                      width: 80,
-                      height: 200,
-                    },
-                  })
-                  column++
-                }
-              }).catch(() => undefined)
-            }}
-          >
-            Crear faders
-          </button>
-          <button
-            type="button"
-            disabled={checked.size === 0}
-            title="Mueve las elegidas a esa carpeta; vacío las saca a la raíz"
-            onClick={() => {
-              const folder = batchName.trim()
-              const ids = [...checked]
-              run(async () => {
-                for (const id of ids) await api.patchFunction(id, { path: folder })
-              }).catch(() => undefined)
-            }}
-          >
-            Mover a carpeta
-          </button>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="fields">
           <label className="field">
-            <span>Tipo</span>
-            <select value={type} onChange={(e) => setType(e.target.value)}>
+            <span>Filtrar</span>
+            <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="">Todas</option>
               {TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
@@ -283,105 +154,275 @@ export function Functions({
               ))}
             </select>
           </label>
-          <label className="field grow-field">
-            <span>Nombre</span>
-            <input
-              value={name}
-              placeholder="Nueva función"
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
+          <button
+            type="button"
+            aria-pressed={selecting}
+            onClick={() => {
+              setSelecting((on) => !on)
+              setChecked(new Set())
+            }}
+          >
+            Selección
+          </button>
+          <button type="button" className="primary" onClick={() => setCreating(true)}>
+            <Icon name="plus" size={18} /> Nueva función
+          </button>
         </div>
-        <button
-          type="button"
-          className="primary"
-          disabled={name.trim() === ''}
-          onClick={() =>
-            run(() =>
-              api.createFunction(type, name.trim()).then((created) => {
-                setName('')
-                setSelected(created.id)
-              }),
-            ).catch(() => undefined)
-          }
-        >
-          Crear
-        </button>
+
+        {selecting && (
+          <div className="fields batch-bar">
+            <span className="chip num">{checked.size} elegidas</span>
+            <label className="field grow-field">
+              <span>Nombre base / carpeta</span>
+              <input
+                value={batchName}
+                placeholder="Tema o Bolo/Sábado"
+                onChange={(e) => setBatchName(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={checked.size === 0 || batchName.trim() === ''}
+              title="«Tema» sobre 3 funciones da Tema 1, Tema 2, Tema 3"
+              onClick={() => {
+                const base = batchName.trim()
+                const ids = functions.filter((f) => checked.has(f.id)).map((f) => f.id)
+                run(async () => {
+                  let ordinal = 1
+                  for (const id of ids) {
+                    await api.patchFunction(id, { name: `${base} ${ordinal}` })
+                    ordinal++
+                  }
+                }).catch(() => undefined)
+              }}
+            >
+              Renombrar numerando
+            </button>
+            <button
+              type="button"
+              disabled={checked.size === 0}
+              title="Crea un botón en la consola por cada función elegida, en un marco nuevo"
+              onClick={() => {
+                const ids = functions.filter((f) => checked.has(f.id)).map((f) => f.id)
+                run(async () => {
+                  const frame = await api.addWidget({
+                    type: 'frame',
+                    caption: batchName.trim() || 'Botonera',
+                    geometry: { x: 0, y: 0, width: 460, height: 220 },
+                  })
+                  let column = 0
+                  for (const id of ids) {
+                    const fn = functions.find((f) => f.id === id)
+                    await api.addWidget({
+                      type: 'button',
+                      parent: Number(frame.id),
+                      caption: fn?.name ?? `#${id}`,
+                      functionId: id,
+                      geometry: {
+                        x: (column % 4) * 110,
+                        y: Math.floor(column / 4) * 70,
+                        width: 100,
+                        height: 60,
+                      },
+                    })
+                    column++
+                  }
+                }).catch(() => undefined)
+              }}
+            >
+              Crear botonera
+            </button>
+            <button
+              type="button"
+              disabled={checked.size === 0}
+              title="Un marco con un fader de playback por función elegida: nivel = intensidad de la función"
+              onClick={() => {
+                const ids = [...checked]
+                run(async () => {
+                  const frame = await api.addWidget({
+                    type: 'frame',
+                    caption: batchName.trim() || 'Faders',
+                    geometry: { x: 0, y: 240, width: 460, height: 240 },
+                  })
+                  let column = 0
+                  for (const id of ids) {
+                    const fn = functions.find((f) => f.id === id)
+                    await api.addWidget({
+                      type: 'slider',
+                      parent: Number(frame.id),
+                      caption: fn?.name ?? `#${id}`,
+                      functionId: id,
+                      geometry: {
+                        x: column * 90,
+                        y: 0,
+                        width: 80,
+                        height: 200,
+                      },
+                    })
+                    column++
+                  }
+                }).catch(() => undefined)
+              }}
+            >
+              Crear faders
+            </button>
+            <button
+              type="button"
+              disabled={checked.size === 0}
+              title="Mueve las elegidas a esa carpeta; vacío las saca a la raíz"
+              onClick={() => {
+                const folder = batchName.trim()
+                const ids = [...checked]
+                run(async () => {
+                  for (const id of ids) await api.patchFunction(id, { path: folder })
+                }).catch(() => undefined)
+              }}
+            >
+              Mover a carpeta
+            </button>
+          </div>
+        )}
+
+        {creating && (
+          <Sheet label="Nueva función" size="m" onClose={() => setCreating(false)}>
+            <form
+              className="sheet-form"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (name.trim() === '') return
+                run(() =>
+                  api.createFunction(type, name.trim()).then((created) => {
+                    setName('')
+                    setCreating(false)
+                    setSelected(created.id)
+                  }),
+                ).catch(() => undefined)
+              }}
+            >
+              <h2>Nueva función</h2>
+              <fieldset className="type-grid">
+                <legend>Tipo</legend>
+                {TYPES.map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    aria-pressed={type === t.value}
+                    onClick={() => setType(t.value)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </fieldset>
+              <label className="field">
+                <span>Nombre</span>
+                <input
+                  // biome-ignore lint/a11y/noAutofocus: the sheet exists to type this one name
+                  autoFocus
+                  value={name}
+                  placeholder="Nueva función"
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              <div className="sheet-actions">
+                <button type="button" onClick={() => setCreating(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="primary" disabled={name.trim() === ''}>
+                  Crear
+                </button>
+              </div>
+            </form>
+          </Sheet>
+        )}
+
+        <Palettes fixtures={fixtures} onError={setError} />
+
+        {functions.length === 0 && <p className="hint">Este proyecto no tiene funciones.</p>}
+
+        {byType.map((group) => (
+          <div key={group.value} className="stack">
+            <h3 className="group-title">
+              {group.label} ({group.items.length})
+            </h3>
+            {group.folders.map(({ folder, items }) => (
+              <div key={folder || '(raíz)'} className="stack">
+                {folder !== '' && (
+                  <h4 className="folder-title">
+                    <Icon name="folder" size={16} /> {folder}
+                  </h4>
+                )}
+                <div className="table">
+                  {items.map((f) => (
+                    <div className="table-row" key={f.id} data-selected={f.id === selected}>
+                      {selecting && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Elegir ${f.name}`}
+                          checked={checked.has(f.id)}
+                          onChange={(e) =>
+                            setChecked((current) => {
+                              const next = new Set(current)
+                              if (e.target.checked) next.add(f.id)
+                              else next.delete(f.id)
+                              return next
+                            })
+                          }
+                        />
+                      )}
+                      <button
+                        type="button"
+                        className="grow linkish left"
+                        onClick={() => setSelected(f.id === selected ? null : f.id)}
+                      >
+                        {f.name}
+                      </button>
+                      <span className="hint">
+                        {f.fadeIn ?? 0} / {f.duration ?? 0} ms
+                      </span>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-pressed={running.has(f.id)}
+                        aria-label={running.has(f.id) ? `Parar ${f.name}` : `Arrancar ${f.name}`}
+                        data-running={running.has(f.id)}
+                        onClick={() => onToggle(f.id)}
+                      >
+                        <Icon name={running.has(f.id) ? 'stop' : 'play'} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {visible.length === 0 && functions.length > 0 && (
+          <p className="hint">Nada responde a ese filtro.</p>
+        )}
       </div>
 
-      <Palettes fixtures={fixtures} onError={setError} />
-
-      {functions.length === 0 && <p className="hint">Este proyecto no tiene funciones.</p>}
-
-      {byType.map((group) => (
-        <div key={group.value} className="stack">
-          <h3 className="group-title">
-            {group.label} ({group.items.length})
-          </h3>
-          {group.folders.map(({ folder, items }) => (
-            <div key={folder || '(raíz)'} className="stack">
-              {folder !== '' && <h4 className="folder-title">📁 {folder}</h4>}
-              <div className="table">
-                {items.map((f) => (
-                  <div className="table-row" key={f.id} data-selected={f.id === selected}>
-                    {selecting && (
-                      <input
-                        type="checkbox"
-                        aria-label={`Elegir ${f.name}`}
-                        checked={checked.has(f.id)}
-                        onChange={(e) =>
-                          setChecked((current) => {
-                            const next = new Set(current)
-                            if (e.target.checked) next.add(f.id)
-                            else next.delete(f.id)
-                            return next
-                          })
-                        }
-                      />
-                    )}
-                    <button
-                      type="button"
-                      className="grow linkish left"
-                      onClick={() => setSelected(f.id === selected ? null : f.id)}
-                    >
-                      {f.name}
-                    </button>
-                    <span className="hint">
-                      {f.fadeIn ?? 0} / {f.duration ?? 0} ms
-                    </span>
-                    <button
-                      type="button"
-                      aria-pressed={running.has(f.id)}
-                      data-running={running.has(f.id)}
-                      onClick={() => onToggle(f.id)}
-                    >
-                      {running.has(f.id) ? '⏹' : '▶'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-
-      {visible.length === 0 && functions.length > 0 && (
-        <p className="hint">Nada responde a ese filtro.</p>
-      )}
-
       {current && (
-        <FunctionEditor
-          fn={current}
-          functions={functions}
-          fixtures={fixtures}
-          revision={revision}
-          elapsed={shows[current.id]?.elapsed}
-          paused={shows[current.id]?.paused === true}
-          running={running.has(current.id)}
-          onRun={run}
-          onTransport={onTransport}
-          onClose={() => setSelected(null)}
-        />
+        <div className="fn-detail">
+          {/* On a phone the editor is the whole screen, and this is the way
+              back to the list -- where the hand expects it, top left. */}
+          <button type="button" className="back-button" onClick={() => setSelected(null)}>
+            <Icon name="chevronLeft" size={18} /> Funciones
+          </button>
+          <FunctionEditor
+            fn={current}
+            functions={functions}
+            fixtures={fixtures}
+            revision={revision}
+            elapsed={shows[current.id]?.elapsed}
+            paused={shows[current.id]?.paused === true}
+            running={running.has(current.id)}
+            onRun={run}
+            onTransport={onTransport}
+            onClose={() => setSelected(null)}
+            {...(onDeleted ? { onDeleted } : {})}
+          />
+        </div>
       )}
     </section>
   )
@@ -398,7 +439,9 @@ function FunctionEditor({
   onRun,
   onTransport,
   onClose,
+  onDeleted,
 }: {
+  onDeleted?: (what: string) => void
   fn: FunctionState
   functions: FunctionState[]
   fixtures: FixtureState[]
@@ -445,7 +488,7 @@ function FunctionEditor({
         </span>
         <span className="spacer" />
         <button type="button" onClick={onClose} aria-label="Cerrar">
-          ✕
+          <Icon name="close" size={18} />
         </button>
       </header>
 
@@ -608,12 +651,24 @@ function FunctionEditor({
              and names what. Asking is better than a force that silently leaves
              chaser steps aiming at nothing. */
           onRun(() => api.removeFunction(fn.id))
-            .then(onClose)
-            .catch((e) => {
+            .then(() => {
+              onClose()
+              onDeleted?.(`«${fn.name}» borrada`)
+            })
+            .catch(async (e) => {
               const reason = e instanceof Error ? e.message : String(e)
-              if (confirm(`${reason}\n\n¿Borrarla de todos modos?`)) {
+              const force = await dialogo.confirmar({
+                title: '¿Borrarla de todos modos?',
+                message: reason,
+                confirm: 'Borrar',
+                destructive: true,
+              })
+              if (force) {
                 onRun(() => api.removeFunction(fn.id, true))
-                  .then(onClose)
+                  .then(() => {
+                    onClose()
+                    onDeleted?.(`«${fn.name}» borrada`)
+                  })
                   .catch(() => undefined)
               }
             })
@@ -859,7 +914,7 @@ function EfxBody({
                   )
                 }
               >
-                ✕
+                <Icon name="close" size={18} />
               </button>
             </li>
           ))}
@@ -1338,7 +1393,7 @@ function ChaserSteps({
               aria-label={`Subir paso ${step.index + 1}`}
               onClick={() => move(step.index, step.index - 1)}
             >
-              ↑
+              <Icon name="arrowUp" />
             </button>
             <button
               type="button"
@@ -1346,14 +1401,14 @@ function ChaserSteps({
               aria-label={`Bajar paso ${step.index + 1}`}
               onClick={() => move(step.index, step.index + 1)}
             >
-              ↓
+              <Icon name="arrowDown" />
             </button>
             <button
               type="button"
               aria-label={`Quitar paso ${step.index + 1}`}
               onClick={() => onApply(() => api.removeChaserStep(fn.id, step.index))}
             >
-              ✕
+              <Icon name="close" size={18} />
             </button>
           </li>
         ))}
@@ -1442,7 +1497,7 @@ function SequenceSteps({
                 aria-label={`Quitar paso ${step.index + 1}`}
                 onClick={() => onApply(() => api.removeChaserStep(fn.id, step.index))}
               >
-                ✕
+                <Icon name="close" size={18} />
               </button>
             </div>
 
@@ -1768,7 +1823,7 @@ function ScenePalettes({
               aria-label={`Quitar palette ${palette.name}`}
               onClick={() => put(attached.filter((p) => p.id !== palette.id).map((p) => p.id))}
             >
-              ✕
+              <Icon name="close" size={18} />
             </button>
           </li>
         ))}
@@ -2095,7 +2150,7 @@ function Members({
                 )
               }
             >
-              ✕
+              <Icon name="close" size={18} />
             </button>
           </li>
         ))}

@@ -378,7 +378,7 @@ export default function Conversacion() {
         {cuantos === 0 && (
           <p className="hint chat-intro">
             {t(
-              'Cuéntale qué hay en la sala y qué quieres: fotos del espacio, el plano, qué foco va en cada sitio. Monta el proyecto aquí delante; los cambios se deshacen con ↶. Guardar es tuyo.',
+              'Cuéntale qué hay en la sala y qué quieres: fotos del espacio, el plano, qué foco va en cada sitio. Monta el proyecto aquí delante; los cambios se deshacen con Deshacer, arriba. Guardar es tuyo.',
             )}
           </p>
         )}

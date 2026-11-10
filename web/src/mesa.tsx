@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FixtureDetail, type FixtureState, type UniverseState, api } from './api'
+import { Icon } from './icons'
 import { Slider } from './slider'
 
 const PER_PAGE = 96
@@ -292,7 +293,7 @@ export function Mesa({
                     title="Soltar: la función de debajo vuelve a mandar"
                     onClick={() => releaseChannel(address)}
                   >
-                    ✕
+                    <Icon name="close" size={18} />
                   </button>
                 )}
               </div>

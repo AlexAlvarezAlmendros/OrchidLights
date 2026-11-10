@@ -66,5 +66,8 @@ export default defineConfig({
     environment: 'node',
     environmentMatchGlobs: [['src/**/*.test.tsx', 'jsdom']],
     setupFiles: ['src/test-setup.ts'],
+    /* CSS is blanked in tests by default, ?raw included. The stylesheet is
+       let through so tokens.test.ts can hold its colours to their contrast. */
+    css: { include: [/theme\.css/] },
   },
 })

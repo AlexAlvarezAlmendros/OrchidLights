@@ -1022,22 +1022,26 @@ export function Stage3D({
   return (
     <div className="stage3d">
       <div className="stage3d-bar">
-        {['libre', 'top', 'front', 'lado'].map((view) => (
-          <button
-            key={view}
-            type="button"
-            aria-pressed={camera === view}
-            onClick={() => setCamera(view)}
-          >
-            {view === 'libre'
-              ? 'Libre'
-              : view === 'top'
-                ? 'Cenital'
-                : view === 'front'
-                  ? 'Frontal'
-                  : 'Lateral'}
-          </button>
-        ))}
+        {/* The four cameras are one choice, drawn as one control. */}
+        {/* biome-ignore lint/a11y/useSemanticElements: a fieldset cannot be a flex track */}
+        <div className="segmented" role="group" aria-label="Cámara">
+          {['libre', 'top', 'front', 'lado'].map((view) => (
+            <button
+              key={view}
+              type="button"
+              aria-pressed={camera === view}
+              onClick={() => setCamera(view)}
+            >
+              {view === 'libre'
+                ? 'Libre'
+                : view === 'top'
+                  ? 'Cenital'
+                  : view === 'front'
+                    ? 'Frontal'
+                    : 'Lateral'}
+            </button>
+          ))}
+        </div>
 
         <button
           type="button"

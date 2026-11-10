@@ -12,7 +12,17 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { type RecentProject, api } from './api'
+import { Icon } from './icons'
 import { isShell, pickProjectToOpen, pickProjectToSave } from './shell'
+import { Sheet, dialogo, useDismiss } from './ui'
+
+export interface MenuExtra {
+  label: string
+  run: () => void
+  /** Set for one of a set of choices: the console's three modes. */
+  checked?: boolean
+  disabled?: boolean
+}
 
 interface ImportPreviewState {
   path: string
@@ -23,10 +33,22 @@ interface ImportPreviewState {
 export function ProjectMenu({
   name,
   dirty,
+  pass,
+  onPass,
+  extras = [],
   onError,
 }: {
   name: string
   dirty: boolean
+  /** The pass is a switch the operator reaches for mid-show, so it lives in
+   *  the one menu that is on every screen. Whether it is on, and the switch:
+   *  where it comes back to is the theme's business, not the menu's. */
+  pass?: boolean
+  onPass?: () => void
+  /** What a phone's bar has no room for, offered here instead: the console's
+   *  mode, operator mode, settings. A narrow toolbar moves its overflow into a
+   *  menu rather than shrinking every control below the size of a finger. */
+  extras?: MenuExtra[]
   /** Failures surface where every other out-of-band problem does. */
   onError: (message: string) => void
 }) {
@@ -49,14 +71,9 @@ export function ProjectMenu({
       .listProjects()
       .then((body) => setAvailable(body.projects))
       .catch(() => setAvailable([]))
-
-    const away = (event: PointerEvent) => {
-      if (menu.current?.contains(event.target as Node) === true) return
-      setOpen(false)
-    }
-    window.addEventListener('pointerdown', away)
-    return () => window.removeEventListener('pointerdown', away)
   }, [open])
+
+  useDismiss(open, menu, () => setOpen(false))
 
   const guard = (work: () => Promise<unknown>) => {
     setOpen(false)
@@ -65,31 +82,37 @@ export function ProjectMenu({
 
   /* Loading over unsaved edits loses them; the daemon cannot ask, so this is
      asked here, once, in words. */
-  const confirmDiscard = () =>
-    !dirty || window.confirm('Hay cambios sin guardar que se perderán. ¿Seguir sin guardarlos?')
+  const confirmDiscard = async () =>
+    !dirty ||
+    dialogo.confirmar({
+      title: 'Hay cambios sin guardar',
+      message: 'Se perderán si sigues sin guardarlos.',
+      confirm: 'Descartar cambios',
+      destructive: true,
+    })
 
   const newProject = () =>
     guard(async () => {
-      if (!confirmDiscard()) return
+      if (!(await confirmDiscard())) return
       await api.newProject()
     })
 
   const openNative = () =>
     guard(async () => {
-      if (!confirmDiscard()) return
+      if (!(await confirmDiscard())) return
       const path = await pickProjectToOpen()
       if (path !== null) await api.openProjectPath(path)
     })
 
   const openByName = (file: string) =>
     guard(async () => {
-      if (!confirmDiscard()) return
+      if (!(await confirmDiscard())) return
       await api.loadProject(file)
     })
 
   const openRecent = (path: string) =>
     guard(async () => {
-      if (!confirmDiscard()) return
+      if (!(await confirmDiscard())) return
       await api.openProjectPath(path)
     })
 
@@ -105,7 +128,12 @@ export function ProjectMenu({
     guard(async () => {
       const path = isShell()
         ? await pickProjectToOpen()
-        : window.prompt('Ruta absoluta del .qxw del que importar:')
+        : await dialogo.preguntar({
+            title: '¿De qué proyecto importar?',
+            label: 'Ruta absoluta del .qxw',
+            placeholder: '/home/…/otro.qxw',
+            confirm: 'Siguiente',
+          })
       if (path === null || path.trim() === '') return
       const preview = await api.importPreview(path.trim())
       setImporting({ path: path.trim(), fixtures: preview.fixtures, functions: preview.functions })
@@ -113,7 +141,12 @@ export function ProjectMenu({
 
   const saveAsNamed = () =>
     guard(async () => {
-      const file = window.prompt('Nombre del proyecto (en la carpeta de proyectos):')
+      const file = await dialogo.preguntar({
+        title: 'Guardar como',
+        label: 'Nombre del proyecto',
+        message: 'Se guarda en la carpeta de proyectos de la mesa.',
+        confirm: 'Guardar',
+      })
       if (file === null || file.trim() === '') return
       /* Case-insensitive, like the display strip below: a name typed as
          "FIESTA.QXW" must not be sent as "FIESTA.QXW.qxw" -- a file the
@@ -133,7 +166,7 @@ export function ProjectMenu({
         onClick={() => setOpen((current) => !current)}
       >
         <strong>{name}</strong>
-        <span aria-hidden="true">▾</span>
+        <Icon name="chevronDown" size={16} />
       </button>
 
       {open && (
@@ -194,6 +227,48 @@ export function ProjectMenu({
           <button type="button" role="menuitem" onClick={startImport}>
             Importar de otro proyecto…
           </button>
+
+          {extras.length > 0 && (
+            <div className="projectmenu-group">
+              {extras.map((extra) => (
+                <button
+                  key={extra.label}
+                  type="button"
+                  role={extra.checked === undefined ? 'menuitem' : 'menuitemradio'}
+                  aria-checked={extra.checked}
+                  disabled={extra.disabled}
+                  className="projectmenu-check"
+                  onClick={() => {
+                    setOpen(false)
+                    extra.run()
+                  }}
+                >
+                  <span>{extra.label}</span>
+                  {extra.checked === true && <Icon name="check" size={18} />}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {pass !== undefined && onPass !== undefined && (
+            <div className="projectmenu-group">
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={pass}
+                className="projectmenu-check"
+                title="Ctrl+Alt+P"
+                onClick={() => {
+                  setOpen(false)
+                  onPass()
+                }}
+              >
+                <Icon name={pass ? 'sun' : 'moon'} size={18} />
+                <span>Modo pase</span>
+                <span className="projectmenu-switch" aria-hidden="true" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -261,8 +336,8 @@ function ImportDialog({
   }
 
   return (
-    <dialog className="gate" open aria-label="Importar de otro proyecto">
-      <div className="gate-card import-dialog">
+    <Sheet label="Importar de otro proyecto" size="l" onClose={onClose}>
+      <div className="import-dialog">
         <h2>Importar de {preview.path.split('/').pop()}</h2>
 
         {report === null ? (
@@ -307,30 +382,31 @@ function ImportDialog({
               vienen con ella aunque no estén marcados.
             </p>
 
-            <div className="gate-actions">
+            <div className="sheet-actions">
+              <button type="button" onClick={onClose}>
+                Cancelar
+              </button>
               <button
                 type="button"
+                className="primary"
                 disabled={busy || (fixtures.size === 0 && functions.size === 0)}
                 onClick={apply}
               >
                 Importar
-              </button>
-              <button type="button" onClick={onClose}>
-                Cancelar
               </button>
             </div>
           </>
         ) : (
           <>
             <p>{report}</p>
-            <div className="gate-actions">
-              <button type="button" onClick={onClose}>
+            <div className="sheet-actions">
+              <button type="button" className="primary" onClick={onClose}>
                 Listo
               </button>
             </div>
           </>
         )}
       </div>
-    </dialog>
+    </Sheet>
   )
 }

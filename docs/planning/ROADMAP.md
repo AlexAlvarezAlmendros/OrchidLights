@@ -922,6 +922,26 @@ que no debe ni pedir.
   lleva.
 - **No guarda.** Ni en montaje.
 
+### F11 — Rediseño: una mesa que se entiende a oscuras
+
+> El plan entero, con lo medido, las fuentes y el estado, en
+> [`F11-rediseno.md`](F11-rediseno.md). Lo de «estilo Apple» que se buscaba no
+> es el cristal ni las esquinas: una cosa importante por sitio y siempre en el
+> mismo, lo raro detrás, un sistema en vez de decisiones sueltas, respuesta en
+> menos de una décima, y deshacer antes que preguntar.
+
+- [x] **R1–R7 en código** (2026-11-09): tokens con contraste comprobado por
+  test, Inter en local, iconos dibujados, hojas modales en vez de
+  `confirm`/`prompt`, barra lateral y cinco pestañas, barra del show en tres
+  grupos, tarjetas que se encienden con su color, fader relativo en táctil,
+  vista dividida en Funciones, pase de solo rojo con atenuador.
+- [x] **Temas Claro y Gris** (2026-11-10), junto a Oscuro y Pase, nombrados por
+  la luz de la sala. El suelo de la planta sigue a oscuras en Claro y salir
+  del pase vuelve al tema de antes.
+- [ ] **La prueba con cinco técnicos**, antes y después, con las cinco tareas
+  cronometradas del plan.
+- [ ] Menú propio para los `<select>`, y medir el cristal en una tablet barata.
+
 ## 5. Riesgos
 
 

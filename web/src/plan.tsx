@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { type FunctionState, type PlanFixture, type PlanState, api } from './api'
+import { Icon } from './icons'
 import { Slider } from './slider'
 import { authHeaders } from './token'
 
@@ -476,7 +477,7 @@ export function Plan({
                 title="Deseleccionar"
                 onClick={() => setChosen([])}
               >
-                ✕
+                <Icon name="close" size={18} />
               </button>
             </div>
 
@@ -762,24 +763,24 @@ function Arrange({
   return (
     <div className="arrange">
       <button type="button" title="Alinear en fila (misma profundidad)" onClick={alignRow}>
-        ⇤⇥
+        <Icon name="alignRow" size={18} />
       </button>
       <button type="button" title="Alinear en columna (misma anchura)" onClick={alignColumn}>
-        ⤒⤓
+        <Icon name="alignColumn" size={18} />
       </button>
       <button
         type="button"
         title="Distribuir a lo ancho, equidistantes"
         onClick={() => distribute('x')}
       >
-        ⇹
+        <Icon name="distributeH" size={18} />
       </button>
       <button
         type="button"
         title="Distribuir en profundidad, equidistantes"
         onClick={() => distribute('y')}
       >
-        ⇳
+        <Icon name="distributeV" size={18} />
       </button>
     </div>
   )
