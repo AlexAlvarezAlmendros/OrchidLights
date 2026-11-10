@@ -7,6 +7,12 @@ import { type Plugin, defineConfig } from 'vite'
 const here = dirname(fileURLToPath(import.meta.url))
 const ICON = resolve(here, '../resources/icons/svg/orchidlights.svg')
 
+/* The declarative document engine lives in mcp/, where the MCP server and
+   orchidctl use it, and the assistant runs it in the browser. Imported from
+   there rather than copied: two copies of an applier are two appliers, and
+   only one of them is the one CI checks as a fixed point. */
+const MCP = resolve(here, '../mcp/src')
+
 /**
  * The app icon, taken from the one the desktop entry and the AppImage use.
  *
@@ -35,12 +41,17 @@ function appIcon(): Plugin {
 
 export default defineConfig({
   plugins: [react(), appIcon()],
+  resolve: {
+    alias: { '@orchid/mcp': MCP },
+  },
   build: {
     // The daemon serves these; keeping them flat makes the install rule simple.
     outDir: 'dist',
     emptyOutDir: true,
   },
   server: {
+    // The engine is outside the app's root; the dev server serves it anyway.
+    fs: { allow: [here, MCP] },
     // During development Vite serves the app and the daemon serves the data.
     proxy: {
       '/api': 'http://127.0.0.1:9998',
@@ -55,5 +66,8 @@ export default defineConfig({
     environment: 'node',
     environmentMatchGlobs: [['src/**/*.test.tsx', 'jsdom']],
     setupFiles: ['src/test-setup.ts'],
+    /* CSS is blanked in tests by default, ?raw included. The stylesheet is
+       let through so tokens.test.ts can hold its colours to their contrast. */
+    css: { include: [/theme\.css/] },
   },
 })

@@ -1,3 +1,13 @@
-/** The four screens of the desk. Its own module so the navigation and the app
+/** The screens of the desk. Its own module so the navigation and the app
  *  can share the type without either importing the other. */
-export type View = 'console' | 'setup' | 'functions' | 'desk' | 'plan' | 'stage3d' | 'remote'
+export type View =
+  | 'console'
+  | 'setup'
+  | 'functions'
+  | 'desk'
+  | 'plan'
+  | 'stage3d'
+  | 'remote'
+  | 'assistant'
+  /* The Montaje tab on a phone: one door onto the three building screens. */
+  | 'build'

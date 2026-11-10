@@ -294,7 +294,7 @@ try {
      in edit mode a tap picks the widget rather than operating it. */
   const cues = await evaluate("document.querySelectorAll('.widget.cuelist').length")
   if (cues > 0) {
-    check('leaving edit mode', (await click('Listo')) === 'ok')
+    check('leaving edit mode', (await click('Tocar')) === 'ok')
     await sleep(600)
 
     const played = await evaluate(`(async () => {
@@ -334,14 +334,23 @@ try {
     const rows = () => document.querySelectorAll('.table-row').length
     const before = rows()
 
-    const input = document.querySelector('.setup .card input')
+    /* Making a function is a sheet now: the button opens it, the name goes in
+       its one field, Crear commits. */
+    const open = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Nueva función')
+    if (!open) return 'there is no Nueva función button'
+    open.click()
+    await new Promise(r => setTimeout(r, 300))
+    const sheet = document.querySelector('dialog.sheet[open]')
+    if (!sheet) return 'Nueva función opened no sheet'
+    const input = sheet.querySelector('input')
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
     setter.call(input, 'Escena de prueba')
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await new Promise(r => setTimeout(r, 150))
 
-    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Crear').click()
+    ;[...sheet.querySelectorAll('button')].find(b => b.textContent.trim() === 'Crear').click()
     await new Promise(r => setTimeout(r, 1200))
+    if (document.querySelector('dialog.sheet[open]')) return 'the sheet stayed open after Crear'
     if (rows() !== before + 1) return 'the list did not grow: ' + before + ' -> ' + rows()
 
     // Created and selected, so its editor is open.
@@ -389,16 +398,22 @@ try {
     for (const [type, expect] of [['EFX', 'Patrón'], ['RGBMatrix', 'Algoritmo'],
                                   ['Script', 'Programa'], ['Audio', 'Archivo'],
                                   ['Video', 'Archivo o URL']]) {
-      const kind = document.querySelector('.setup .card select')
-      selectSetter.call(kind, type)
-      kind.dispatchEvent(new Event('change', { bubbles: true }))
+      /* The sheet: the type is a button in its grid, labelled the way the
+         list labels types; the name is its one text field. */
+      const LABEL = { EFX: 'EFX', RGBMatrix: 'RGB Matrix', Script: 'Script', Audio: 'Audio', Video: 'Vídeo' }
+      ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Nueva función')?.click()
+      await new Promise(r => setTimeout(r, 300))
+      const sheet = document.querySelector('dialog.sheet[open]')
+      if (!sheet) { problems.push(type + ': no creation sheet'); continue }
+      ;[...sheet.querySelectorAll('.type-grid button')].find(b => b.textContent.trim() === LABEL[type])?.click()
+      await new Promise(r => setTimeout(r, 100))
 
-      const nameField = document.querySelector('.setup .card input')
+      const nameField = sheet.querySelector('input')
       setter.call(nameField, 'Prueba ' + type)
       nameField.dispatchEvent(new Event('input', { bubbles: true }))
       await new Promise(r => setTimeout(r, 100))
 
-      ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Crear').click()
+      ;[...sheet.querySelectorAll('button')].find(b => b.textContent.trim() === 'Crear').click()
       await new Promise(r => setTimeout(r, 1400))
 
       const panel = document.querySelector('.setup article.card')
@@ -1115,7 +1130,8 @@ try {
     /* The show bar names the show, and the daemon agrees. */
     const project = await (await fetch('/api/v1/project')).json()
     const stem = project.name.replace(/\.qxw$/i, '')
-    const bar = document.querySelector('.showbar-id')
+    /* The bar's first group: the show's name, its unsaved dot, the link. */
+    const bar = document.querySelector('.showbar .tb-identity')
     if (!bar) return 'no show bar'
     if (!bar.textContent.includes(stem)) return 'the bar does not name the show: ' + bar.textContent
 
@@ -1238,7 +1254,7 @@ try {
     await new Promise(r => setTimeout(r, 700))
     if (document.querySelector('.board')) return 'arrange mode still draws the designed layout'
     if (!document.querySelector('.row')) return 'arrange mode lost the rows'
-    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Listo'))?.click()
+    ;[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Tocar')?.click()
     await new Promise(r => setTimeout(r, 700))
     if (!document.querySelector('.board')) return 'the designed layout did not come back'
 
@@ -1401,7 +1417,7 @@ try {
   })()`)
   check('the saved arrangement can be given back', restored === 'none' || restored === 'ok', restored)
 
-  check('leaving arrange mode', (await click('Listo')) === 'ok')
+  check('leaving arrange mode', (await click('Tocar')) === 'ok')
   await sleep(500)
 
   /* Appearance, edited from the browser. Cosmetic on a desk is not decoration:
@@ -1510,7 +1526,7 @@ try {
   })()`)
   check('edit mode says what it does and can be put away', usable === 'ok', usable)
 
-  check('leaving edit mode again', (await click('Listo')) === 'ok')
+  check('leaving edit mode again', (await click('Tocar')) === 'ok')
   await sleep(500)
 
   /* Two people on the same show. An edit made anywhere else has to arrive
@@ -1759,17 +1775,26 @@ try {
     const bare = new Set()
     let seen = 0
 
+    /* Everything the colour can be drawn as: the edge along the top (the
+       ::before), a wash or a stripe (the background image), and -- on a card
+       that is running -- the fill itself. A widget shows its colour if giving
+       it one changes any of them; one that looks the same either way has
+       lost it. */
+    const look = (w) => {
+      const own = getComputedStyle(w)
+      return [own.backgroundColor, own.backgroundImage, own.borderTopColor,
+        getComputedStyle(w, '::before').backgroundColor].join('|')
+    }
     const sweep = () => {
       const widgets = [...document.querySelectorAll('.widget')]
       seen += widgets.length
+      const before = widgets.map(look)
       for (const w of widgets) w.style.setProperty('--tint', orange)
-      for (const w of widgets) {
-        const pill = getComputedStyle(w, '::before').backgroundColor
-        const edge = getComputedStyle(w).backgroundImage
-        if (pill !== orange && !edge.includes(orange)) {
+      widgets.forEach((w, i) => {
+        if (look(w) === before[i]) {
           bare.add(w.className.split(' ').filter(c => c !== 'widget').join('.') || 'widget')
         }
-      }
+      })
       for (const w of widgets) w.style.removeProperty('--tint')
     }
 
@@ -1785,7 +1810,7 @@ try {
       await new Promise(r => setTimeout(r, 900))
       sweep()
       const done = [...document.querySelectorAll('button')]
-        .find(b => b.textContent.trim() === 'Listo')
+        .find(b => b.textContent.trim() === 'Tocar')
       if (done) done.click()
       await new Promise(r => setTimeout(r, 900))
     }
@@ -1810,7 +1835,7 @@ try {
     /* Whatever an earlier test was doing, this one is about pressing, and
        pressing happens in run mode. */
     const done = [...document.querySelectorAll('button')]
-      .find(b => b.textContent.trim().startsWith('Listo'))
+      .find(b => b.textContent.trim() === 'Tocar')
     if (done) {
       done.click()
       await wait(800)
@@ -2303,7 +2328,7 @@ try {
       /* Let the wire go BEFORE leaving: a held grip is a held press. */
       await fetch('/api/v1/simpledesk/2', { method: 'DELETE' })
       ;[...document.querySelectorAll('button')]
-        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+        .find(b => b.textContent.trim() === 'Tocar')?.click()
       await wait(700)
       return 'ok:' + target.id + ':' + target.functionId
     })()`)
@@ -2837,7 +2862,7 @@ try {
 
     const cleanup = async () => {
       ;[...document.querySelectorAll('button')]
-        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+        .find(b => b.textContent.trim() === 'Tocar')?.click()
       await wait(400)
       for (const id of made) {
         await fetch('/api/v1/vc/widgets/' + id, { method: 'DELETE' })
@@ -2915,7 +2940,7 @@ try {
       if (!flip.ok) return 'the GrandMaster mode was refused: ' + flip.status
       await wait(700)
       ;[...document.querySelectorAll('button')]
-        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+        .find(b => b.textContent.trim() === 'Tocar')?.click()
       await wait(900)
 
       /* The clock's face ticks a real time -- in run mode, where widgets
@@ -2980,7 +3005,7 @@ try {
     const cleanup = async () => {
       document.querySelector('article.card header button[aria-label="Cerrar"]')?.click()
       ;[...document.querySelectorAll('button')]
-        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+        .find(b => b.textContent.trim() === 'Tocar')?.click()
       await wait(400)
       for (const id of made) await fetch('/api/v1/vc/widgets/' + id, { method: 'DELETE' })
       const searchBox = [...document.querySelectorAll('input')]
@@ -3059,7 +3084,7 @@ try {
         return 'the preset never landed: ' + JSON.stringify(withPreset?.padPresets)
       }
       ;[...document.querySelectorAll('button')]
-        .find(b => b.textContent.trim().startsWith('Listo'))?.click()
+        .find(b => b.textContent.trim() === 'Tocar')?.click()
       await wait(800)
       const chip = [...document.querySelectorAll('.pad-presets .chip')].at(-1)
       if (!chip) {
@@ -3412,11 +3437,20 @@ try {
 
       /* The import dialog reads the donor and offers its pieces. */
       localStorage.setItem('orchid.token', ${JSON.stringify(apiToken)})
-      window.prompt = () => ${JSON.stringify(donorPath)}
       document.querySelector('.projectmenu-trigger')?.click()
       await wait(500)
       ;[...document.querySelectorAll('[role=menuitem]')]
         .find(b => b.textContent.trim() === 'Importar de otro proyecto…')?.click()
+      await wait(500)
+      /* The path is asked in the desk's own sheet now, not window.prompt. */
+      const ask = document.querySelector('dialog.sheet[open] form')
+      if (!ask) return 'the path question never appeared'
+      const pathBox = ask.querySelector('input')
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+        .call(pathBox, ${JSON.stringify(donorPath)})
+      pathBox.dispatchEvent(new Event('input', { bubbles: true }))
+      await wait(100)
+      ask.requestSubmit()
       await wait(1500)
       const dialog = document.querySelector('dialog[aria-label="Importar de otro proyecto"]')
       if (!dialog) return 'the import dialog never appeared'
@@ -3534,7 +3568,7 @@ try {
       /* Time surgery from the buttons: the cursor sits at 2 s (120px at 60
          px/s), inside the first item. */
       ;[...transport.querySelectorAll('button')]
-        .find(b => b.textContent.trim() === '+⏱')?.click()
+        .find(b => (b.title ?? '').startsWith('Insertar tiempo en el cursor'))?.click()
       await wait(1000)
       let bodyNow = await (await fetch('/api/v1/functions/' + show + '/body')).json()
       let first = bodyNow.tracks.find(t => t.id === track).functions
@@ -3543,7 +3577,7 @@ try {
         return 'insert at the cursor left the item at ' + first.duration
       }
       ;[...transport.querySelectorAll('button')]
-        .find(b => b.textContent.trim() === '−⏱')?.click()
+        .find(b => (b.title ?? '').startsWith('Cortar tiempo en el cursor'))?.click()
       await wait(1000)
       bodyNow = await (await fetch('/api/v1/functions/' + show + '/body')).json()
       first = bodyNow.tracks.find(t => t.id === track).functions
@@ -3583,13 +3617,13 @@ try {
 
       /* Play starts AT the cursor. */
       ;[...transport.querySelectorAll('button')]
-        .find(b => b.textContent.trim().startsWith('▶'))?.click()
+        .find(b => (b.title ?? '').startsWith('Reproducir'))?.click()
       await wait(900)
       const fns = await (await fetch('/api/v1/functions')).json()
       const runningShow = fns.find(f => f.id === show)
       if (runningShow?.running !== true) return 'play started nothing'
       ;[...transport.querySelectorAll('button')]
-        .find(b => b.textContent.trim() === '⏹')?.click()
+        .find(b => b.title === 'Parar')?.click()
       await wait(700)
 
       return 'ok'
@@ -3941,37 +3975,36 @@ try {
         body: JSON.stringify({ preset: 'all' }) })
       document.body.removeAttribute('data-kiosk')
       document.documentElement.style.fontSize = ''
-      ;[...document.querySelectorAll('dialog .gate-actions button')]
+      ;[...document.querySelectorAll('dialog.sheet .sheet-head button')]
         .find(b => b.textContent.trim() === 'Listo')?.click()
       await wait(300)
     }
 
     try {
-      /* Ajustes: the dialog opens from the rail and the scale acts. */
-      ;[...document.querySelectorAll('.rail-item')]
-        .find(b => b.textContent.trim() === 'Ajustes')?.click()
+      /* Ajustes: the sheet opens from the bar's gear -- settings are not a
+         place, so they are not in the rail -- and the scale acts. */
+      document.querySelector('.showbar button[aria-label="Ajustes"]')?.click()
       await wait(500)
       const dialog = document.querySelector('dialog[aria-label="Ajustes"]')
       if (!dialog) return 'the settings dialog never opened'
-      const scaleSelect = [...dialog.querySelectorAll('label')]
-        .find(l => l.querySelector('span')?.textContent === 'Escala')
-        ?.querySelector('select')
-      if (!scaleSelect) return 'there is no scale setting'
-      const setS = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
-      setS.call(scaleSelect, '1.15')
-      scaleSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      const scale = dialog.querySelector('[role=group][aria-label="Escala"]')
+      if (!scale) return 'there is no scale setting'
+      const pressScale = (label) => [...scale.querySelectorAll('button')]
+        .find(b => b.textContent.trim() === label)?.click()
+      pressScale('115%')
       await wait(300)
       if (document.documentElement.style.fontSize !== '115%') {
         return 'the scale moved nothing: ' + document.documentElement.style.fontSize
       }
-      setS.call(scaleSelect, '1')
-      scaleSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      pressScale('100%')
       await wait(200)
-      const themeSelect = [...dialog.querySelectorAll('label')]
-        .find(l => l.querySelector('span')?.textContent === 'Tema')?.querySelector('select')
+      const theme = dialog.querySelector('[role=group][aria-label="Tema"]')
+      const themes = theme ? [...theme.querySelectorAll('button')].map(b => b.textContent.trim()) : []
       const langSelect = [...dialog.querySelectorAll('label')]
         .find(l => l.querySelector('span')?.textContent === 'Idioma')?.querySelector('select')
-      if (!themeSelect || !langSelect) return 'the dialog misses theme or language'
+      if (themes.join('/') !== 'Claro/Gris/Oscuro/Pase' || !langSelect) {
+        return 'the dialog misses theme or language: ' + themes.join('/')
+      }
       ;[...dialog.querySelectorAll('button')]
         .find(b => b.textContent.trim() === 'Listo')?.click()
       await wait(300)
@@ -4503,7 +4536,7 @@ try {
     window.dispatchEvent(new CustomEvent('orchid-close-request'))
     await wait(500)
 
-    const dialog = document.querySelector('dialog.gate[aria-label="Cerrar con cambios sin guardar"]')
+    const dialog = document.querySelector('dialog.sheet[aria-label="Cerrar con cambios sin guardar"]')
     if (!dialog) return 'the close question never appeared'
 
     const labels = [...dialog.querySelectorAll('button')].map(b => b.textContent.trim())
@@ -4513,7 +4546,7 @@ try {
 
     ;[...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === 'Cancelar').click()
     await wait(400)
-    if (document.querySelector('dialog.gate[aria-label="Cerrar con cambios sin guardar"]')) {
+    if (document.querySelector('dialog.sheet[aria-label="Cerrar con cambios sin guardar"]')) {
       return 'Cancelar did not put the question away'
     }
     return 'ok'
@@ -4529,11 +4562,19 @@ try {
      its Desconectar button must close it on the wire, not just in the DOM. */
   const remote = await evaluate(`(async () => {
     const wait = (ms) => new Promise(r => setTimeout(r, ms))
-    const tab = [...document.querySelectorAll('.rail-item')]
-      .find(b => b.textContent.trim() === 'Remoto')
-    if (!tab) return 'no Remoto in the rail'
-    tab.click()
+    /* Devices live in Ajustes, not in the rail: they are a setting of the
+       desk, not a place an operator goes during a show. */
+    if ([...document.querySelectorAll('.rail-item')].some(b => b.textContent.trim() === 'Remoto')) {
+      return 'Remoto is still in the rail'
+    }
+    document.querySelector('.showbar button[aria-label="Ajustes"]')?.click()
+    await wait(500)
+    const door = [...document.querySelectorAll('dialog[aria-label="Ajustes"] .list-row')]
+      .find(b => b.textContent.includes('Dispositivos'))
+    if (!door) return 'no Dispositivos in Ajustes'
+    door.click()
     await wait(900)
+    if (document.querySelector('dialog[aria-label="Ajustes"]')) return 'Ajustes stayed open'
 
     const panel = document.querySelector('.remote')
     if (!panel) return 'the remote screen never drew'

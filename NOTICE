@@ -46,3 +46,12 @@ of the upstream project and are used here solely to describe the origin of this
 software, as permitted by Section 6 of the Apache License, Version 2.0.
 OrchidLights is not affiliated with, endorsed by, or supported by the QLC+
 project. Please do not report OrchidLights issues to the QLC+ project.
+
+------------------------------------------------------------------------------
+Bundled typeface
+------------------------------------------------------------------------------
+
+The web interface (web/) ships the Inter typeface, Copyright 2016 The Inter
+Project Authors (https://github.com/rsms/inter), licensed under the SIL Open
+Font License, Version 1.1. The full licence travels with the font files as
+OFL-Inter.txt in the installed web directory.

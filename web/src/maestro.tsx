@@ -15,7 +15,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { type GrandMasterState, api } from './api'
+import { Icon } from './icons'
 import { Slider } from './slider'
+import { useDismiss } from './ui'
 
 const FADES = [
   { ms: 0, label: 'Ahora' },
@@ -41,15 +43,7 @@ export function GrandMasterDock({
   const [listening, setListening] = useState(false)
   const panel = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    if (!open) return
-    const away = (event: PointerEvent) => {
-      if (panel.current?.contains(event.target as Node) === true) return
-      setOpen(false)
-    }
-    window.addEventListener('pointerdown', away)
-    return () => window.removeEventListener('pointerdown', away)
-  }, [open])
+  useDismiss(open, panel, () => setOpen(false))
 
   const apply = (patch: Partial<GrandMasterState>) =>
     api
@@ -177,15 +171,7 @@ export function StopAll({
   const [open, setOpen] = useState(false)
   const menu = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    if (!open) return
-    const away = (event: PointerEvent) => {
-      if (menu.current?.contains(event.target as Node) === true) return
-      setOpen(false)
-    }
-    window.addEventListener('pointerdown', away)
-    return () => window.removeEventListener('pointerdown', away)
-  }, [open])
+  useDismiss(open, menu, () => setOpen(false))
 
   const stop = (fadeMs: number) => {
     setOpen(false)
@@ -214,7 +200,7 @@ export function StopAll({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        ▾
+        <Icon name="chevronDown" size={16} />
       </button>
 
       {open && (
@@ -294,7 +280,7 @@ export function BpmDock({ beatTick }: { beatTick: number }) {
         onClick={() => write({ source: running ? 'none' : 'internal' })}
       >
         <span className="bpm-led" data-on={lit && running} aria-hidden="true" />
-        BPM
+        <span className="bpm-label">BPM</span>
       </button>
       <input
         type="number"

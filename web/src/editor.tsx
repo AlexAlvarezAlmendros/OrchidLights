@@ -21,6 +21,7 @@ import {
   type WidgetPatch,
   api,
 } from './api'
+import { Icon } from './icons'
 import type { VcWidget } from './layout'
 import { keySequenceOf } from './teclas'
 
@@ -120,7 +121,7 @@ export function WidgetEditor({
         </span>
         <span className="spacer" />
         <button type="button" onClick={onClose} aria-label="Cerrar">
-          ✕
+          <Icon name="close" size={18} />
         </button>
       </header>
 
@@ -564,7 +565,7 @@ function LevelChannels({
                 )
               }
             >
-              ✕
+              <Icon name="close" size={18} />
             </button>
           </li>
         ))}
@@ -791,7 +792,7 @@ function ClockAgenda({
                 disabled={busy}
                 onClick={() => put(schedules.filter((_, i) => i !== index))}
               >
-                ✕
+                <Icon name="close" size={18} />
               </button>
             </li>
           )

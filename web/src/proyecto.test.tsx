@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
 import { ProjectMenu } from './proyecto'
 import { isShell, pickProjectToOpen, pickProjectToSave } from './shell'
+import { dialogo } from './ui'
 
 vi.mock('./api', () => ({
   api: {
@@ -46,9 +47,11 @@ beforeEach(() => {
   vi.mocked(api.saveProject).mockResolvedValue({ path: '/x.qxw' })
   vi.mocked(api.saveProjectAs).mockResolvedValue({ path: '/x.qxw' })
   vi.mocked(api.saveProjectNamed).mockResolvedValue({ path: '/x.qxw' })
-  /* jsdom's confirm/prompt are stubs that warn; the menu needs real answers. */
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
-  vi.spyOn(window, 'prompt').mockReturnValue(null)
+  /* The desk's own questions, answered by spies: what is asked and whether
+     the answer is honoured is what these tests are about. The sheets that ask
+     have their own tests in ui.test.tsx. */
+  vi.spyOn(dialogo, 'confirmar').mockResolvedValue(true)
+  vi.spyOn(dialogo, 'preguntar').mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -111,21 +114,21 @@ describe('nuevo', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Nuevo' }))
 
     await waitFor(() => expect(api.newProject).toHaveBeenCalled())
-    expect(window.confirm).not.toHaveBeenCalled()
+    expect(dialogo.confirmar).not.toHaveBeenCalled()
   })
 
   it('asks before discarding unsaved work and stands down on "no"', async () => {
-    vi.mocked(window.confirm).mockReturnValue(false)
+    vi.mocked(dialogo.confirmar).mockResolvedValue(false)
     await openMenu({ dirty: true })
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Nuevo' }))
 
-    expect(window.confirm).toHaveBeenCalled()
+    expect(dialogo.confirmar).toHaveBeenCalled()
     await waitFor(() => expect(api.newProject).not.toHaveBeenCalled())
   })
 
   it('proceeds when the operator accepts the loss', async () => {
-    vi.mocked(window.confirm).mockReturnValue(true)
+    vi.mocked(dialogo.confirmar).mockResolvedValue(true)
     await openMenu({ dirty: true })
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Nuevo' }))
@@ -182,12 +185,12 @@ describe('abrir, from the desktop shell', () => {
   })
 
   it('asks about unsaved work before even showing the dialog', async () => {
-    vi.mocked(window.confirm).mockReturnValue(false)
+    vi.mocked(dialogo.confirmar).mockResolvedValue(false)
     await openMenu({ dirty: true })
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Abrir…' }))
 
-    await waitFor(() => expect(window.confirm).toHaveBeenCalled())
+    await waitFor(() => expect(dialogo.confirmar).toHaveBeenCalled())
     expect(pickProjectToOpen).not.toHaveBeenCalled()
   })
 })
@@ -229,7 +232,7 @@ describe('guardar', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Guardar' }))
 
     await waitFor(() => expect(api.saveProject).toHaveBeenCalled())
-    expect(window.confirm).not.toHaveBeenCalled()
+    expect(dialogo.confirmar).not.toHaveBeenCalled()
   })
 
   it('surfaces a failed save where every error goes', async () => {
@@ -244,7 +247,7 @@ describe('guardar', () => {
 
 describe('guardar como', () => {
   it('asks for a name and saves it into the projects directory, extension added', async () => {
-    vi.mocked(window.prompt).mockReturnValue('nochevieja')
+    vi.mocked(dialogo.preguntar).mockResolvedValue('nochevieja')
     await openMenu()
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Guardar como…' }))
@@ -253,7 +256,7 @@ describe('guardar como', () => {
   })
 
   it('does not double the extension when the operator typed it', async () => {
-    vi.mocked(window.prompt).mockReturnValue('nochevieja.qxw')
+    vi.mocked(dialogo.preguntar).mockResolvedValue('nochevieja.qxw')
     await openMenu()
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Guardar como…' }))
@@ -264,7 +267,7 @@ describe('guardar como', () => {
   // Regression: the extension check was case-sensitive while the display
   // strip was not, so "FIESTA.QXW" was saved as "FIESTA.QXW.qxw".
   it('accepts the extension whatever its case', async () => {
-    vi.mocked(window.prompt).mockReturnValue('FIESTA.QXW')
+    vi.mocked(dialogo.preguntar).mockResolvedValue('FIESTA.QXW')
     await openMenu()
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Guardar como…' }))
@@ -273,27 +276,27 @@ describe('guardar como', () => {
   })
 
   it('saves nothing on a cancelled or blank prompt', async () => {
-    vi.mocked(window.prompt).mockReturnValueOnce(null).mockReturnValueOnce('   ')
+    vi.mocked(dialogo.preguntar).mockResolvedValueOnce(null).mockResolvedValueOnce('   ')
     await openMenu()
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Guardar como…' }))
-    await waitFor(() => expect(window.prompt).toHaveBeenCalled())
+    await waitFor(() => expect(dialogo.preguntar).toHaveBeenCalled())
 
     fireEvent.click(screen.getByRole('button', { name: 'bolo' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Guardar como…' }))
 
-    await waitFor(() => expect(window.prompt).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(dialogo.preguntar).toHaveBeenCalledTimes(2))
     expect(api.saveProjectNamed).not.toHaveBeenCalled()
   })
 
   it('never asks about unsaved changes: nothing is lost by saving', async () => {
-    vi.mocked(window.prompt).mockReturnValue('copia')
+    vi.mocked(dialogo.preguntar).mockResolvedValue('copia')
     await openMenu({ dirty: true })
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Guardar como…' }))
 
     await waitFor(() => expect(api.saveProjectNamed).toHaveBeenCalledWith('copia.qxw'))
-    expect(window.confirm).not.toHaveBeenCalled()
+    expect(dialogo.confirmar).not.toHaveBeenCalled()
   })
 
   it('walks the native save dialog in the shell', async () => {
@@ -330,7 +333,7 @@ describe('importar de otro proyecto', () => {
   }
 
   beforeEach(() => {
-    vi.mocked(window.prompt).mockReturnValue('/bolos/otro.qxw')
+    vi.mocked(dialogo.preguntar).mockResolvedValue('/bolos/otro.qxw')
     vi.mocked(api.importPreview).mockResolvedValue(preview)
     vi.mocked(api.importProject).mockResolvedValue({
       fixturesCreated: 1,
@@ -383,12 +386,12 @@ describe('importar de otro proyecto', () => {
   })
 
   it('imports nothing when the path prompt is cancelled', async () => {
-    vi.mocked(window.prompt).mockReturnValue(null)
+    vi.mocked(dialogo.preguntar).mockResolvedValue(null)
     await openMenu()
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Importar de otro proyecto…' }))
 
-    await waitFor(() => expect(window.prompt).toHaveBeenCalled())
+    await waitFor(() => expect(dialogo.preguntar).toHaveBeenCalled())
     expect(api.importPreview).not.toHaveBeenCalled()
   })
 })

@@ -9,8 +9,8 @@
  */
 
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import { Slider } from './slider'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Slider, relativeValue, snap } from './slider'
 
 /** The track element the styles hang off. Null would mean the input escaped
  *  the drawing, which is exactly the leak the component exists to close. */
@@ -109,5 +109,66 @@ describe('disabled state', () => {
     render(<Slider value={20} onChange={() => {}} disabled />)
 
     expect(screen.getByRole('slider')).toBeDisabled()
+  })
+})
+
+describe('the touch drag: where the finger travels, not where it lands', () => {
+  it('moves by the distance travelled, as a share of the track', () => {
+    // From 100 on 0..255, a third of a 300 px track to the right is +85.
+    expect(relativeValue(100, 100, 300, 0, 255)).toBeCloseTo(185)
+    expect(relativeValue(100, -100, 300, 0, 255)).toBeCloseTo(15)
+  })
+
+  it('stays at the end when the finger runs off it', () => {
+    expect(relativeValue(200, 900, 300, 0, 255)).toBe(255)
+    expect(relativeValue(20, -900, 300, 0, 255)).toBe(0)
+  })
+
+  it('does not move on a track with no width', () => {
+    expect(relativeValue(42, 50, 0, 0, 255)).toBe(42)
+  })
+
+  it("lands on the input's own grid", () => {
+    expect(snap(12.6, 0, 255, 1)).toBe(13)
+    expect(snap(447, 0, 10000, 10)).toBe(450)
+    expect(snap(-3, 0, 100, 5)).toBe(0)
+    expect(snap(0.123, 0, 1, 0.05)).toBe(0.1)
+  })
+
+  describe('on a touch screen', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('a finger landing mid-track does not jump the value; dragging moves it from where it was', () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query === '(pointer: coarse)',
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }))
+      const seen: number[] = []
+      render(
+        <Slider
+          aria-label="Washes"
+          min={0}
+          max={100}
+          value={20}
+          onChange={(e) => seen.push(Number(e.target.value))}
+        />,
+      )
+      const slider = screen.getByRole('slider', { name: 'Washes' })
+      const track = trackOf(slider)
+      track.getBoundingClientRect = () =>
+        ({ left: 0, width: 200, top: 0, height: 30, right: 200, bottom: 30 }) as DOMRect
+
+      // Lands at 80% of the track: nothing happens yet.
+      fireEvent.pointerDown(track, { clientX: 160, pointerId: 1, pointerType: 'touch' })
+      expect(seen).toEqual([])
+
+      // Travels a quarter of the track: 20 + 25.
+      fireEvent.pointerMove(track, { clientX: 210, pointerId: 1, pointerType: 'touch' })
+      expect(seen.at(-1)).toBe(45)
+      fireEvent.pointerUp(track, { pointerId: 1, pointerType: 'touch' })
+    })
   })
 })

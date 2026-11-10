@@ -24,6 +24,7 @@ import {
   type UniverseState,
   api,
 } from './api'
+import { Icon } from './icons'
 
 type Tab = 'universes' | 'fixtures' | 'groups' | 'channels' | 'audio'
 
@@ -32,7 +33,10 @@ export function Setup({
   levels,
   onLevel,
   onChanged,
+  onDeleted,
 }: {
+  /** Something was removed: the shell offers the way back. */
+  onDeleted?: (what: string) => void
   revision: number
   /** Where each channels group's fader is, by group id. Empty until somebody
    *  moves one: a group reports the value it was saved with. */
@@ -116,7 +120,13 @@ export function Setup({
       {error && <p className="editor-error">{error}</p>}
 
       {tab === 'universes' && (
-        <Universes universes={universes} io={io} fixtures={fixtures} onRun={run} />
+        <Universes
+          universes={universes}
+          io={io}
+          fixtures={fixtures}
+          onRun={run}
+          {...(onDeleted ? { onDeleted } : {})}
+        />
       )}
       {tab === 'fixtures' && <Fixtures fixtures={fixtures} universes={universes} onRun={run} />}
       {tab === 'groups' && <Groups groups={groups} fixtures={fixtures} onRun={run} />}
@@ -139,7 +149,9 @@ function Universes({
   io,
   fixtures,
   onRun,
+  onDeleted,
 }: {
+  onDeleted?: (what: string) => void
   universes: UniverseState[]
   io: IoOptions | null
   fixtures: FixtureState[]
@@ -161,6 +173,7 @@ function Universes({
           io={io}
           fixtureCount={fixtures.filter((f) => f.universe === universe.id).length}
           onRun={onRun}
+          {...(onDeleted ? { onDeleted } : {})}
         />
       ))}
 
@@ -372,7 +385,7 @@ function ProfileWorkshop({
                       )
                     }
                   >
-                    ✕
+                    <Icon name="close" size={18} />
                   </button>
                 )}
               </li>
@@ -455,7 +468,9 @@ function UniverseCard({
   io,
   fixtureCount,
   onRun,
+  onDeleted,
 }: {
+  onDeleted?: (what: string) => void
   universe: UniverseState
   io: IoOptions | null
   fixtureCount: number
@@ -493,13 +508,6 @@ function UniverseCard({
             }
           }}
         />
-        <button
-          type="button"
-          className="danger"
-          onClick={() => onRun(() => api.removeUniverse(universe.id))}
-        >
-          Eliminar
-        </button>
       </header>
 
       {outputSlots.map((value, index) => (
@@ -650,6 +658,22 @@ function UniverseCard({
       </p>
 
       {map && <ChannelMap map={map} />}
+
+      {/* At the foot of the card, in words, and undoable: removing a universe
+          is the rare thing done here, not the first thing offered. */}
+      <footer className="card-foot">
+        <button
+          type="button"
+          className="destructive linkish-plain"
+          onClick={() =>
+            onRun(() => api.removeUniverse(universe.id)).then(() =>
+              onDeleted?.(`Universo ${universe.id} eliminado`),
+            )
+          }
+        >
+          <Icon name="trash" size={16} /> Eliminar universo
+        </button>
+      </footer>
     </article>
   )
 }
@@ -1309,7 +1333,7 @@ function FixtureRow({
           title="Sustituir por otro modelo llevándose el show"
           onClick={() => setRemapping((open) => !open)}
         >
-          ⇄
+          <Icon name="swap" size={18} />
         </button>
 
         {/* A lamp behaving oddly is explained by a modifier more often than by
@@ -1331,7 +1355,7 @@ function FixtureRow({
           aria-label={`Eliminar ${fixture.name}`}
           onClick={() => onRun(() => api.removeFixture(fixture.id))}
         >
-          ✕
+          <Icon name="close" size={18} />
         </button>
       </div>
 
@@ -1748,7 +1772,7 @@ function GroupCard({
                 )
               }
             >
-              ✕
+              <Icon name="close" size={18} />
             </button>
           </li>
         ))}
@@ -1887,19 +1911,19 @@ function GroupGrid({
               title="Girar 90° a la izquierda"
               onClick={() => turn('rotate270')}
             >
-              ⟲
+              <Icon name="reset" size={18} />
             </button>
             <button type="button" title="Girar 90° a la derecha" onClick={() => turn('rotate90')}>
-              ⟳
+              <Icon name="rotate" size={18} />
             </button>
             <button type="button" title="Girar 180°" onClick={() => turn('rotate180')}>
               180°
             </button>
             <button type="button" title="Espejar horizontal" onClick={() => turn('flipH')}>
-              ↔
+              <Icon name="arrowsH" size={18} />
             </button>
             <button type="button" title="Espejar vertical" onClick={() => turn('flipV')}>
-              ↕
+              <Icon name="arrowsV" size={18} />
             </button>
           </div>
         </div>
@@ -2097,7 +2121,7 @@ function ChannelGroupCard({
                 )
               }
             >
-              ✕
+              <Icon name="close" size={18} />
             </button>
           </li>
         ))}

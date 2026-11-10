@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { Surface } from './surface'
 import { adoptTokenFromLocation } from './token'
+/* Inter, served by the daemon itself: a venue has no internet, and SF Pro is
+   licensed for Apple platforms only. On a Mac or an iPhone the system face
+   comes first in the stack and this is never downloaded. */
+import '@fontsource-variable/inter/opsz.css'
 import './theme.css'
 
 /* Before anything renders or fetches: a token handed over in the fragment must

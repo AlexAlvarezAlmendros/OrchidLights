@@ -8,7 +8,8 @@
  * feed is a fake Live that lets each test pull the strings by hand.
  */
 
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 
@@ -273,13 +274,55 @@ describe('App at boot', () => {
 })
 
 describe('deep routes', () => {
-  it('#/remoto opens the remote screen', async () => {
+  it('#/remoto opens the devices screen', async () => {
     window.history.replaceState(null, '', '/#/remoto')
     await mountApp()
 
-    expect(screen.getByRole('button', { name: 'Remoto' })).toHaveAttribute('aria-pressed', 'true')
-    // The panel itself, not just the highlighted rail item.
+    // The panel itself: the devices live in Ajustes now, not in the rail.
     expect(await screen.findByText('Acceso desde la red')).toBeInTheDocument()
+  })
+
+  it('reaches the devices screen from Ajustes, and the sheet goes away', async () => {
+    const user = userEvent.setup()
+    await mountApp()
+
+    await user.click(screen.getByRole('button', { name: 'Ajustes' }))
+    await user.click(await screen.findByRole('button', { name: /Dispositivos/ }))
+
+    expect(await screen.findByText('Acceso desde la red')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Ajustes' })).not.toBeInTheDocument()
+  })
+
+  it('closes Ajustes with Escape', async () => {
+    const user = userEvent.setup()
+    await mountApp()
+
+    await user.click(screen.getByRole('button', { name: 'Ajustes' }))
+    expect(screen.getByRole('dialog', { name: 'Ajustes' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Ajustes' })).not.toBeInTheDocument()
+  })
+
+  it('offers four themes, and the pass shortcut comes back to the chosen one', async () => {
+    const user = userEvent.setup()
+    await mountApp()
+
+    await user.click(screen.getByRole('button', { name: 'Ajustes' }))
+    const themes = within(screen.getByRole('group', { name: 'Tema' }))
+    expect(themes.getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'Claro',
+      'Gris',
+      'Oscuro',
+      'Pase',
+    ])
+
+    await user.click(themes.getByRole('button', { name: 'Gris' }))
+    expect(document.documentElement.dataset.theme).toBe('grey')
+
+    await user.keyboard('{Control>}{Alt>}p{/Alt}{/Control}')
+    expect(document.documentElement.dataset.theme).toBe('blackout')
+    await user.keyboard('{Control>}{Alt>}p{/Alt}{/Control}')
+    expect(document.documentElement.dataset.theme).toBe('grey')
   })
 
   it('#/mesa opens the simple desk', async () => {

@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { type FunctionState, api } from './api'
+import { Icon } from './icons'
 import type { VcWidget } from './layout'
 import { Slider } from './slider'
 
@@ -97,7 +98,7 @@ export function CueList({
           aria-label="Anterior"
           onClick={() => onCommand(chaser, 'previous')}
         >
-          ⏮
+          <Icon name="previous" />
         </button>
         <button
           type="button"
@@ -106,7 +107,7 @@ export function CueList({
           aria-pressed={state?.running === true}
           onClick={() => onCommand(chaser, state?.running ? 'stop' : 'play')}
         >
-          {state?.running ? '⏹' : '▶'}
+          <Icon name={state?.running ? 'stop' : 'play'} />
         </button>
         <button
           type="button"
@@ -114,7 +115,7 @@ export function CueList({
           aria-label="Siguiente"
           onClick={() => onCommand(chaser, 'next')}
         >
-          ⏭
+          <Icon name="next" />
         </button>
       </div>
 

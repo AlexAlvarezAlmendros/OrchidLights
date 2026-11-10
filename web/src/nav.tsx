@@ -1,19 +1,27 @@
 /**
  * Where you are in the desk.
  *
- * One component, two shapes, decided by CSS alone: a rail down the left where
- * there is room, and a bar across the bottom where there is not. Same markup
- * either way, because they are the same control — and because a phone's
- * navigation belongs under the thumb, not at the top of the screen next to
- * everything else that is competing for the same corner.
+ * One component, three shapes, decided by CSS alone: a sidebar with room, a
+ * rail of icons with less, and five tabs across the bottom on a phone -- under
+ * the thumb, not at the top of the screen next to everything else competing
+ * for the same corner. Same markup every time, because they are the same
+ * control.
  *
- * The icons are drawn rather than set in type. An emoji is a different picture
- * on every platform and a different weight from the text beside it; these are
- * one stroke width on one grid, and they take the colour of whatever state
- * they are in.
+ * The views are grouped by what the operator is there to do (Endsley: organise
+ * around goals). Directo is running a show: the console, the raw desk and the
+ * plan with the rig lit. Montaje is building one: functions, the patch, the
+ * stage in 3D. On a phone there is room for five tabs and no more (Apple's own
+ * ceiling, and the point past which a tab bar stops being glanceable), so
+ * Montaje folds into one tab that opens onto its three screens -- a section
+ * with a name, never a "More" drawer.
+ *
+ * The theme and the settings are not here. They are not places, and a tab bar
+ * that carries actions is a tab bar where a tap sometimes goes somewhere and
+ * sometimes does something.
  */
 
 import { t } from './i18n'
+import { Glyph, Icon } from './icons'
 import type { View } from './views'
 
 const ICONS: Record<View, React.ReactNode> = {
@@ -61,6 +69,13 @@ const ICONS: Record<View, React.ReactNode> = {
       <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" />
     </>
   ),
+  /* A speech bubble with a spark in it: the desk you talk to. */
+  assistant: (
+    <>
+      <path d="M4 5h16v11H10l-4 3.5V16H4z" />
+      <path d="M12 7.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" />
+    </>
+  ),
   /* Waves leaving an antenna: the desk, reachable. */
   remote: (
     <>
@@ -69,100 +84,109 @@ const ICONS: Record<View, React.ReactNode> = {
       <path d="M8.5 7.5a5 5 0 0 1 7 0M5.5 4.5a9 9 0 0 1 13 0" />
     </>
   ),
+  /* A wrench over a grid: everything that builds the show. */
+  build: (
+    <>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.6" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.6" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="1.6" />
+    </>
+  ),
 }
 
-const LABELS: Record<View, string> = {
+export const LABELS: Record<View, string> = {
   console: 'Consola',
   functions: 'Funciones',
   setup: 'Patch',
   desk: 'Mesa',
   plan: 'Planta',
   stage3d: 'Escenario',
-  remote: 'Remoto',
+  remote: 'Dispositivos',
+  assistant: 'Asistente',
+  build: 'Montaje',
 }
 
-export const VIEWS: View[] = ['console', 'functions', 'setup', 'desk', 'plan', 'stage3d', 'remote']
+/** The building screens, the ones the Montaje tab stands for. */
+export const BUILD_VIEWS: View[] = ['functions', 'setup', 'stage3d']
+
+const GROUPS: { title: string | null; views: View[] }[] = [
+  { title: 'Directo', views: ['console', 'desk', 'plan'] },
+  { title: 'Montaje', views: BUILD_VIEWS },
+  { title: null, views: ['assistant'] },
+]
+
+/** Every place the navigation can name, in the order it names them. */
+export const VIEWS: View[] = GROUPS.flatMap((group) => group.views)
 
 export function Nav({
   view,
-  theme,
   visible,
   onView,
-  onTheme,
-  onSettings,
+  collapsed = false,
+  onCollapse,
 }: {
   view: View
-  theme: 'stage' | 'blackout'
   /** What the access mask leaves on offer. The console always is. */
   visible: View[]
   onView: (view: View) => void
-  onTheme: () => void
-  onSettings: () => void
+  /** The sidebar folded to its icons, by choice. */
+  collapsed?: boolean
+  onCollapse?: () => void
 }) {
-  return (
-    <nav className="rail" aria-label="Vistas">
-      {VIEWS.filter((target) => visible.includes(target)).map((target) => (
-        <button
-          key={target}
-          type="button"
-          className="rail-item"
-          aria-pressed={view === target}
-          onClick={() => onView(target)}
-        >
-          <Glyph>{ICONS[target]}</Glyph>
-          <span>{t(LABELS[target])}</span>
-        </button>
-      ))}
+  const offered = (target: View) => visible.includes(target)
+  const building = BUILD_VIEWS.some(offered)
+  const inBuild = view === 'build' || BUILD_VIEWS.includes(view)
 
-      <span className="rail-gap" />
-
-      <button
-        type="button"
-        className="rail-item"
-        aria-pressed={theme === 'blackout'}
-        onClick={onTheme}
-        title="Modo seguro para la oscuridad"
-      >
-        <Glyph>
-          {theme === 'stage' ? (
-            <path d="M20 13a8 8 0 1 1-9-9 6.5 6.5 0 0 0 9 9z" />
-          ) : (
-            <>
-              <circle cx="12" cy="12" r="4" />
-              <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19" />
-            </>
-          )}
-        </Glyph>
-        <span>{theme === 'stage' ? t('Oscuro') : t('Pase')}</span>
-      </button>
-
-      <button type="button" className="rail-item" title={t('Ajustes')} onClick={onSettings}>
-        <Glyph>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z" />
-        </Glyph>
-        <span>{t('Ajustes')}</span>
-      </button>
-    </nav>
-  )
-}
-
-/** One 24-grid stroke icon. Nothing filled: a filled glyph reads as a state
- *  here, and these are labels. */
-function Glyph({ children }: { children: React.ReactNode }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="22"
-      height="22"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
+  const item = (target: View, className: string, pressed: boolean) => (
+    <button
+      key={`${className}-${target}`}
+      type="button"
+      className={`rail-item ${className}`}
+      aria-pressed={pressed}
+      aria-current={pressed ? 'page' : undefined}
+      title={t(LABELS[target])}
+      onClick={() => onView(target)}
     >
-      {children}
-    </svg>
+      <Glyph>{ICONS[target]}</Glyph>
+      <span>{t(LABELS[target])}</span>
+    </button>
+  )
+
+  return (
+    <nav className="rail" aria-label="Vistas" data-collapsed={collapsed}>
+      {onCollapse !== undefined && (
+        <button
+          type="button"
+          className="rail-toggle icon-button"
+          aria-label={collapsed ? 'Mostrar la barra lateral' : 'Plegar la barra lateral'}
+          title={collapsed ? 'Mostrar la barra lateral' : 'Plegar la barra lateral'}
+          onClick={onCollapse}
+        >
+          <Icon name="sidebar" />
+        </button>
+      )}
+
+      {GROUPS.map((group) => {
+        const views = group.views.filter(offered)
+        if (views.length === 0) return null
+        const isBuild = group.views === BUILD_VIEWS
+        return (
+          <div
+            key={group.title ?? 'rest'}
+            className="rail-group"
+            data-group={isBuild ? 'build' : group.title === null ? 'rest' : 'live'}
+          >
+            {group.title !== null && <span className="rail-title">{t(group.title)}</span>}
+            {views.map((target) =>
+              /* The three building screens are sidebar items; on a phone they
+                 collapse into the one Montaje tab below. */
+              item(target, isBuild ? 'rail-wide' : '', view === target),
+            )}
+            {isBuild && building && item('build', 'rail-narrow', inBuild)}
+          </div>
+        )
+      })}
+    </nav>
   )
 }

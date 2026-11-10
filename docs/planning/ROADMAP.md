@@ -842,20 +842,53 @@ que no debe ni pedir.
     con sus cuatro últimos caracteres de pista—, modelo, dirección del
     servicio, tope, **Probar** y el gasto de hoy. Cualquier otro rol ve una
     línea con cómo está montado.
-- [ ] **F10.2 — El asistente en modo montaje.**
-  - Una vista nueva, *Asistente*: conversación, adjuntos y, a cada paso, qué
-    herramienta usó y qué cambió.
-  - El motor del documento compartido entre `mcp/` y `web/` —un alias de Vite
-    a `mcp/src`, o un paquete del workspace—, sin copiarlo.
-  - Los dos adaptadores y las herramientas. Cada turno que escribe es un lote
-    de undo.
-  - Tests con respuestas del proveedor grabadas: el bucle, la validación de la
-    entrada de cada herramienta y que una entrada truncada se devuelve como
-    error y no se ejecuta.
-  - **Un conjunto fijo de pedidos para medirlo** —«cuatro PAR LED RGBW en el
+- [ ] **F10.2 — El asistente en modo montaje.** Hecho todo menos la medida
+      con un modelo de verdad (2026-11-03).
+  - [x] **La vista *Asistente***: conversación, fotos y planos, y cada paso del
+    asistente como una línea —«Aplicar · Ha aplicado +1 fixture, +1 función»—
+    con lo que mandó a un toque, mientras ocurre. Botón de parar. Carga en
+    diferido: los dos SDKs (190 KB comprimidos) solo bajan al abrirla. La
+    conversación vive en el módulo, así que cambiar de pantalla a mitad de
+    turno no la corta; entre recargas y dispositivos es F10.3.
+  - [x] **El motor del documento, compartido y no copiado**: un alias de Vite
+    `@orchid/mcp` a `mcp/src`. El aplicador que corre en el navegador es el
+    mismo que la CI comprueba como punto fijo.
+  - [x] **Los dos dialectos** con los SDKs oficiales apuntados al proxy. Cada uno
+    guarda el historial en el formato de su proveedor y solo añade: los
+    bloques de razonamiento de Anthropic vuelven intactos, y cambiar de
+    proveedor empieza conversación. Con Anthropic: instrucciones y
+    herramientas cacheadas, caché de la conversación, streaming de las
+    entradas, razonamiento adaptativo con resumen, esfuerzo alto y
+    `fallbacks: "default"` —todo solo en los modelos que lo aceptan—.
+  - [x] **Nueve herramientas**: `ver_proyecto` —un índice de unos 3.000
+    tokens donde el documento de la boda son 60.000—, `ver`, `libreria`,
+    `mapa_universo`, `entradas_y_salidas`, `proponer`, `aplicar`, `probar` y
+    `leer_dmx`. Cada entrada se valida antes de ejecutarse. `aplicar` vuelve a
+    aplicar mientras un marco nuevo espera a sus hijos —el motor no puede
+    colgar nada de un id que aún no ha repartido— y para a las cuatro
+    pasadas. **Cada aplicación es su propio lote de undo**, no cada turno: un
+    lote que pasa 30 s sin ediciones se sella solo, y un modelo que piensa
+    más que eso entre dos escrituras dejaría el resto fuera de cualquier lote.
+  - [x] **El bucle no ejecuta nada de un turno cortado por longitud ni de uno
+    rechazado**, y contesta siempre cada llamada, también las canceladas: un
+    historial con una herramienta sin respuesta es una conversación que el
+    proveedor ya no acepta.
+  - [x] Tests con dobles de los SDKs y de la mesa: 57 nuevos, entre el bucle,
+    los dialectos, las herramientas, el índice, los adjuntos y la pantalla.
+    Uno encontró un fallo de verdad: un documento rechazado volvía como
+    éxito.
+  - [x] **`ai-ui-smoke.sh`, de punta a punta y en CI**: la pantalla en Chrome,
+    el SDK de Anthropic de verdad leyendo el stream troceado del proxy, y un
+    proveedor falso que hace de modelo con un guion SSE —mira el proyecto,
+    aplica un documento, termina—. Comprueba que la fixture y la escena están
+    en la mesa, que la consola del navegador está limpia, y que al proveedor
+    le llegan la clave guardada, el modelo fijado, la caché, los `fallbacks` y
+    un historial que solo crece. Sin gastar un token.
+  - [ ] **Un conjunto fijo de pedidos para medirlo** —«cuatro PAR LED RGBW en el
     truss frontal», el plano de la boda con sus siete focos— y el documento
     resultante comparado con lo esperado. Sin eso, cambiar el prompt o el modelo
-    es probar a ciegas.
+    es probar a ciegas. Es lo único que gasta tokens de verdad, así que espera
+    a una clave y a un sí.
 - [ ] **F10.3 — Conversaciones y propuestas en el daemon.**
   - Hilos de solo añadir en `~/.orchidlights/assistant/<proyecto>/`, con sus
     imágenes; empezar en el portátil y seguir desde el móvil.
@@ -888,6 +921,26 @@ que no debe ni pedir.
 - **No edita el cuerpo de un Show**, por la misma razón que el documento no lo
   lleva.
 - **No guarda.** Ni en montaje.
+
+### F11 — Rediseño: una mesa que se entiende a oscuras
+
+> El plan entero, con lo medido, las fuentes y el estado, en
+> [`F11-rediseno.md`](F11-rediseno.md). Lo de «estilo Apple» que se buscaba no
+> es el cristal ni las esquinas: una cosa importante por sitio y siempre en el
+> mismo, lo raro detrás, un sistema en vez de decisiones sueltas, respuesta en
+> menos de una décima, y deshacer antes que preguntar.
+
+- [x] **R1–R7 en código** (2026-11-09): tokens con contraste comprobado por
+  test, Inter en local, iconos dibujados, hojas modales en vez de
+  `confirm`/`prompt`, barra lateral y cinco pestañas, barra del show en tres
+  grupos, tarjetas que se encienden con su color, fader relativo en táctil,
+  vista dividida en Funciones, pase de solo rojo con atenuador.
+- [x] **Temas Claro y Gris** (2026-11-10), junto a Oscuro y Pase, nombrados por
+  la luz de la sala. El suelo de la planta sigue a oscuras en Claro y salir
+  del pase vuelve al tema de antes.
+- [ ] **La prueba con cinco técnicos**, antes y después, con las cinco tareas
+  cronometradas del plan.
+- [ ] Menú propio para los `<select>`, y medir el cristal en una tablet barata.
 
 ## 5. Riesgos
 

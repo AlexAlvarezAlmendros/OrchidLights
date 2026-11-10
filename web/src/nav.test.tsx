@@ -16,11 +16,8 @@ import type { View } from './views'
 function renderNav(over: Partial<React.ComponentProps<typeof Nav>> = {}) {
   const props: React.ComponentProps<typeof Nav> = {
     view: 'console',
-    theme: 'stage',
     visible: VIEWS,
     onView: vi.fn(),
-    onTheme: vi.fn(),
-    onSettings: vi.fn(),
     ...over,
   }
   return { ...render(<Nav {...props} />), props }
@@ -40,20 +37,53 @@ describe('which views are on offer', () => {
     expect(screen.getByRole('button', { name: 'Mesa' })).toBeInTheDocument()
 
     /* A kiosk client must not even see the doors it cannot open. */
-    for (const hidden of ['Funciones', 'Patch', 'Planta', 'Escenario', 'Remoto']) {
+    for (const hidden of ['Funciones', 'Patch', 'Planta', 'Escenario', 'Montaje']) {
       expect(screen.queryByRole('button', { name: hidden })).toBeNull()
     }
+  })
+
+  it('offers no more than five places on a phone', () => {
+    /* The phone's tab bar is everything that is not a sidebar-only item.
+       Apple's ceiling is five, and it is the point past which a tab bar stops
+       being something you can hit without looking. */
+    renderNav({ visible: [...VIEWS, 'remote'] })
+    const tabs = screen.getAllByRole('button').filter((b) => !b.className.includes('rail-wide'))
+    const places = tabs.filter((b) => !b.className.includes('rail-toggle'))
+    expect(places.map((b) => b.textContent)).toEqual([
+      'Consola',
+      'Mesa',
+      'Planta',
+      'Montaje',
+      'Asistente',
+    ])
+  })
+
+  it('folds the three building screens into Montaje, which reads as current on any of them', () => {
+    renderNav({ view: 'setup' })
+    expect(screen.getByRole('button', { name: 'Montaje' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Patch' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Funciones' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+  })
+
+  it('names the devices screen nowhere in the navigation: it lives in Ajustes', () => {
+    renderNav({ visible: [...VIEWS, 'remote'] })
+    expect(screen.queryByRole('button', { name: 'Dispositivos' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remoto' })).toBeNull()
   })
 
   it('keeps the rail order fixed regardless of the order the mask arrives in', () => {
     // The mask says what is allowed, never where it sits: an operator's muscle
     // memory survives a permissions change.
-    const backwards: View[] = ['remote', 'desk', 'console']
+    const backwards: View[] = ['assistant', 'functions', 'desk', 'console']
     renderNav({ visible: backwards })
 
     const labels = screen.getAllByRole('button').map((b) => b.textContent)
     expect(labels.indexOf('Consola')).toBeLessThan(labels.indexOf('Mesa'))
-    expect(labels.indexOf('Mesa')).toBeLessThan(labels.indexOf('Remoto'))
+    expect(labels.indexOf('Mesa')).toBeLessThan(labels.indexOf('Funciones'))
+    expect(labels.indexOf('Funciones')).toBeLessThan(labels.indexOf('Asistente'))
   })
 })
 
@@ -78,38 +108,37 @@ describe('what a tap does', () => {
     expect(props.onView).toHaveBeenCalledWith('plan')
   })
 
-  it('keeps the settings and theme buttons out of the view callback', async () => {
-    const user = userEvent.setup()
-    const { props } = renderNav()
-
-    await user.click(screen.getByRole('button', { name: 'Ajustes' }))
-    await user.click(screen.getByRole('button', { name: 'Oscuro' }))
-
-    expect(props.onView).not.toHaveBeenCalled()
-    expect(props.onSettings).toHaveBeenCalledTimes(1)
-    expect(props.onTheme).toHaveBeenCalledTimes(1)
+  it('carries no actions: settings and the theme are not places', () => {
+    renderNav()
+    for (const action of ['Ajustes', 'Oscuro', 'Pase']) {
+      expect(screen.queryByRole('button', { name: action })).toBeNull()
+    }
   })
 
-  it('shows the theme toggle as the way OUT of the current theme', () => {
-    // In stage theme the button offers the dark mode; in blackout it offers
-    // the way back, and reads as engaged.
-    const first = renderNav({ theme: 'stage' })
-    expect(screen.getByRole('button', { name: 'Oscuro' })).toHaveAttribute('aria-pressed', 'false')
+  it('folds the sidebar to its icons and back', async () => {
+    const user = userEvent.setup()
+    const onCollapse = vi.fn()
+    const first = renderNav({ onCollapse })
+    await user.click(screen.getByRole('button', { name: 'Plegar la barra lateral' }))
+    expect(onCollapse).toHaveBeenCalledTimes(1)
     first.unmount()
 
-    renderNav({ theme: 'blackout' })
-    expect(screen.getByRole('button', { name: 'Pase' })).toHaveAttribute('aria-pressed', 'true')
+    renderNav({ onCollapse, collapsed: true })
+    expect(screen.getByRole('navigation')).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.getByRole('button', { name: 'Mostrar la barra lateral' })).toBeInTheDocument()
   })
 })
 
 describe('the labels speak the desk language', () => {
   it('renders the rail in English when the operator chose English', () => {
     localStorage.setItem('orchid.lang', 'en')
-    renderNav({ visible: ['console', 'functions', 'desk', 'plan', 'remote'] })
+    renderNav({ visible: ['console', 'functions', 'desk', 'plan', 'assistant'] })
 
-    for (const label of ['Console', 'Functions', 'Desk', 'Plan', 'Remote', 'Settings']) {
+    for (const label of ['Console', 'Build', 'Functions', 'Desk', 'Plan', 'Assistant']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
     }
+    // The group headings too.
+    expect(screen.getByText('Live')).toBeInTheDocument()
   })
 
   // Regression: 'Escenario' landed after the EN dictionary and shipped

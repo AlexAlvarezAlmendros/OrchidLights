@@ -10,6 +10,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { type FunctionState, api } from './api'
+import { Icon } from './icons'
+import { useDismiss } from './ui'
 
 const GROUP_LABELS: Record<string, string> = {
   Intensity: 'Intensidad',
@@ -52,13 +54,9 @@ export function DumpButton({
       .dumpState()
       .then((state) => setAvailable(state.groups))
       .catch(() => setAvailable([]))
-    const away = (event: PointerEvent) => {
-      if (panel.current?.contains(event.target as Node) === true) return
-      setOpen(false)
-    }
-    window.addEventListener('pointerdown', away)
-    return () => window.removeEventListener('pointerdown', away)
   }, [open])
+
+  useDismiss(open, panel, () => setOpen(false))
 
   const scenes = functions.filter((f) => f.type === 'Scene')
 
@@ -95,7 +93,8 @@ export function DumpButton({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        ⭳ {count > 0 ? count : ''}
+        <Icon name="dump" size={18} />
+        {count > 0 ? count : ''}
       </button>
 
       {open && (

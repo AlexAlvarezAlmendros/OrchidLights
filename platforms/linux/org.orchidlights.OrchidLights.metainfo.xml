@@ -43,6 +43,15 @@
   </categories>
 
   <releases>
+    <release version="0.2.0" date="2026-11-10">
+      <description>
+        <p>The project as a text document for agents, with an MCP server and a
+        command line tool; an assistant that builds the show from a
+        conversation, with the provider key kept in the daemon; a redesigned
+        interface with four themes, from light to the red-only pass; and one
+        key per paired device.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-08-13">
       <description>
         <p>Headless engine daemon: loads QLC+ project files with no user

@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type FunctionBody, type FunctionState, type ShowItem, type ShowTrack, api } from './api'
 import { type Span, collision } from './drag'
+import { Icon } from './icons'
 import { Slider } from './slider'
 
 /** Milliseconds a drag snaps to. Fine enough to place a cue, coarse enough
@@ -109,7 +110,8 @@ export function ShowTimeline({
           onClick={() => onTransport(fn.id, 'start', cursor ?? 0)}
           disabled={running && !paused}
         >
-          ▶{cursor !== null ? ` ${formatTime(cursor)}` : ''}
+          <Icon name="play" size={18} />
+          {cursor !== null ? ` ${formatTime(cursor)}` : ''}
         </button>
         <button
           type="button"
@@ -118,7 +120,7 @@ export function ShowTimeline({
           title={paused ? 'Reanudar' : 'Pausar'}
           onClick={() => onTransport(fn.id, paused ? 'resume' : 'pause')}
         >
-          ⏸
+          <Icon name="pause" size={18} />
         </button>
         <button
           type="button"
@@ -126,7 +128,7 @@ export function ShowTimeline({
           title="Parar"
           onClick={() => onTransport(fn.id, 'stop')}
         >
-          ⏹
+          <Icon name="stop" size={18} />
         </button>
 
         <span className="spacer" />
@@ -177,7 +179,8 @@ export function ShowTimeline({
             apply(() => api.showTime(fn.id, 'insert', cursor, Math.round(amount * 1000)))
           }
         >
-          +⏱
+          <Icon name="plus" size={16} />
+          <Icon name="timer" size={18} />
         </button>
         <button
           type="button"
@@ -188,7 +191,8 @@ export function ShowTimeline({
             apply(() => api.showTime(fn.id, 'cut', cursor, Math.round(amount * 1000)))
           }
         >
-          −⏱
+          <Icon name="minus" size={16} />
+          <Icon name="timer" size={18} />
         </button>
       </div>
 
@@ -343,7 +347,7 @@ function TrackHead({
           title="Silenciar la pista"
           onClick={() => onApply(() => api.patchTrack(showId, track.id, { mute: !track.mute }))}
         >
-          {track.mute ? '🔇' : '🔊'}
+          <Icon name={track.mute ? 'mute' : 'volume'} size={18} />
         </button>
 
         <button
@@ -365,7 +369,7 @@ function TrackHead({
           aria-label={`Eliminar la pista ${track.name}`}
           onClick={() => onApply(() => api.removeTrack(showId, track.id))}
         >
-          ✕
+          <Icon name="close" size={18} />
         </button>
       </div>
     </div>
@@ -540,7 +544,7 @@ function Bar({
 
       <span className="bar-label">
         {item.name}
-        {item.missing ? ' ⚠' : ''}
+        {item.missing && <Icon name="warning" size={14} label="falta el archivo" />}
       </span>
 
       <span className="bar-time">
@@ -556,7 +560,7 @@ function Bar({
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => onApply(() => api.patchShowItem(showId, item.id, { locked: !item.locked }))}
       >
-        {item.locked ? '🔒' : '🔓'}
+        <Icon name={item.locked ? 'lock' : 'unlock'} size={16} />
       </button>
 
       <button
@@ -566,7 +570,7 @@ function Bar({
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => onApply(() => api.removeShowItem(showId, item.id))}
       >
-        ✕
+        <Icon name="close" size={18} />
       </button>
 
       {/* The grip that changes how long it plays. Not offered on a locked

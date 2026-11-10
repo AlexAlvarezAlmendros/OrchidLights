@@ -1,6 +1,6 @@
 {
   "name": "@orchidlights/mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Servidor MCP y CLI para manejar una mesa OrchidLights desde un agente.",
   "type": "module",
   "license": "Apache-2.0",
