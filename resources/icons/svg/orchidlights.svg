@@ -1,27 +1,65 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" width="512" height="512">
   <title>OrchidLights</title>
-  <desc>An orchid bloom whose petals read as beams of light.</desc>
+  <desc>An orchid lit from its own heart: two round petals in front of three pointed sepals, white-hot where the lip is.</desc>
   <defs>
-    <linearGradient id="ol-petal" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#9B4DFF"/>
-      <stop offset="55%" stop-color="#C238F5"/>
-      <stop offset="100%" stop-color="#E81E9B"/>
+    <linearGradient id="ol-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1B1530"/>
+      <stop offset="1" stop-color="#0B0A12"/>
     </linearGradient>
-    <radialGradient id="ol-core" cx="50%" cy="45%" r="55%">
-      <stop offset="0%" stop-color="#FFFDF5"/>
-      <stop offset="45%" stop-color="#FFE08A"/>
-      <stop offset="100%" stop-color="#FF9B3D"/>
+    <radialGradient id="ol-glow" cx="256" cy="274" r="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7C5CFF" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#7C5CFF" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#7C5CFF" stop-opacity="0"/>
     </radialGradient>
+
+    <!-- Both centred on the lip, which is the origin of the flower below, so
+         the light falls off from one point however each shape is rotated. -->
+    <radialGradient id="ol-petal" cx="0" cy="0" r="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.25" stop-color="#E9DDFF"/>
+      <stop offset="0.6" stop-color="#A07BFF"/>
+      <stop offset="1" stop-color="#D24BFF"/>
+    </radialGradient>
+    <radialGradient id="ol-sepal" cx="0" cy="0" r="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9C84FF"/>
+      <stop offset="0.55" stop-color="#6B4BF2"/>
+      <stop offset="1" stop-color="#4A2FD0"/>
+    </radialGradient>
+
+    <!-- A petal is the hull of two circles on one axis, r14 at the lip and r72
+         at 90 units out: the outline of a beam landing on a surface. -->
+    <g id="ol-petals">
+      <path d="M10.71 9.02L55.05 -43.6A72 72 0 1 0 -55.05 -43.6L-10.71 9.02A14 14 0 0 0 10.71 9.02Z" transform="rotate(74)"/>
+      <path d="M10.71 9.02L55.05 -43.6A72 72 0 1 0 -55.05 -43.6L-10.71 9.02A14 14 0 0 0 10.71 9.02Z" transform="rotate(-74)"/>
+    </g>
+
+    <!-- The petals cut a 9-unit channel out of the sepals behind them. A
+         renderer without masks draws the sepals whole, and the flower still
+         reads: the petals are painted on top either way. -->
+    <mask id="ol-behind-petals" maskUnits="userSpaceOnUse" x="-256" y="-274" width="512" height="512">
+      <rect x="-256" y="-274" width="512" height="512" fill="#FFFFFF"/>
+      <use xlink:href="#ol-petals" fill="#000000" stroke="#000000" stroke-width="18" stroke-linejoin="round"/>
+    </mask>
   </defs>
 
-  <g fill="url(#ol-petal)">
-    <ellipse cx="256" cy="146" rx="63" ry="116"/>
-    <ellipse cx="256" cy="146" rx="63" ry="116" transform="rotate(72 256 256)"/>
-    <ellipse cx="256" cy="146" rx="63" ry="116" transform="rotate(144 256 256)"/>
-    <ellipse cx="256" cy="146" rx="63" ry="116" transform="rotate(216 256 256)"/>
-    <ellipse cx="256" cy="146" rx="63" ry="116" transform="rotate(288 256 256)"/>
-  </g>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#ol-tile)"/>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#ol-glow)"/>
+  <!-- A hairline of light on the edge, so the tile keeps its shape on a dark
+       dock instead of dissolving into it. -->
+  <rect x="17" y="17" width="478" height="478" rx="107" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
 
-  <circle cx="256" cy="256" r="58" fill="url(#ol-core)"/>
+  <g transform="translate(256 274)">
+    <!-- Sepals: symmetric cubic leaves, curved along the sides and pointed at
+         the tip (a lens of this width has a 120-degree tip, which reads as a
+         flat cut once it is turned on its side). One straight up, two at 146
+         degrees, their bases hidden under the petals. -->
+    <g fill="url(#ol-sepal)" mask="url(#ol-behind-petals)">
+      <path d="M0 -14C65.34 -48.74 31.73 -104.74 0 -176C-31.73 -104.74 -65.34 -48.74 0 -14Z"/>
+      <path d="M0 -36C52.01 -76.63 31.56 -105.29 0 -170C-31.56 -105.29 -52.01 -76.63 0 -36Z" transform="rotate(146)"/>
+      <path d="M0 -36C52.01 -76.63 31.56 -105.29 0 -170C-31.56 -105.29 -52.01 -76.63 0 -36Z" transform="rotate(-146)"/>
+    </g>
+    <use xlink:href="#ol-petals" fill="url(#ol-petal)"/>
+    <!-- The lip, and the lamp. -->
+    <circle cx="0" cy="12" r="22" fill="#FFFFFF"/>
+  </g>
 </svg>

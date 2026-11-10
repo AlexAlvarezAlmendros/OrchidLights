@@ -13,7 +13,10 @@
     display: flex; align-items: center; justify-content: center;
   }
   main { text-align: center; display: flex; flex-direction: column; gap: 0.9rem; align-items: center; max-width: 34rem; padding: 1rem; }
-  .mark { width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(145deg, #7c5cff, #b23cff); }
+  /* icon.svg is a link to resources/icons/svg/orchidlights.svg, not a copy:
+     tauri-codegen follows links when it embeds this directory, and a copy
+     would be a second icon that quietly stops matching the first. */
+  .mark { width: 72px; height: 72px; display: block; }
   h1 { font-size: 1.1rem; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
   p { margin: 0; font-size: 0.85rem; color: #9aa1ad; line-height: 1.45; }
   .pulse { animation: pulse 1.2s ease-in-out infinite; }
@@ -27,7 +30,7 @@
 </head>
 <body>
 <main>
-  <div class="mark"></div>
+  <img class="mark" src="icon.svg" alt="">
   <h1>OrchidLights</h1>
   <p class="pulse" id="state">Arrancando el motor…</p>
   <p id="trouble"></p>

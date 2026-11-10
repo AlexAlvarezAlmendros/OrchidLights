@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="resources/icons/svg/orchidlights.svg" width="112" height="112" alt="">
+</p>
+
 <h1 align="center">OrchidLights</h1>
 
 <p align="center">
