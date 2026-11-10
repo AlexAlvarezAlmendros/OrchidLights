@@ -419,6 +419,24 @@ resumen en el README:
 - [x] PWA instalable — hecha en F2 junto al modo operador.
 - [x] **3D** — escenario con haces que son el DMX, clic en el suelo que apunta
       las móviles, colocar, colgar y girar, y picking por cuerpos (#62, #69–#72).
+- [x] **Un modelo por tipo de foco** (2026-11-10). Las seis mallas `.dae`
+      grises dejan paso a catorce modelos generados en código
+      (`web/src/fixtures3d.ts`): cabeza móvil spot y wash, escáner, PAR LED,
+      PAR clásico, estrobo, barra de haces y de píxeles, láser, flower, humo,
+      hazer, ventilador y un genérico.
+  - Cada tipo se construye una vez y lo comparten todos los focos iguales;
+    las piezas que se mueven juntas van fundidas en una geometría, así que una
+    cabeza móvil son cuatro draw calls y ningún modelo pasa de 5.000
+    triángulos. Un solo atlas de texturas para los cuerpos y una cara de lente
+    por tipo, que se enciende con el color en vivo. No se descarga nada.
+  - Base, yugo y cabeza se articulan de verdad, y con eso **el pan gira el
+    haz**: antes el haz solo se inclinaba, fuese cual fuese el pan.
+  - El haz es un volumen que nace en la lente y queda tapado por los cuerpos;
+    el láser abre un abanico y las máquinas no tiran haz.
+  - Un foco a menos de 15 cm del suelo y sin inclinar se apoya en su base y
+    tira hacia arriba. El tamaño sale del bloque físico de la definición.
+  - Reflejos con mapa de entorno solo en calidad Alta.
+  - La ruta `/api/v1/meshes` sigue en el daemon; la web ya no la usa.
 - [x] **Una llave por dispositivo, con rol** (2026-10-17). Había token,
       máscara de kiosko por áreas (#60) y conexiones vivas con su botón de
       expulsar (#66) — y un hueco debajo: en una mesa abierta a la red todo
