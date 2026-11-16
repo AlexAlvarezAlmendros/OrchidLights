@@ -97,6 +97,9 @@ const PATHS = {
       <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
     </>
   ),
+  fullscreen: (
+    <path d="M4.5 9V6.5a2 2 0 0 1 2-2H9M15 4.5h2.5a2 2 0 0 1 2 2V9M19.5 15v2.5a2 2 0 0 1-2 2H15M9 19.5H6.5a2 2 0 0 1-2-2V15" />
+  ),
   unlock: (
     <>
       <rect x="5" y="10.5" width="14" height="9.5" rx="2.2" />

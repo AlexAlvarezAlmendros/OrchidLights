@@ -17,6 +17,7 @@ import { type Insertion, insertionAt, isNoop, sameInsertion } from './drag'
 import { WidgetEditor } from './editor'
 import { Functions } from './functions'
 import { type Lang, currentLang, setLang, t } from './i18n'
+import { enterBrowserKiosk, kioskInLocation, leaveBrowserKiosk } from './kiosk'
 import {
   type Row,
   type VcWidget,
@@ -36,7 +37,14 @@ import { Plan } from './plan'
 import { type MenuExtra, ProjectMenu } from './proyecto'
 import { splitHeading, toSections } from './sections'
 import { Setup } from './setup'
-import { leaveKiosk, resolveClose, takePendingOpen, toggleFullscreen } from './shell'
+import {
+  enterKiosk,
+  isShell,
+  leaveKiosk,
+  resolveClose,
+  takePendingOpen,
+  toggleFullscreen,
+} from './shell'
 
 const Stage3D = lazy(() => import('./stage3d'))
 const Conversacion = lazy(() => import('./conversacion'))
@@ -170,13 +178,15 @@ export function App() {
     () => window.localStorage.getItem('orchid.operator') === 'yes',
   )
   /* Kiosk: the URL decides, not a setting -- a kiosk tablet must come back
-     as a kiosk after a reboot with nobody touching it. */
-  const kiosk = useMemo(
-    () =>
-      new URLSearchParams(window.location.search).get('kiosk') === '1' ||
-      window.location.hash.includes('kiosk=1'),
-    [],
-  )
+     as a kiosk after a reboot with nobody touching it. State rather than a
+     constant because operator mode has a button that closes the door, and
+     both that button and the shell do it by rewriting the address. */
+  const [kiosk, setKiosk] = useState(kioskInLocation)
+  useEffect(() => {
+    const onHash = () => setKiosk(kioskInLocation())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   /** What the daemon's access mask leaves on offer. */
   const [access, setAccess] = useState({
     fixtures: true,
@@ -217,6 +227,7 @@ export function App() {
   }, [scale])
   useEffect(() => {
     if (kiosk) document.body.dataset.kiosk = '1'
+    else delete document.body.dataset.kiosk
   }, [kiosk])
   const [pads, setPads] = useState<Record<number, { x: number; y: number }>>({})
   /** Bumped whenever the project changed under us, so the screens that keep
@@ -1084,6 +1095,54 @@ export function App() {
     window.localStorage.removeItem('orchid.operator')
   }, [])
 
+  /* The kiosk, one step further in than operator mode and offered only from
+     there: fullscreen, the console and nothing else, and a PIN to get out.
+     The PIN is asked on the way in because the person closing the door is
+     the one who should be able to open it. */
+  const enterKioskMode = useCallback(async () => {
+    const pin = await dialogo.preguntar({
+      title: t('Modo kiosko'),
+      message: t(
+        'Pantalla completa y solo la consola. Para salir hará falta este PIN; vacío, sale cualquiera.',
+      ),
+      label: t('PIN para salir'),
+      confirm: t('Entrar'),
+      secret: true,
+    })
+    if (pin === null) return
+
+    if (isShell()) {
+      /* The shell swaps the window's key for an operator's and navigates;
+         the page comes back as the kiosk by itself. */
+      const entered = await enterKiosk(pin).catch(() => false)
+      if (!entered) setToast({ kind: 'error', text: t('No se pudo entrar en el kiosko') })
+      return
+    }
+    enterBrowserKiosk(pin)
+    setKiosk(true)
+  }, [])
+
+  const leaveKioskMode = useCallback(async () => {
+    const pin = await dialogo.preguntar({
+      title: t('Salir del kiosko'),
+      label: 'PIN',
+      confirm: 'Salir',
+      secret: true,
+    })
+    if (pin === null) return
+
+    /* Whoever closed the door opens it: the shell when there is one, this
+       page when its own button did, and nobody when the kiosk came by URL. */
+    const left = isShell()
+      ? await leaveKiosk(pin).catch(() => false)
+      : leaveBrowserKiosk(pin)
+    if (!left) {
+      setToast({ kind: 'error', text: t('Ese PIN no abre este kiosko') })
+      return
+    }
+    if (!isShell()) setKiosk(false)
+  }, [])
+
   const connectionLabel =
     connection === 'open'
       ? 'en vivo'
@@ -1298,10 +1357,28 @@ export function App() {
                 onError={setToast}
                 onDone={(text) => notify(text)}
               />
-              {operator ? (
-                <Unlock onUnlock={leaveOperator} />
+              {/* One door at a time, each a step further in: the desk offers
+                  operator mode, operator mode offers the kiosk and its own way
+                  out, and the kiosk offers only its way out. */}
+              {kiosk ? (
+                <button type="button" title={t('Salir del kiosko')} onClick={leaveKioskMode}>
+                  {t('Salir del kiosko')}
+                </button>
+              ) : operator ? (
+                <>
+                  <button
+                    type="button"
+                    className="tb-operator tb-kiosk"
+                    onClick={enterKioskMode}
+                    title={t('Pantalla completa, solo la consola y un PIN para salir')}
+                    aria-label={t('Modo kiosko')}
+                  >
+                    <Icon name="fullscreen" size={18} />
+                    <span>{t('Kiosko')}</span>
+                  </button>
+                  <Unlock onUnlock={leaveOperator} />
+                </>
               ) : (
-                !kiosk &&
                 !compact && (
                   <button
                     type="button"
@@ -1313,23 +1390,6 @@ export function App() {
                     <span>Operador</span>
                   </button>
                 )
-              )}
-              {kiosk && (
-                <button
-                  type="button"
-                  title={t('Salir del kiosko')}
-                  onClick={async () => {
-                    const pin = await dialogo.preguntar({
-                      title: t('Salir del kiosko'),
-                      label: 'PIN',
-                      confirm: 'Salir',
-                      secret: true,
-                    })
-                    if (pin !== null) void leaveKiosk(pin)
-                  }}
-                >
-                  {t('Salir del kiosko')}
-                </button>
               )}
             </div>
 

@@ -69,6 +69,18 @@ export async function toggleFullscreen(): Promise<void> {
   await tauri.invoke('toggle_fullscreen')
 }
 
+/**
+ * Close the kiosk's door from the page: the shell takes the window fullscreen,
+ * swaps its key for an operator's and closes the daemon's access mask. True
+ * when it did -- and then the window is about to reload as the kiosk. An
+ * empty PIN is a door anybody may open.
+ */
+export async function enterKiosk(pin: string | null): Promise<boolean> {
+  const tauri = internals()
+  if (tauri === null) return false
+  return (await tauri.invoke('enter_kiosk', { pin })) === true
+}
+
 /** The kiosk's door: true when the shell opened it. */
 export async function leaveKiosk(pin: string | null): Promise<boolean> {
   const tauri = internals()
